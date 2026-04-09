@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") version "2.3.0"
+    id("com.gradleup.shadow") version "9.0.0"
 }
 
 group = "com.github.nepyh"
@@ -40,6 +41,17 @@ dependencies {
 
 kotlin {
     jvmToolchain(21)
+}
+
+tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar> {
+    archiveClassifier.set("all")
+    manifest {
+        attributes["Main-Class"] = "com.github.nepyh.ebazi.MainKt"
+    }
+//    from(sourceSets.main.get().output)
+//    configurations = listOf(project.configurations.runtimeClasspath.get())
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    mergeServiceFiles()
 }
 
 tasks.test {
