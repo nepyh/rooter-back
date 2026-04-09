@@ -1,7 +1,6 @@
 package com.github.nepyh.ebazi.module.blink
 
 import io.ktor.server.application.*
-import io.ktor.server.response.respondText
 import io.ktor.server.routing.*
 import org.koin.dsl.module
 
