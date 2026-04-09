@@ -2,8 +2,6 @@ package com.github.nepyh.ebazi.module
 
 import com.github.nepyh.ebazi.module.blink.blinkModule
 import com.github.nepyh.ebazi.module.blink.installBlinkModule
-import com.github.nepyh.ebazi.module.database.DatabaseConfig
-import com.github.nepyh.ebazi.module.database.installDatabaseModule
 import io.ktor.server.application.Application
 import org.koin.dsl.module
 
