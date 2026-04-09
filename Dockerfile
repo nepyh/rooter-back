@@ -12,7 +12,7 @@ RUN gradle build --no-daemon -x test
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
-COPY --from=build /app/build/libs/*.jar app.jar
+COPY --from=build /app/build/libs/*-all.jar app.jar
 
 RUN addgroup -S appuser && adduser -S appuser  -G appuser
 USER appuser
