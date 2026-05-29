@@ -7,3 +7,6 @@
 # 한것 & 고친것
 * user 레포 추가함
 * user 인증기능 추가함
+
+Closes #이슈번호 (이슈가 feature 이슈면 이 줄 쓰기)
+Resolves #이슈번호 (이슈가 problem 이슈면 이 줄 쓰기)
