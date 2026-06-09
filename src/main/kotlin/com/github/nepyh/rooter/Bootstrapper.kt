@@ -1,9 +1,9 @@
-package com.github.nepyh.ebazi
+package com.github.nepyh.rooter
 
-import com.github.nepyh.ebazi.module.appModule
-import com.github.nepyh.ebazi.module.database.DatabaseConfig
-import com.github.nepyh.ebazi.module.database.DatabaseManager
-import com.github.nepyh.ebazi.module.installAppModule
+import com.github.nepyh.rooter.module.appModule
+import com.github.nepyh.rooter.module.database.DatabaseConfig
+import com.github.nepyh.rooter.module.database.DatabaseManager
+import com.github.nepyh.rooter.module.installAppModule
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.application.serverConfig

@@ -1,4 +1,4 @@
-package com.github.nepyh.ebazi
+package com.github.nepyh.rooter
 
 import io.ktor.server.netty.EngineMain
 
