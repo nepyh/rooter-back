@@ -1,7 +1,7 @@
 services:
   app:
+    container_name: rooter-back-app
     build: .
-    container_name: ebazi-back-app
     restart: always
     ports:
       - "8080:8080"
@@ -17,8 +17,8 @@ services:
       - app-network
 
   db:
+    container_name: rooter-back-db
     image: postgres:15-alpine
-    container_name: ebazi-back-db
     restart: always
     environment:
       - POSTGRES_USER=${DB_USER}
@@ -36,7 +36,7 @@ services:
       - app-network
 
 volumes:
-  storage: # it's full name will be like "ebazi-back_storage"
+  storage:
 
 networks:
   app-network:
