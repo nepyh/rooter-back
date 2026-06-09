@@ -1,6 +1,9 @@
+import java.util.Properties
+
 plugins {
     kotlin("jvm") version "2.3.0"
     id("com.gradleup.shadow") version "9.0.0"
+    application
 }
 
 group = "com.github.nepyh"
@@ -43,10 +46,32 @@ kotlin {
     jvmToolchain(21)
 }
 
+val mainClassPath = "com.github.nepyh.rooter.MainKt"
+
+application {
+    mainClass.set(mainClassPath)
+}
+tasks.named<JavaExec>("run") {
+    val envFile = File(projectDir, ".env")
+
+    if (envFile.exists()) {
+        envFile.bufferedReader().use { reader ->
+            val properties = Properties()
+            properties.load(reader)
+            properties.forEach { (key, value) ->
+                environment(key.toString(), value.toString())
+            }
+        }
+    } else {
+        logger.warn(".env 파일을 프로젝트 루트에서 찾을수 없습니다.")
+        logger.warn("리드미에 적힌대로 했음?")
+    }
+}
+
 tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar> {
     archiveClassifier.set("all")
     manifest {
-        attributes["Main-Class"] = "com.github.nepyh.rooter.MainKt"
+        attributes["Main-Class"] = mainClassPath
     }
 //    from(sourceSets.main.get().output)
 //    configurations = listOf(project.configurations.runtimeClasspath.get())
