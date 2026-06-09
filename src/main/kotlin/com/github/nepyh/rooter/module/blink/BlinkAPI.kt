@@ -6,6 +6,6 @@ import io.ktor.server.routing.get
 
 fun Route.configureBlinkAPI() {
     get("") {
-        call.respondText("Hello Ebazi!")
+        call.respondText("Hello Sans!")
     }
 }
