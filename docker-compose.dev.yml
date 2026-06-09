@@ -1,6 +1,6 @@
 services:
   app:
-    container_name: rooter-back-test-app
+    container_name: rooter-back-dev-app
     build: .
     restart: always
     ports:
@@ -17,7 +17,7 @@ services:
       - app-network
 
   db:
-    container_name: rooter-back-test-db
+    container_name: rooter-back-dev-db
     image: postgres:15-alpine
     restart: always
     environment:
@@ -25,7 +25,7 @@ services:
       - POSTGRES_PASSWORD=wasans
       - POSTGRES_DB=main
     volumes:
-      - test-storage:/var/lib/postgresql/data
+      - dev-storage:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
@@ -38,7 +38,7 @@ services:
       - app-network
 
 volumes:
-  test-storage:
+  dev-storage:
 
 networks:
   app-network:
