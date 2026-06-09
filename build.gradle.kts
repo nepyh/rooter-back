@@ -46,7 +46,7 @@ kotlin {
 tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar> {
     archiveClassifier.set("all")
     manifest {
-        attributes["Main-Class"] = "com.github.nepyh.ebazi.MainKt"
+        attributes["Main-Class"] = "com.github.nepyh.rooter.MainKt"
     }
 //    from(sourceSets.main.get().output)
 //    configurations = listOf(project.configurations.runtimeClasspath.get())
