@@ -2,7 +2,7 @@
 name: problem
 about: 문제나 버그 리포트
 title: 'problem: 30000글자 이름 유저 넣으면 터짐'
-labels: ''
+labels: ['bug']
 assignees: ''
 
 ---

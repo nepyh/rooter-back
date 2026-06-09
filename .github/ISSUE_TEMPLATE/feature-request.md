@@ -2,7 +2,7 @@
 name: feature request
 about: 새로운 아이디어나 기능 요청
 title: 'feature: 유저 기본 데이터베이스'
-labels: ''
+labels: ['enhancement']
 assignees: ''
 
 ---
