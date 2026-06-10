@@ -1,4 +1,4 @@
-package com.github.nepyh.ebazi.module.blink
+package com.github.nepyh.rooter.module.blink
 
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
