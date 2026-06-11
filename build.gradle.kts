@@ -37,6 +37,7 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-dao:${exposedVersion}")
     implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
     implementation("org.jetbrains.exposed:exposed-java-time:${exposedVersion}")
+    implementation("org.mindrot:jbcrypt:0.4")
     // exposed jdbc driver using different version name
     implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
 
