@@ -20,7 +20,7 @@ fun Application.configureAppModule() {
     val apiRoutes by inject<List<ApiRoute>>()
 
     routing {
-        route("/api") {
+        route("api") {
             apiRoutes.forEach { apiRoute ->
                 with(apiRoute) { configureRoute() }
             }
