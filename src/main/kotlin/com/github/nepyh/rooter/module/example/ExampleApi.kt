@@ -5,7 +5,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 
 
-fun ExampleApi(service: ExampleService) = ApiRoute {
+fun ExampleApi(service: ExampleService) = ApiRoute("/example") {
     get("") {
         call.respondText("이건 예제 API 임")
     }

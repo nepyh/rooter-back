@@ -1,14 +1,16 @@
 package com.github.nepyh.rooter.common
 
-import io.ktor.server.routing.Route
+import io.ktor.server.routing.*
 
 
-interface ApiRoute {
-    fun Route.configureRoute()
-}
+class ApiRoute(val baseRoute: String? = null, val routeProvider: Route.() -> Unit) {
+    fun Route.configureRoute() {
+        val targetRouter = if (baseRoute != null) {
+            createRouteFromPath(baseRoute)
+        } else {
+            this.apply(routeProvider)
+        }
 
-fun ApiRoute(routeProvider: Route.() -> Unit): ApiRoute = object : ApiRoute {
-    override fun Route.configureRoute() {
-        this.apply(routeProvider)
+        targetRouter.apply(routeProvider)
     }
 }
