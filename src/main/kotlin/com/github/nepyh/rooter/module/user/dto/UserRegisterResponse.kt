@@ -1,4 +1,6 @@
 package com.github.nepyh.rooter.module.user.dto
 
-class UserRegisterResponse {
-}
+data class UserRegisterResponse(
+    val email: String,
+    val userName: String
+)
