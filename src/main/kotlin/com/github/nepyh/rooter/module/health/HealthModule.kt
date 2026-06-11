@@ -9,10 +9,8 @@ import org.koin.dsl.module
 val healthModule = module {
     single {
         ApiRoute {
-            route("/health") {
-                get("") {
-                    call.respondResource("banana.png")
-                }
+            get("/health") {
+                call.respondResource("banana.png")
             }
         }
     }
