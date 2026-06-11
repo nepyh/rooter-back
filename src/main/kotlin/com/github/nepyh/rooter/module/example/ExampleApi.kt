@@ -5,11 +5,11 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 
 
-fun ExampleApi(service: ExampleService) = ApiRoute("/example") {
+fun ExampleApi(service: ExampleService) = ApiRoute("example") {
     get("") {
         call.respondText("이건 예제 API 임")
     }
-    get("/random") {
+    get("random") {
         call.respondText(service.getRandomNumber().toString())
     }
 }
