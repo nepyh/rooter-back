@@ -1,4 +1,4 @@
-package com.github.nepyh.rooter.module.blink
+package com.github.nepyh.rooter.module.example
 
 import com.github.nepyh.rooter.common.ApiRoute
 import io.ktor.server.response.*
