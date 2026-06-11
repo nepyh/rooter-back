@@ -8,7 +8,7 @@ class ApiRoute(val baseRoute: String? = null, val routeProvider: Route.() -> Uni
         val targetRouter = if (baseRoute != null) {
             createRouteFromPath(baseRoute)
         } else {
-            this.apply(routeProvider)
+            this
         }
 
         targetRouter.apply(routeProvider)
