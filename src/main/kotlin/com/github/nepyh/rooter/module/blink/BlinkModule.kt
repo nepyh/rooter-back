@@ -6,12 +6,5 @@ import org.koin.dsl.module
 
 val blinkModule = module {
     single { BlinkService() }
-}
-
-fun Application.installBlinkModule() {
-    routing {
-        route("/blink") {
-            configureBlinkAPI()
-        }
-    }
+    single { BlinkApi() }
 }

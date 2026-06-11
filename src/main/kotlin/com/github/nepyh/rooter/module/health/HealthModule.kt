@@ -1,14 +1,18 @@
 package com.github.nepyh.rooter.module.health
 
-import io.ktor.server.application.*
-import io.ktor.server.response.respondResource
+import com.github.nepyh.rooter.common.ApiRoute
+import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import org.koin.dsl.module
 
-fun Application.installHealthModule() {
-    routing {
-        route("/health") {
-            get("") {
-                call.respondResource("banana.png")
+
+val healthModule = module {
+    single {
+        ApiRoute {
+            route("/health") {
+                get("") {
+                    call.respondResource("banana.png")
+                }
             }
         }
     }
