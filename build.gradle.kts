@@ -1,3 +1,4 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
 import java.util.Properties
 
 plugins {
@@ -66,9 +67,11 @@ tasks.named<JavaExec>("run") {
         logger.warn(".env 파일을 프로젝트 루트에서 찾을수 없습니다.")
         logger.warn("리드미에 적힌대로 했음?")
     }
+
+    systemProperties(System.getProperties().mapKeys { it.key.toString() })
 }
 
-tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar> {
+tasks.withType<ShadowJar> {
     archiveClassifier.set("all")
     manifest {
         attributes["Main-Class"] = mainClassPath
