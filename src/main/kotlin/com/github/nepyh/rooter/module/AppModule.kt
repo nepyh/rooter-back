@@ -10,7 +10,7 @@ val appModule = module {
     includes(blinkModule)
 }
 
-fun Application.installAppModule() {
+fun Application.configureAppModule() {
     installBlinkModule()
     installHealthModule()
 }
