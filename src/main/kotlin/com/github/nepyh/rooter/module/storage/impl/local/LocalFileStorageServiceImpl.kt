@@ -1,0 +1,88 @@
+package com.github.nepyh.rooter.module.storage.impl.local
+
+import com.github.nepyh.rooter.module.storage.FileStorageService
+import io.ktor.http.*
+import io.ktor.http.content.*
+import io.ktor.util.cio.*
+import io.ktor.utils.io.*
+import kotlinx.coroutines.Dispatchers.IO
+import kotlinx.coroutines.withContext
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.util.*
+
+
+class LocalFileStorageServiceImpl(
+    val baseDir: String,
+    val baseUrl: String
+) : FileStorageService {
+    init {
+        val rootPath = Paths.get(baseDir)
+        if (!Files.exists(rootPath)) {
+            Files.createDirectories(rootPath)
+        }
+    }
+
+    override suspend fun upload(file: PartData.FileItem, directory: String): String =
+        withContext(IO) {
+            val targetDir = Paths.get(baseDir, directory)
+            if (!Files.exists(targetDir)) {
+                Files.createDirectories(targetDir)
+            }
+
+            val originalName = file.originalFileName ?: "unknown_file"
+            val fileExtension = originalName.substringAfterLast('.', "")
+            val uniqueFileName = if (fileExtension.isNotEmpty()) {
+                "${UUID.randomUUID()}.$fileExtension"
+            } else {
+                UUID.randomUUID().toString()
+            }
+
+            val targetFile = targetDir.resolve(uniqueFileName).toFile()
+
+            val writeChannel = targetFile.writeChannel()
+            val readChannel = file.provider()
+
+            readChannel.copyTo(writeChannel)
+
+            return@withContext if (directory.isEmpty()) uniqueFileName else "$directory/$uniqueFileName"
+        }
+
+    override suspend fun getFile(fileKey: String): PartData.FileItem? =
+        withContext(IO) {
+            val file = Paths.get(baseDir, fileKey).toFile()
+            if (!file.exists() || !file.isFile) return@withContext null
+
+            PartData.FileItem(
+                provider = { file.readChannel() },
+                dispose = {},
+                partHeaders = Headers.build {
+                    append(
+                        HttpHeaders.ContentDisposition,
+                        "attachment; filename=\"${file.name}\""
+                    )
+                    append(
+                        HttpHeaders.ContentLength,
+                        file.length().toString()
+                    )
+                }
+            )
+        }
+
+    override suspend fun getUrl(fileKey: String): String? {
+        val file = Paths.get(baseDir, fileKey).toFile()
+        if (!file.exists()) return null
+
+        return "${baseUrl.removeSuffix("/")}/${fileKey.removePrefix("/")}"
+    }
+
+    override suspend fun delete(fileKey: String): Boolean =
+        withContext(IO) {
+            val file = Paths.get(baseDir, fileKey).toFile()
+            if (file.exists() && file.isFile) {
+                file.delete()
+            } else {
+                false
+            }
+        }
+}
