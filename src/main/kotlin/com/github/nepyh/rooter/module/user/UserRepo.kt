@@ -14,7 +14,7 @@ class UserRepo {
         transaction {
             UserTable.insert {
                 it[email] = user.email
-                it[userName] = user.userName
+                it[username] = user.username
                 it[password] = user.password
                 it[avatarImageKey] = user.avatarImageKey
                 it[bio] = user.bio
@@ -36,7 +36,7 @@ class UserRepo {
         return UserRow(
             id = this[UserTable.id],
             email = this[UserTable.email],
-            userName = this[UserTable.userName],
+            username = this[UserTable.username],
             password = this[UserTable.password],
             avatarImageKey = this[UserTable.avatarImageKey],
             bio = this[UserTable.bio],

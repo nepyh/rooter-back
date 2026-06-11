@@ -5,7 +5,7 @@ import java.time.LocalDateTime
 data class UserRow(
     val id: Int,
     val email: String,
-    val userName: String,
+    val username: String,
     val password: String,
     val avatarImageKey: String?,
     val bio: String?,
