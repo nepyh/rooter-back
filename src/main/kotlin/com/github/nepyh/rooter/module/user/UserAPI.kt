@@ -2,7 +2,6 @@ package com.github.nepyh.rooter.module.user
 
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
-import com.github.nepyh.rooter.module.user.exception.UserAuthException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.*
