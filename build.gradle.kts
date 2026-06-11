@@ -42,6 +42,8 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
 
     implementation("org.postgresql:postgresql:42.7.2")
+    //jwt
+    implementation("com.auth0:java-jwt:4.4.0")
 }
 
 kotlin {
