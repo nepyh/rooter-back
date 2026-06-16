@@ -8,6 +8,6 @@ val userModule = module {
     single { UserRepo() }
     single { UserService(get()) }
     single { UserAuthService(get(), get()) }
-    single(named("userApi")) { UserApi(get()) }
-    single(named("authApi")) { AuthApi(get()) }
+    single(named("apiRoute")) { UserApi(get()) }
+    single(named("apiRoute")) { AuthApi(get()) }
 }
