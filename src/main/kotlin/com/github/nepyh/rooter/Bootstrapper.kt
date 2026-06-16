@@ -3,7 +3,7 @@ package com.github.nepyh.rooter
 import com.github.nepyh.rooter.module.appModule
 import com.github.nepyh.rooter.module.database.DatabaseConfig
 import com.github.nepyh.rooter.module.database.DatabaseManager
-import com.github.nepyh.rooter.module.installAppModule
+import com.github.nepyh.rooter.module.configureAppModule
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.application.serverConfig
@@ -29,7 +29,7 @@ fun Application.devModule() {
             maxPoolSize = environment.config.property("storage.dbMaxPoolSize").getString().toInt()
         )
     )
-    installAppModule()
+    configureAppModule()
 }
 
 fun Application.prodModule() {
@@ -51,7 +51,7 @@ fun Application.prodModule() {
             maxPoolSize = environment.config.property("storage.dbMaxPoolSize").getString().toInt()
         )
     )
-    installAppModule()
+    configureAppModule()
 }
 
 // You can swap only dataModule in each entry module (actually, it's a function)
