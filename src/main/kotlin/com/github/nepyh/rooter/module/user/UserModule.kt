@@ -1,6 +1,5 @@
 package com.github.nepyh.rooter.module.user
 
-import com.github.nepyh.rooter.common.ApiRoute
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
