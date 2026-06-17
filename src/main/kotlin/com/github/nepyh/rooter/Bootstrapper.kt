@@ -4,9 +4,11 @@ import com.github.nepyh.rooter.module.appModule
 import com.github.nepyh.rooter.module.database.DatabaseConfig
 import com.github.nepyh.rooter.module.database.DatabaseManager
 import com.github.nepyh.rooter.module.configureAppModule
+import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.application.serverConfig
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
 
@@ -14,6 +16,10 @@ fun Application.devModule() {
     install(Koin) {
         slf4jLogger()
         modules(appModule)
+    }
+
+    install(ContentNegotiation) {
+        json()
     }
 
     serverConfig {
