@@ -6,27 +6,22 @@ import com.github.nepyh.rooter.module.health.healthModule
 import com.github.nepyh.rooter.module.user.userModule
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
-import org.koin.core.qualifier.named
 import org.koin.dsl.module
-import org.koin.ktor.ext.getKoin
+import org.koin.ktor.ext.inject
 
 val appModule = module {
     includes(exampleModule)
     includes(healthModule)
     includes(userModule)
+
+    single<List<ApiRoute>> { getAll() }
 }
 
 fun Application.configureAppModule() {
+    val apiRoutes by inject<List<ApiRoute>>()
+
     routing {
         route("api") {
-            val koin = getKoin()
-
-            val routeNames = listOf("apiRoute", "exampleApi")
-
-            val apiRoutes = routeNames.map { name ->
-                koin.get<ApiRoute>(named(name))
-            }
-
             apiRoutes.forEach { apiRoute ->
                 with(apiRoute) { configureRoute() }
             }
