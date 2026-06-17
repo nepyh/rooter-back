@@ -12,6 +12,10 @@ import io.ktor.server.plugins.cors.routing.*
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
 
+/**
+ * TODO CROS 세팅은 env 로 따로 넣어줘야됨. 장기적으로 anyHost 에서 env 로 바꿔야됨
+ * 지금은 그냥 이렇게 하고 나중에 AppConfig 같은게 좀 정리가 되면 그떄 env 로 분리하는걸로
+ */
 
 fun Application.devModule() {
     install(Koin) {
