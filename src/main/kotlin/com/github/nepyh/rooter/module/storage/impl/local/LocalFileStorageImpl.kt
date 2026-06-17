@@ -1,6 +1,6 @@
 package com.github.nepyh.rooter.module.storage.impl.local
 
-import com.github.nepyh.rooter.module.storage.FileStorageService
+import com.github.nepyh.rooter.module.storage.FileStorage
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.util.cio.*
@@ -12,10 +12,10 @@ import java.nio.file.Paths
 import java.util.*
 
 
-class LocalFileStorageServiceImpl(
+class LocalFileStorageImpl(
     val baseDir: String,
     val baseUrl: String
-) : FileStorageService {
+) : FileStorage {
     init {
         val rootPath = Paths.get(baseDir)
         if (!Files.exists(rootPath)) {
