@@ -1,7 +1,7 @@
 package com.github.nepyh.rooter.module.user.api
 
 import com.github.nepyh.rooter.common.ApiRoute
-import com.github.nepyh.rooter.module.user.UserAuthService
+import com.github.nepyh.rooter.module.user.AuthService
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
@@ -11,7 +11,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.post
 
 
-fun AuthApi(userAuthService: UserAuthService) = ApiRoute("auth") {
+fun AuthApi(userAuthService: AuthService) = ApiRoute("auth") {
     post("login") {
         try {
             val request = call.receive<UserLoginRequest>()

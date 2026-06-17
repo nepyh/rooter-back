@@ -9,7 +9,7 @@ import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import org.mindrot.jbcrypt.BCrypt
 
-class UserAuthService(
+class AuthService(
     private val userRepo: UserRepo,
     private val userService: UserService
 ) {
