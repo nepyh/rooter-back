@@ -6,6 +6,7 @@ import com.github.nepyh.rooter.module.database.DatabaseConfig
 import com.github.nepyh.rooter.module.database.DatabaseManager
 import com.github.nepyh.rooter.module.example.exampleModule
 import com.github.nepyh.rooter.module.health.healthModule
+import com.github.nepyh.rooter.module.storage.fileStorageModule
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
 import org.koin.core.module.Module
@@ -18,6 +19,7 @@ fun AppModule(appConfig: AppConfig): Module = module {
 
     includes(exampleModule)
     includes(healthModule)
+    includes(fileStorageModule)
 
     single<List<ApiRoute>> { getAll() }
 }
