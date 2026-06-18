@@ -4,11 +4,18 @@ import com.github.nepyh.rooter.module.appModule
 import com.github.nepyh.rooter.module.database.DatabaseConfig
 import com.github.nepyh.rooter.module.database.DatabaseManager
 import com.github.nepyh.rooter.module.configureAppModule
-import io.ktor.server.application.Application
-import io.ktor.server.application.install
-import io.ktor.server.application.serverConfig
+import io.ktor.http.*
+import io.ktor.serialization.kotlinx.json.*
+import io.ktor.server.application.*
+import io.ktor.server.plugins.contentnegotiation.*
+import io.ktor.server.plugins.cors.routing.*
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
+
+/**
+ * TODO CROS 세팅은 env 로 따로 넣어줘야됨. 장기적으로 anyHost 에서 env 로 바꿔야됨
+ * 지금은 그냥 이렇게 하고 나중에 AppConfig 같은게 좀 정리가 되면 그떄 env 로 분리하는걸로
+ */
 
 fun Application.devModule() {
     install(Koin) {
@@ -16,6 +23,21 @@ fun Application.devModule() {
         modules(appModule)
     }
 
+    install(ContentNegotiation) {
+        json()
+    }
+
+    install(CORS) {
+        allowMethod(HttpMethod.Options)
+        allowMethod(HttpMethod.Post)
+        allowMethod(HttpMethod.Get)
+        allowMethod(HttpMethod.Put)
+        allowMethod(HttpMethod.Delete)
+        allowHeader(HttpHeaders.Authorization)
+        allowHeader(HttpHeaders.ContentType)
+        anyHost()
+    }
+
     serverConfig {
         developmentMode = true
     }
@@ -31,6 +53,7 @@ fun Application.devModule() {
     )
     configureAppModule()
 }
+
 
 fun Application.prodModule() {
     install(Koin) {
@@ -38,8 +61,23 @@ fun Application.prodModule() {
         modules(appModule)
     }
 
+    install(ContentNegotiation) {
+        json()
+    }
+
+    install(CORS) { // TODO env!!!!!!!!!
+        allowMethod(HttpMethod.Options)
+        allowMethod(HttpMethod.Post)
+        allowMethod(HttpMethod.Get)
+        allowMethod(HttpMethod.Put)
+        allowMethod(HttpMethod.Delete)
+        allowHeader(HttpHeaders.Authorization)
+        allowHeader(HttpHeaders.ContentType)
+        anyHost()
+    }
+
     serverConfig {
-        developmentMode = true
+        developmentMode = false
     }
 
     DatabaseManager.init(
@@ -53,5 +91,3 @@ fun Application.prodModule() {
     )
     configureAppModule()
 }
-
-// You can swap only dataModule in each entry module (actually, it's a function)
