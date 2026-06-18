@@ -45,9 +45,5 @@ fun Application.appEntryModule() {
         allowCredentials = true
     }
 
-    serverConfig {
-        developmentMode = appConfig.environment == EnvironmentMode.DEV
-    }
-
     configureAppModule()
 }
