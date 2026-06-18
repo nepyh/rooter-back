@@ -14,7 +14,12 @@ data class AppConfig(
 
     // cors related
     val corsAllowedHosts: List<String>,
-    val corsMaxAgeSeconds: Long
+    val corsMaxAgeSeconds: Long,
+
+    // storage related
+    val storageType: String,
+    val storageBaseDir: String?,
+    val storageBaseUrl: String?
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
@@ -43,7 +48,11 @@ data class AppConfig(
                 dbMaxPoolSize = config.property("database.dbMaxPoolSize").getString().toInt(),
 
                 corsAllowedHosts = allowedHosts,
-                corsMaxAgeSeconds = config.property("cors.maxAgeSeconds").getString().toLong()
+                corsMaxAgeSeconds = config.property("cors.maxAgeSeconds").getString().toLong(),
+
+                storageType = config.property("storage.type").getString(),
+                storageBaseDir = config.propertyOrNull("storage.baseDir")?.getString(),
+                storageBaseUrl = config.propertyOrNull("storage.baseUrl")?.getString()
             )
         }
     }
