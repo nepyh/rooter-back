@@ -20,7 +20,7 @@ data class AppConfig(
     val dbMaxPoolSize: Int,
 
     // cors related
-    val corsAllowedOrigins: List<String>,
+    val corsAllowedHosts: List<String>,
     val corsMaxAgeSeconds: Long
 ) {
     companion object {
@@ -29,12 +29,17 @@ data class AppConfig(
                 config.property("ktor.deployment.environment").getString()
             )
 
-            val origins = config.property("cors.allowedOrigins")
+            val allowedHosts = config.property("cors.allowedHosts")
                 .getString()
                 .split(",")
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
-                .map { it.removeSuffix("/") }
+                .map { rawHost ->
+                    rawHost
+                        .replace("https://", "")
+                        .replace("http://", "")
+                        .removeSuffix("/")
+                }
 
             return AppConfig(
                 environment = envMode,
@@ -44,7 +49,7 @@ data class AppConfig(
                 dbPassword = config.property("database.dbPassword").getString(),
                 dbMaxPoolSize = config.property("database.dbMaxPoolSize").getString().toInt(),
 
-                corsAllowedOrigins = origins,
+                corsAllowedHosts = allowedHosts,
                 corsMaxAgeSeconds = config.property("cors.maxAgeSeconds").getString().toLong()
             )
         }
