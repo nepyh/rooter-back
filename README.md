@@ -4,7 +4,7 @@
 
 성민규는 **running application using gradle (local jvm)** 섹션을 보라
 
-서버가 잘 켜졌는지가 궁금하다면 그냥 `http://localhost:8080/health` 을 접속하라
+서버가 잘 켜졌는지가 궁금하다면 그냥 `http://localhost:8080/api/health` 을 접속하라
 
 # run
 

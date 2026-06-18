@@ -6,10 +6,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - JDBC_URL=jdbc:postgresql://db:5432/main
-      - DB_USER=user
-      - DB_PASSWORD=wasans
-      - DB_MAX_POOL_SIZE=10
+      - JDBC_URL=jdbc:postgresql://db:5432/${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - ALLOWED_HOSTS=와언더테일아시는구나 # dev 세팅에서 ALLOWED_HOSTS 는 짜피 anyHost 로 설정 되기에 씹힘
+      - DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
     depends_on:
       db:
         condition: service_healthy
@@ -21,15 +22,15 @@ services:
     image: postgres:15-alpine
     restart: always
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=wasans
-      - POSTGRES_DB=main
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
     volumes:
       - dev-storage:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME:-mydb}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5
