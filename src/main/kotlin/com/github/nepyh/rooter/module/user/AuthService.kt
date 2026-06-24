@@ -34,7 +34,11 @@ class AuthService(
             .withClaim("email", user.email)
             .sign(Algorithm.HMAC256(jwtSecret))
 
-        return UserLoginResponse(token = token)
+        return UserLoginResponse(
+            email = user.email,
+            username = user.username,
+            token = token
+        )
     }
 
     fun auth(token: String): Int {
