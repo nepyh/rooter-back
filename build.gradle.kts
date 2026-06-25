@@ -19,8 +19,6 @@ repositories {
 }
 
 dependencies {
-    testImplementation(kotlin("test"))
-
     // logging, structure, ktor
     implementation("ch.qos.logback:logback-classic:1.5.32")
 
@@ -43,6 +41,15 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
 
     implementation("org.postgresql:postgresql:42.7.2")
+
+    // test dependencies
+    testImplementation("io.kotest:kotest-runner-junit5:6.2.0")
+    testImplementation("io.kotest:kotest-assertions-core:6.2.0")
+    testImplementation("io.kotest:kotest-property:6.2.0")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 kotlin {
@@ -82,8 +89,4 @@ tasks.withType<ShadowJar> {
 //    configurations = listOf(project.configurations.runtimeClasspath.get())
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     mergeServiceFiles()
-}
-
-tasks.test {
-    useJUnitPlatform()
 }
