@@ -40,9 +40,9 @@ val fileStorageModule = module {
                     baseRoute = appConfig.storageBaseRoute!!.trim('/')
                 )
             }
-            else -> {
-                null // TODO also this
-            }
+//            else -> {
+//                null // TODO also this
+//            }
         }
     }
 }
