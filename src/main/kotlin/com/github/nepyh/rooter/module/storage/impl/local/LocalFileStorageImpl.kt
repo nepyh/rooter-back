@@ -8,24 +8,24 @@ import io.ktor.utils.io.*
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
-import java.nio.file.Paths
+import java.nio.file.Path
 import java.util.*
+import kotlin.io.path.createDirectories
 
 
 class LocalFileStorageImpl(
-    val baseDir: String,
+    val baseDir: Path,
     val baseUrl: String
 ) : FileStorage {
     init {
-        val rootPath = Paths.get(baseDir)
-        if (!Files.exists(rootPath)) {
-            Files.createDirectories(rootPath)
+        if (!Files.exists(baseDir)) {
+            baseDir.createDirectories()
         }
     }
 
     override suspend fun upload(file: PartData.FileItem, directory: String): String =
         withContext(IO) {
-            val targetDir = Paths.get(baseDir, directory)
+            val targetDir = baseDir.resolve(directory)
             if (!Files.exists(targetDir)) {
                 Files.createDirectories(targetDir)
             }
@@ -50,7 +50,7 @@ class LocalFileStorageImpl(
 
     override suspend fun getFile(fileKey: String): PartData.FileItem? =
         withContext(IO) {
-            val file = Paths.get(baseDir, fileKey).toFile()
+            val file = baseDir.resolve(fileKey).toFile()
             if (!file.exists() || !file.isFile) return@withContext null
 
             PartData.FileItem(
@@ -70,7 +70,7 @@ class LocalFileStorageImpl(
         }
 
     override suspend fun getUrl(fileKey: String): String? {
-        val file = Paths.get(baseDir, fileKey).toFile()
+        val file = baseDir.resolve(fileKey).toFile()
         if (!file.exists()) return null
 
         return "${baseUrl.removeSuffix("/")}/${fileKey.removePrefix("/")}"
@@ -78,7 +78,7 @@ class LocalFileStorageImpl(
 
     override suspend fun delete(fileKey: String): Boolean =
         withContext(IO) {
-            val file = Paths.get(baseDir, fileKey).toFile()
+            val file = baseDir.resolve(fileKey).toFile()
             if (file.exists() && file.isFile) {
                 file.delete()
             } else {
