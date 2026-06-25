@@ -7,7 +7,7 @@ import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
 
-val healthModule = module {
+fun HealthModule() = module {
     single(named("healthApi")) {
         ApiRoute {
             get("health") {

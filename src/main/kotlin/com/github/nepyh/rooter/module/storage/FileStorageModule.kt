@@ -14,7 +14,7 @@ enum class FileStorageType {
     ;
 }
 
-val fileStorageModule = module {
+fun FileStorageModule(appConfig: AppConfig) = module {
     single<FileStorage> {
         val appConfig: AppConfig = get() // TODO this is really bad. function? (in new ticket)
         val storageType = FileStorageType.valueOf(appConfig.storageType)

@@ -4,7 +4,7 @@ import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
 
-val exampleModule = module {
+fun ExampleModule() = module {
     single { ExampleService() }
     single(named("exampleApi")) { ExampleApi(get()) }
 }
