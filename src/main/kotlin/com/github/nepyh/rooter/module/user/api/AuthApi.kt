@@ -25,4 +25,12 @@ fun AuthApi(userAuthService: AuthService) = ApiRoute("auth") {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
         }
     }
+    post("logout") {
+        try {
+            val response = userAuthService.logout()
+            call.respond(HttpStatusCode.OK, response)
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }
 }
