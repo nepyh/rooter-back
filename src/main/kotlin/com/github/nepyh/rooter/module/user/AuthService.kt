@@ -4,6 +4,7 @@ import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginResponse
+import com.github.nepyh.rooter.module.user.dto.UserLogoutResponse
 import com.github.nepyh.rooter.module.user.exception.UserAuthException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
@@ -39,6 +40,10 @@ class AuthService(
             username = user.username,
             token = token
         )
+    }
+
+    fun logout(): UserLogoutResponse {
+        return UserLogoutResponse(message = "Successfully logged out.")
     }
 
     fun auth(token: String): Int {
