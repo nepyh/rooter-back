@@ -43,6 +43,13 @@ class UserRepo {
         }
     }
 
+    fun findUserByUsername(username: String): UserRow? {
+        return transaction {
+            UserRow.find { UserTable.username eq username }
+                .singleOrNull()
+        }
+    }
+
     fun findStudentProfileByUserId(userId: Int): StudentProfileRow? {
         return transaction {
             val user = UserRow.findById(userId) ?: return@transaction null

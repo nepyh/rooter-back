@@ -15,6 +15,12 @@ class UserService(
             throw UserValidationException.DuplicatedEmailException()
         }
 
+        // 사용자 이름 중복 체크
+        val existingUsername = userRepo.findUserByUsername(request.username)
+        if (existingUsername != null) {
+            throw UserValidationException.WrongUsernameAlreadyException()
+        }
+
         // 비밀번호 형식 체크 (8자 이상, 숫자 + 영문 포함)
         val passwordRegex = Regex("^(?=.*[A-Za-z])(?=.*\\d).{8,}$")
         if (!passwordRegex.matches(request.password)) {

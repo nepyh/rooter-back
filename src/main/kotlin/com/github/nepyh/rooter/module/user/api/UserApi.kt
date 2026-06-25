@@ -22,6 +22,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             call.respond(HttpStatusCode.BadRequest, mapOf("message" to e.message))
         } catch (_: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        } catch (e: UserValidationException.WrongUsernameAlreadyException) {
+            call.respond(HttpStatusCode.Conflict, mapOf("message" to e.message))
         }
     }
 }

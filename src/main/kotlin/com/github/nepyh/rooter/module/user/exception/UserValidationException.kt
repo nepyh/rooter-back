@@ -5,4 +5,5 @@ sealed class UserValidationException(message: String) : Exception(message) {
     class WrongPasswordFormatException : UserValidationException("비밀번호 형식이 올바르지 않습니다.")
     class WrongPasswordException : UserValidationException("비밀번호가 일치하지 않습니다.")
     class WrongUsernameException : UserValidationException("사용할 수 없는 사용자 이름입니다.")
+    class WrongUsernameAlreadyException : UserValidationException("이미 있는 사용자 이름입니다.")
 }
