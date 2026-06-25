@@ -19,7 +19,8 @@ data class AppConfig(
     // storage related
     val storageType: String,
     val storageBaseDir: String?,
-    val storageBaseUrl: String?
+    val storageBaseUrl: String?,
+    val storageBaseRoute: String?
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
@@ -52,7 +53,8 @@ data class AppConfig(
 
                 storageType = config.property("storage.type").getString(),
                 storageBaseDir = config.propertyOrNull("storage.baseDir")?.getString(),
-                storageBaseUrl = config.propertyOrNull("storage.baseUrl")?.getString()
+                storageBaseUrl = config.propertyOrNull("storage.baseUrl")?.getString(),
+                storageBaseRoute = config.propertyOrNull("storage.baseRoute")?.getString()
             )
         }
     }
