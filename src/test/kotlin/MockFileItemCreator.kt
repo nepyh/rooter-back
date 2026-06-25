@@ -6,8 +6,7 @@ import java.io.InputStream
 
 fun createMockFileItem(resourcePath: String): PartData.FileItem {
     val inputStream: InputStream = Thread.currentThread().contextClassLoader
-        .getResourceAsStream(resourcePath)
-        ?: throw IllegalArgumentException("테스트 리소스를 찾을 수 없습니다: $resourcePath")
+        .getResourceAsStream(resourcePath)!!
 
     val fileName = resourcePath.substringAfterLast('/')
 
