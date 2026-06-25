@@ -3,12 +3,12 @@ package com.github.nepyh.rooter.module.storage.impl.local
 import com.github.nepyh.rooter.common.ApiRoute
 import io.ktor.server.http.content.staticFiles
 import java.io.File
+import java.nio.file.Path
 
 
-fun LocalFileStorageApi(baseDir: String, baseRoute: String) = ApiRoute(baseRoute) {
-    println(File(baseDir).absoluteFile)
+fun LocalFileStorageApi(baseDir: Path, baseRoute: String) = ApiRoute(baseRoute) {
     staticFiles(
         remotePath = "",
-        dir = File(baseDir)
+        dir = baseDir.toFile()
     )
 }
