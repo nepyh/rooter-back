@@ -16,14 +16,16 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             val request = call.receive<UserRegisterRequest>()
             val response = userService.registerUser(request)
             call.respond(HttpStatusCode.Created, response)
+        } catch (e: UserValidationException.WrongUsernameException) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("message" to e.message))           // 400
         } catch (e: UserValidationException.DuplicatedEmailException) {
-            call.respond(HttpStatusCode.Conflict, mapOf("message" to e.message))
-        } catch (e: UserValidationException.WrongPasswordFormatException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("message" to e.message))
-        } catch (_: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+            call.respond(HttpStatusCode.Conflict, mapOf("message" to e.message))              // 409
         } catch (e: UserValidationException.WrongUsernameAlreadyException) {
-            call.respond(HttpStatusCode.Conflict, mapOf("message" to e.message))
+            call.respond(HttpStatusCode.UnprocessableEntity, mapOf("message" to e.message))    // 422
+        } catch (e: UserValidationException.WrongPasswordFormatException) {
+            call.respond(HttpStatusCode.NotAcceptable, mapOf("message" to e.message))          // 406
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))  // 500
         }
     }
 }
