@@ -7,6 +7,7 @@ import com.github.nepyh.rooter.module.database.DatabaseManager
 import com.github.nepyh.rooter.module.example.exampleModule
 import com.github.nepyh.rooter.module.health.healthModule
 import com.github.nepyh.rooter.module.storage.fileStorageModule
+import com.github.nepyh.rooter.module.swagger.configureSwagger
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
 import org.koin.core.module.Module
@@ -46,4 +47,6 @@ fun Application.configureAppModule() {
             }
         }
     }
+
+    configureSwagger()
 }
