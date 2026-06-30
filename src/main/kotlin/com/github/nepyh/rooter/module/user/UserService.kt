@@ -86,5 +86,41 @@ class UserService(
             )
         }
     }
+
+    fun createStudentProfile(userId: Int, request: StudentProfileRequest): StudentProfileResponse {
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        val row = userRepo.insertStudentProfile(
+            userId = userId,
+            schoolId = request.schoolId,
+            grade = request.grade,
+            classNumber = request.classNumber
+        )
+
+        return StudentProfileResponse(
+            id = row.id.value,
+            userId = userId,
+            schoolId = row.school,
+            grade = row.grade,
+            classNumber = row.classNumber
+        )
+    }
+
+    fun addUnavailableTime(userId: Int, request: UnavailableTimeRequest): UnavailableTimeResponse {
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        val row = userRepo.insertUnavailableTime(
+            userId = userId,
+            dayOfWeek = request.dayOfWeek,
+            startTime = LocalTime.parse(request.startTime),
+            endTime = LocalTime.parse(request.endTime)
+        )
+
+        return UnavailableTimeResponse(
+            id = row.id.value,
+            dayOfWeek = row.dayOfWeek,
+            startTime = row.startTime.toString(),
+            endTime = row.endTime.toString()
+        )
     }
 }

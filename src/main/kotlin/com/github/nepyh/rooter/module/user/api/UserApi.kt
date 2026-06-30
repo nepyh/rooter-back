@@ -57,4 +57,32 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
         }
     }
+
+    post("{id}/profile") {
+        try {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val request = call.receive<StudentProfileRequest>()
+            val response = userService.createStudentProfile(id, request)
+            call.respond(HttpStatusCode.Created, response)
+        } catch (e: UserNotFoundException) {
+            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }
+
+    post("{id}/unavailable-times") {
+        try {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val request = call.receive<UnavailableTimeRequest>()
+            val response = userService.addUnavailableTime(id, request)
+            call.respond(HttpStatusCode.Created, response)
+        } catch (e: UserNotFoundException) {
+            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }
 }

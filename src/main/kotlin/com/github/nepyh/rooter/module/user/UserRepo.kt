@@ -65,4 +65,38 @@ class UserRepo {
                 .toList()
         }
     }
+
+    fun insertStudentProfile(
+        userId: Int,
+        schoolId: String,
+        grade: Int,
+        classNumber: Int
+    ): StudentProfileRow {
+        return transaction {
+            val user = UserRow.findById(userId) ?: throw com.github.nepyh.rooter.module.user.exception.UserNotFoundException()
+            StudentProfileRow.new {
+                this.user = user
+                this.school = schoolId
+                this.grade = grade
+                this.classNumber = classNumber
+            }
+        }
+    }
+
+    fun insertUnavailableTime(
+        userId: Int,
+        dayOfWeek: Short,
+        startTime: java.time.LocalTime,
+        endTime: java.time.LocalTime
+    ): UnavailableTimeRow {
+        return transaction {
+            val user = UserRow.findById(userId) ?: throw com.github.nepyh.rooter.module.user.exception.UserNotFoundException()
+            UnavailableTimeRow.new {
+                this.user = user
+                this.dayOfWeek = dayOfWeek
+                this.startTime = startTime
+                this.endTime = endTime
+            }
+        }
+    }
 }
