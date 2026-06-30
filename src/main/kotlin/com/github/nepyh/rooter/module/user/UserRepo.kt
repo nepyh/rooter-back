@@ -70,7 +70,8 @@ class UserRepo {
         userId: Int,
         schoolId: String,
         grade: Int,
-        classNumber: Int
+        classNumber: Int,
+        studyStyle: String? = null
     ): StudentProfileRow {
         return transaction {
             val user = UserRow.findById(userId) ?: throw com.github.nepyh.rooter.module.user.exception.UserNotFoundException()
@@ -79,6 +80,7 @@ class UserRepo {
                 this.school = schoolId
                 this.grade = grade
                 this.classNumber = classNumber
+                this.studyStyle = studyStyle
             }
         }
     }

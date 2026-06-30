@@ -6,5 +6,6 @@ import kotlinx.serialization.Serializable
 data class StudentProfileRequest(
     val schoolId: String,
     val grade: Int,
-    val classNumber: Int
+    val classNumber: Int,
+    val studyStyle: String? = null
 )

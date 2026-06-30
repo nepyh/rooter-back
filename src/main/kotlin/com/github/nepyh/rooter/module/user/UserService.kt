@@ -94,7 +94,8 @@ class UserService(
             userId = userId,
             schoolId = request.schoolId,
             grade = request.grade,
-            classNumber = request.classNumber
+            classNumber = request.classNumber,
+            studyStyle = request.studyStyle
         )
 
         return StudentProfileResponse(
@@ -102,7 +103,8 @@ class UserService(
             userId = userId,
             schoolId = row.school,
             grade = row.grade,
-            classNumber = row.classNumber
+            classNumber = row.classNumber,
+            studyStyle = row.studyStyle
         )
     }
 

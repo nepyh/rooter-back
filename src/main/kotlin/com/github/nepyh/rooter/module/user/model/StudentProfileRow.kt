@@ -10,6 +10,7 @@ object StudentProfileTable : IntIdTable("student_profiles") {
     val school = char("school_id", 10)
     val grade = integer("grade")
     val classNumber = integer("class_number")
+    val studyStyle = varchar("study_style", 50).nullable()
 }
 
 class StudentProfileRow(id: EntityID<Int>) : IntEntity(id) {
@@ -19,4 +20,5 @@ class StudentProfileRow(id: EntityID<Int>) : IntEntity(id) {
     var school by StudentProfileTable.school
     var grade by StudentProfileTable.grade
     var classNumber by StudentProfileTable.classNumber
+    var studyStyle by StudentProfileTable.studyStyle
 }

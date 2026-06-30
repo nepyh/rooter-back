@@ -8,5 +8,6 @@ data class StudentProfileResponse(
     val userId: Int,
     val schoolId: String,
     val grade: Int,
-    val classNumber: Int
+    val classNumber: Int,
+    val studyStyle: String? = null
 )
