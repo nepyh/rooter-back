@@ -1,8 +1,15 @@
 package com.github.nepyh.rooter.module.user
 
+import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
+import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
+import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
+import com.github.nepyh.rooter.module.user.dto.UnavailableTimeResponse
+import com.github.nepyh.rooter.module.user.dto.UserInfoResponse
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
+import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
+import java.time.LocalTime
 
 class UserService(
     private val userRepo: UserRepo
@@ -50,5 +57,34 @@ class UserService(
             email = request.email,
             username = request.username
         )
+    }
+
+    fun getUserInfo(id: Int): UserInfoResponse {
+        val user = userRepo.findUserById(id) ?: throw UserNotFoundException()
+        val profile = userRepo.findStudentProfileByUserId(id) ?: throw UserNotFoundException()
+
+        return UserInfoResponse(
+            id = user.id.value,
+            username = user.username,
+            email = user.email,
+            schoolId = profile.school,
+            grade = profile.grade,
+            classNumber = profile.classNumber,
+            createdAt = user.createdAt.toString()
+        )
+    }
+
+    fun getUnavailableTimes(id: Int): List<UnavailableTimeResponse> {
+        userRepo.findUserById(id) ?: throw UserNotFoundException()
+
+        return userRepo.findUnavailableTimesByUserId(id).map { row ->
+            UnavailableTimeResponse(
+                id = row.id.value,
+                dayOfWeek = row.dayOfWeek,
+                startTime = row.startTime.toString(),
+                endTime = row.endTime.toString()
+            )
+        }
+    }
     }
 }

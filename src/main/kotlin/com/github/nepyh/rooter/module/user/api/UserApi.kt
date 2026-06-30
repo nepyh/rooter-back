@@ -2,7 +2,10 @@ package com.github.nepyh.rooter.module.user.api
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.module.user.UserService
+import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
+import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
+import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.*
 import io.ktor.server.request.*
@@ -26,6 +29,32 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             call.respond(HttpStatusCode.NotAcceptable, mapOf("message" to e.message))          // 406
         } catch (_: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))  // 500
+        }
+    }
+
+    get("{id}") {
+        try {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val response = userService.getUserInfo(id)
+            call.respond(HttpStatusCode.OK, response)
+        } catch (e: UserNotFoundException) {
+            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }
+
+    get("{id}/unavailable-times") {
+        try {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val response = userService.getUnavailableTimes(id)
+            call.respond(HttpStatusCode.OK, response)
+        } catch (e: UserNotFoundException) {
+            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
         }
     }
 }
