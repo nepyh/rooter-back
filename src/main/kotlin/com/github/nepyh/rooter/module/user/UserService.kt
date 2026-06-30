@@ -15,6 +15,12 @@ class UserService(
             throw UserValidationException.DuplicatedEmailException()
         }
 
+        // 사용자 이름 (12자 이하)
+        val lengthUsername = request.username
+        if (lengthUsername.length > 12) {
+            throw UserValidationException.WrongUsernameException()
+        }
+
         // 사용자 이름 중복 체크
         val existingUsername = userRepo.findUserByUsername(request.username)
         if (existingUsername != null) {
