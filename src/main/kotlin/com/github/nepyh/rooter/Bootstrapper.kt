@@ -1,7 +1,9 @@
 package com.github.nepyh.rooter
 
-import com.github.nepyh.rooter.config.AppConfig
-import com.github.nepyh.rooter.config.EnvironmentMode
+import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.config.EnvironmentMode
+import com.github.nepyh.rooter.common.database.DatabaseConfig
+import com.github.nepyh.rooter.common.database.DatabaseManager
 import com.github.nepyh.rooter.module.AppModule
 import com.github.nepyh.rooter.module.configureAppModule
 import io.ktor.http.*
@@ -44,6 +46,16 @@ fun Application.appEntryModule() {
 
         allowCredentials = true
     }
+
+    DatabaseManager.init(
+        DatabaseConfig(
+            driverClassName = "org.postgresql.Driver",
+            jdbcUrl = appConfig.jdbcUrl,
+            username = appConfig.dbUsername,
+            password = appConfig.dbPassword,
+            maxPoolSize = appConfig.dbMaxPoolSize
+        )
+    )
 
     configureAppModule()
 }

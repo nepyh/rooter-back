@@ -1,4 +1,4 @@
-package com.github.nepyh.rooter.config
+package com.github.nepyh.rooter.common.config
 
 import io.ktor.server.config.ApplicationConfig
 
@@ -24,8 +24,8 @@ data class AppConfig(
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
-            val envMode = EnvironmentMode.fromString(
-                config.property("ktor.deployment.environment").getString()
+            val envMode = EnvironmentMode.valueOf(
+                config.property("ktor.deployment.environment").getString().uppercase()
             )
 
             val allowedHosts = config.property("cors.allowedHosts")
