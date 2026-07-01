@@ -8,7 +8,7 @@ import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
 
-val swaggerModule = module {
+fun SwaggerDocsModule() = module {
     single(named("swaggerApi")) {
         ApiRoute {
             swaggerUI(path = "swagger", swaggerFile = "openapi/docs.yaml")
