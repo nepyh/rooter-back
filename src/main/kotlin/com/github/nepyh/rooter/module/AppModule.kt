@@ -7,13 +7,8 @@ import com.github.nepyh.rooter.module.database.DatabaseManager
 import com.github.nepyh.rooter.module.example.exampleModule
 import com.github.nepyh.rooter.module.health.healthModule
 import com.github.nepyh.rooter.module.user.userModule
-import com.github.nepyh.rooter.module.user.model.StudentProfileTable
-import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
-import com.github.nepyh.rooter.module.user.model.UserTable
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
-import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.koin.core.module.Module
 import org.koin.dsl.module
 import org.koin.ktor.ext.inject
@@ -38,14 +33,6 @@ fun Application.configureAppModule() {
             maxPoolSize = appConfig.dbMaxPoolSize
         )
     )
-    transaction {
-        SchemaUtils.create(
-            UserTable,
-            StudentProfileTable,
-            UnavailableTimeTable
-        )
-    }
-
     val apiRoutes: List<ApiRoute> by inject()
     routing {
         route("api") {
