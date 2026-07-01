@@ -1,7 +1,7 @@
 package com.github.nepyh.rooter
 
-import com.github.nepyh.rooter.config.AppConfig
-import com.github.nepyh.rooter.config.EnvironmentMode
+import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.AppModule
 import com.github.nepyh.rooter.module.configureAppModule
 import io.ktor.http.*

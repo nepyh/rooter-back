@@ -1,7 +1,7 @@
 package com.github.nepyh.rooter.module.storage
 
 import com.github.nepyh.rooter.common.ApiRoute
-import com.github.nepyh.rooter.config.AppConfig
+import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.module.storage.impl.local.LocalFileStorageApi
 import com.github.nepyh.rooter.module.storage.impl.local.LocalFileStorageImpl
 import org.koin.dsl.module

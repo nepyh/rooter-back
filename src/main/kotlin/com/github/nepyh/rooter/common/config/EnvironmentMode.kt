@@ -1,4 +1,4 @@
-package com.github.nepyh.rooter.config
+package com.github.nepyh.rooter.common.config
 
 
 enum class EnvironmentMode {
@@ -8,6 +8,6 @@ enum class EnvironmentMode {
 
     companion object {
         fun fromString(string: String): EnvironmentMode =
-            EnvironmentMode.valueOf(string.uppercase())
+            valueOf(string.uppercase())
     }
 }

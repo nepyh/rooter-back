@@ -1,9 +1,9 @@
 package com.github.nepyh.rooter.module
 
 import com.github.nepyh.rooter.common.ApiRoute
-import com.github.nepyh.rooter.config.AppConfig
-import com.github.nepyh.rooter.module.database.DatabaseConfig
-import com.github.nepyh.rooter.module.database.DatabaseManager
+import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.database.DatabaseConfig
+import com.github.nepyh.rooter.common.database.DatabaseManager
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.storage.FileStorageModule
