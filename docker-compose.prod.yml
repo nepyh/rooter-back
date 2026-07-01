@@ -1,7 +1,7 @@
 services:
   app:
     container_name: rooter-back-app
-    build: .
+    image: 208367987268.dkr.ecr.ap-northeast-2.amazonaws.com/rooter:latest
     restart: always
     ports:
       - "${SERVICE_HOST}:${SERVICE_PORT}:8080"
@@ -21,6 +21,8 @@ services:
     container_name: rooter-back-db
     image: postgres:15-alpine
     restart: always
+    ports:
+      - "5432:5432"
     environment:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
