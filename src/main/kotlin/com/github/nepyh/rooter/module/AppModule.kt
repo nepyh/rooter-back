@@ -33,18 +33,6 @@ fun AppModule(appConfig: AppConfig): Module = module {
 }
 
 fun Application.configureAppModule() {
-    val appConfig: AppConfig by inject()
-
-    DatabaseManager.init(
-        DatabaseConfig(
-            driverClassName = "org.postgresql.Driver",
-            jdbcUrl = appConfig.jdbcUrl,
-            username = appConfig.dbUsername,
-            password = appConfig.dbPassword,
-            maxPoolSize = appConfig.dbMaxPoolSize
-        )
-    )
-
     val apiRoutes: List<ApiRoute> by inject()
 
     routing {
