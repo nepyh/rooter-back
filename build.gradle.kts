@@ -30,6 +30,7 @@ dependencies {
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
     implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
+    implementation("io.ktor:ktor-server-swagger:$ktorVersion")
 
     // database, orm
     implementation("com.zaxxer:HikariCP:5.1.0")
