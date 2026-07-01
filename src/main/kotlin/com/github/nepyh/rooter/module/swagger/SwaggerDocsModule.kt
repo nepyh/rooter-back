@@ -11,7 +11,7 @@ import org.koin.dsl.module
 val swaggerModule = module {
     single(named("swaggerApi")) {
         ApiRoute {
-            swaggerUI(path = "swagger", swaggerFile = "openapi/documentation.yaml")
+            swaggerUI(path = "swagger", swaggerFile = "openapi/docs.yaml")
         }
     }
 }
