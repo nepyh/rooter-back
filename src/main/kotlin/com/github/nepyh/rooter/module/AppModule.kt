@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.common.database.DatabaseConfig
 import com.github.nepyh.rooter.common.database.DatabaseManager
 import com.github.nepyh.rooter.module.example.ExampleModule
@@ -15,7 +16,10 @@ import org.koin.ktor.ext.inject
 
 
 fun AppModule(appConfig: AppConfig): Module = module {
-    includes(ExampleModule())
+    if (appConfig.environment == EnvironmentMode.DEV) {
+        includes(ExampleModule())
+    }
+
     includes(HealthModule())
     includes(FileStorageModule(appConfig))
 
