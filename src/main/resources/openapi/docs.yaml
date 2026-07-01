@@ -1,0 +1,54 @@
+openapi: "3.0.3"
+info:
+  title: Rooter API
+  version: "1.0.0"
+  description: Rooter 백엔드 API 문서
+servers:
+  - url: http://localhost:8080
+    description: 로컬 개발 서버
+  - url: https://anyone-enhance-lustrous.ngrok-free.dev
+    description: ngrok 배포 서버
+paths:
+  /api/health:
+    get:
+      tags:
+        - Health
+      summary: 헬스 체크
+      description: 서버 상태 확인
+      responses:
+        "200":
+          description: 서버 정상
+  /api/example:
+    get:
+      tags:
+        - Example
+      summary: 예제 API
+      description: 예제 텍스트 반환
+      responses:
+        "200":
+          description: 예제 응답
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: 이건 예제 API 임
+  /api/example/random:
+    get:
+      tags:
+        - Example
+      summary: 랜덤 숫자 반환
+      description: 랜덤 숫자를 반환
+      responses:
+        "200":
+          description: 랜덤 숫자
+          content:
+            text/plain:
+              schema:
+                type: integer
+                example: 42
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

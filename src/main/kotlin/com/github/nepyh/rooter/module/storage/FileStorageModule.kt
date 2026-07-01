@@ -17,7 +17,7 @@ enum class FileStorageType {
 val fileStorageModule = module {
     single<FileStorage> {
         val appConfig: AppConfig = get() // TODO this is really bad. function? (in new ticket)
-        val storageType = FileStorageType.valueOf(appConfig.storageType)
+        val storageType = FileStorageType.valueOf(appConfig.storageType.uppercase())
 
         when (storageType) {
             FileStorageType.LOCAL -> {
@@ -31,7 +31,7 @@ val fileStorageModule = module {
 
     single<ApiRoute?>(named("localFileStorageApi")) {
         val appConfig: AppConfig = get()
-        val storageType = FileStorageType.valueOf(appConfig.storageType)
+        val storageType = FileStorageType.valueOf(appConfig.storageType.uppercase())
 
         when (storageType) {
             FileStorageType.LOCAL -> {
