@@ -4,10 +4,10 @@ info:
   version: "1.0.0"
   description: Rooter 백엔드 API 문서
 servers:
-  - url: https://anyone-enhance-lustrous.ngrok-free.dev
-    description: ngrok 배포 서버
   - url: http://localhost:8080
     description: 로컬 개발 서버
+  - url: https://anyone-enhance-lustrous.ngrok-free.dev
+    description: ngrok 배포 서버
 paths:
   /api/health:
     get:
