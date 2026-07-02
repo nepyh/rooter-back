@@ -4,6 +4,7 @@ import java.util.Properties
 plugins {
     kotlin("jvm") version "2.3.0"
     id("com.gradleup.shadow") version "9.0.0"
+    kotlin("plugin.serialization") version "2.3.0"
     application
 }
 
@@ -39,6 +40,7 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-core:${exposedVersion}")
     implementation("org.jetbrains.exposed:exposed-dao:${exposedVersion}")
     implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
+    implementation("org.jetbrains.exposed:exposed-java-time:${exposedVersion}")
     // exposed jdbc driver using different version name
     implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
 
