@@ -5,7 +5,8 @@ import com.github.nepyh.rooter.module.user.api.UserApi
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
-val userModule = module {
+
+fun UserModule() = module {
     single { UserRepo() }
     single { UserService(get()) }
     single { AuthService(get(), get()) }
