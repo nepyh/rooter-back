@@ -1,4 +1,4 @@
-package com.github.nepyh.rooter.module.database
+package com.github.nepyh.rooter.common.database
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
