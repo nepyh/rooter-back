@@ -6,6 +6,7 @@ import com.github.nepyh.rooter.module.database.DatabaseConfig
 import com.github.nepyh.rooter.module.database.DatabaseManager
 import com.github.nepyh.rooter.module.example.exampleModule
 import com.github.nepyh.rooter.module.health.healthModule
+import com.github.nepyh.rooter.module.planboard.planBoardModule
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
 import org.koin.core.module.Module
@@ -18,9 +19,11 @@ fun AppModule(appConfig: AppConfig): Module = module {
 
     includes(exampleModule)
     includes(healthModule)
+    includes(planBoardModule) // 👈 우리가 만든 플랜보드 모듈 포함
 
     single<List<ApiRoute>> { getAll() }
-}
+
+\}
 
 fun Application.configureAppModule() {
     val appConfig: AppConfig by inject()
