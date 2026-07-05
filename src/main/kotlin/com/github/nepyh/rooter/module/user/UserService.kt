@@ -23,6 +23,11 @@ class UserService(
             throw UserValidationException.WrongUsernameException()
         }
 
+        // 이메일 길이 체크 (users.email varchar(320))
+        if (request.email.length > 320) {
+            throw UserValidationException.WrongEmailLengthException()
+        }
+
         // 이메일 중복 체크
         val existingUser = userRepo.findUserByEmail(request.email)
         if (existingUser != null) {
@@ -91,6 +96,11 @@ class UserService(
     fun createStudentProfile(userId: Int, request: StudentProfileRequest): StudentProfileResponse {
         userRepo.findUserById(userId) ?: throw UserNotFoundException()
 
+        // 학교 코드 길이 체크 (student_profiles.school_id char(10))
+        if (request.schoolId.length > 10) {
+            throw UserValidationException.WrongSchoolIdException()
+        }
+
         val row = userRepo.insertStudentProfile(
             userId = userId,
             schoolId = request.schoolId,
@@ -111,6 +121,11 @@ class UserService(
 
     fun addUnavailableTime(userId: Int, request: UnavailableTimeRequest): UnavailableTimeResponse {
         userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        // 요일 범위 체크 (user_unavailable_times.day_of_week check 1~7)
+        if (request.dayOfWeek < 1 || request.dayOfWeek > 7) {
+            throw UserValidationException.WrongDayOfWeekException()
+        }
 
         val row = userRepo.insertUnavailableTime(
             userId = userId,

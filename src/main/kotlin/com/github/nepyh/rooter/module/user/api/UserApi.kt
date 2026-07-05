@@ -27,6 +27,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             call.respond(HttpStatusCode.UnprocessableEntity, mapOf("message" to e.message))    // 422
         } catch (e: UserValidationException.WrongPasswordFormatException) {
             call.respond(HttpStatusCode.NotAcceptable, mapOf("message" to e.message))          // 406
+        } catch (e: UserValidationException.WrongEmailLengthException) {
+            call.respond(HttpStatusCode.PayloadTooLarge, mapOf("code" to "EMAIL_TOO_LONG", "message" to e.message))  // 413
         } catch (_: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))  // 500
         }
@@ -67,6 +69,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             call.respond(HttpStatusCode.Created, response)
         } catch (e: UserNotFoundException) {
             call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+        } catch (e: UserValidationException.WrongSchoolIdException) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_SCHOOL_ID", "message" to e.message))
         } catch (_: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
         }
@@ -81,6 +85,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             call.respond(HttpStatusCode.Created, response)
         } catch (e: UserNotFoundException) {
             call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+        } catch (e: UserValidationException.WrongDayOfWeekException) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_DAY_OF_WEEK", "message" to e.message))
         } catch (e: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
         }
