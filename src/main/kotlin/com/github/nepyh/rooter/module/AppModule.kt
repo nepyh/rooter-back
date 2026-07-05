@@ -18,14 +18,14 @@ fun AppModule(appConfig: AppConfig): Module = module {
     // dev-related modules
     if (appConfig.environment == EnvironmentMode.DEV) {
         includes(
-            ExampleModule(),
-            SwaggerDocsModule()
+            ExampleModule()
         )
     }
     // infra-related modules
     includes(
         HealthModule(),
-        FileStorageModule(appConfig)
+        FileStorageModule(appConfig),
+        SwaggerDocsModule()
     )
     // service-related modules
     includes(
