@@ -16,16 +16,17 @@ class UserService(
 ) {
 
     fun registerUser(request: UserRegisterRequest): UserRegisterResponse {
-        // 이메일 중복 체크
-        val existingUser = userRepo.findUserByEmail(request.email)
-        if (existingUser != null) {
-            throw UserValidationException.DuplicatedEmailException()
-        }
 
         // 사용자 이름 (12자 이하)
         val lengthUsername = request.username
         if (lengthUsername.length > 12) {
             throw UserValidationException.WrongUsernameException()
+        }
+
+        // 이메일 중복 체크
+        val existingUser = userRepo.findUserByEmail(request.email)
+        if (existingUser != null) {
+            throw UserValidationException.DuplicatedEmailException()
         }
 
         // 사용자 이름 중복 체크
