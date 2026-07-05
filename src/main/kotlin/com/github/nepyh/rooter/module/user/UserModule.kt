@@ -8,7 +8,7 @@ import org.koin.dsl.module
 
 fun UserModule() = module {
     single { UserRepo() }
-    single { UserService(get()) }
+    single { UserService(get(), get()) }
     single { AuthService(get(), get()) }
     single(named("userApi")) { UserApi(get()) }
     single(named("authApi")) { AuthApi(get()) }

@@ -8,6 +8,7 @@ import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.*
+import io.ktor.http.content.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -39,6 +40,33 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             val id = call.parameters["id"]?.toIntOrNull()
                 ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
             val response = userService.getUserInfo(id)
+            call.respond(HttpStatusCode.OK, response)
+        } catch (e: UserNotFoundException) {
+            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }
+
+    post("{id}/avatar") {
+        try {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+
+            var fileItem: PartData.FileItem? = null
+            call.receiveMultipart().forEachPart { part ->
+                if (part is PartData.FileItem && fileItem == null) {
+                    fileItem = part
+                } else {
+                    part.dispose()
+                }
+            }
+
+            val file = fileItem
+                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "이미지 파일이 필요합니다."))
+
+            val response = userService.updateAvatar(id, file)
+            file.dispose()
             call.respond(HttpStatusCode.OK, response)
         } catch (e: UserNotFoundException) {
             call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))

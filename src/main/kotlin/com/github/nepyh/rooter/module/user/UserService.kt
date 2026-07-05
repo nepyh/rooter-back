@@ -1,5 +1,7 @@
 package com.github.nepyh.rooter.module.user
 
+import com.github.nepyh.rooter.module.storage.FileStorage
+import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
@@ -9,10 +11,12 @@ import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
+import io.ktor.http.content.PartData
 import java.time.LocalTime
 
 class UserService(
-    private val userRepo: UserRepo
+    private val userRepo: UserRepo,
+    private val fileStorage: FileStorage
 ) {
 
     fun registerUser(request: UserRegisterRequest): UserRegisterResponse {
@@ -116,6 +120,18 @@ class UserService(
             grade = row.grade,
             classNumber = row.classNumber,
             studyStyle = row.studyStyle
+        )
+    }
+
+    suspend fun updateAvatar(userId: Int, file: PartData.FileItem): AvatarUpdateResponse {
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        val avatarImageKey = fileStorage.upload(file, "avatars")
+        userRepo.updateAvatarImageKey(userId, avatarImageKey)
+
+        return AvatarUpdateResponse(
+            userId = userId,
+            avatarImageKey = avatarImageKey
         )
     }
 

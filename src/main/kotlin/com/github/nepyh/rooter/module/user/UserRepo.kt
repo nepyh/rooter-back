@@ -50,6 +50,15 @@ class UserRepo {
         }
     }
 
+    fun updateAvatarImageKey(userId: Int, avatarImageKey: String): UserRow {
+        return transaction {
+            val user = UserRow.findById(userId)
+                ?: throw com.github.nepyh.rooter.module.user.exception.UserNotFoundException()
+            user.avatarImageKey = avatarImageKey
+            user
+        }
+    }
+
     fun findStudentProfileByUserId(userId: Int): StudentProfileRow? {
         return transaction {
             val user = UserRow.findById(userId) ?: return@transaction null
