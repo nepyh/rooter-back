@@ -11,6 +11,11 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.post
 
 
+private val loginBadCredentialsResponse = mapOf(
+    "code" to "BAD_CREDENTIALS",
+    "message" to "이메일 또는 비밀번호가 일치하지 않습니다."
+)
+
 fun AuthApi(userAuthService: AuthService) = ApiRoute("auth") {
     post("login") {
         try {
@@ -18,9 +23,9 @@ fun AuthApi(userAuthService: AuthService) = ApiRoute("auth") {
             val response = userAuthService.login(request)
             call.respond(HttpStatusCode.OK, response)
         } catch (e: UserNotFoundException) {
-            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+            call.respond(HttpStatusCode.Unauthorized, loginBadCredentialsResponse)
         } catch (e: UserValidationException.WrongPasswordException) {
-            call.respond(HttpStatusCode.Unauthorized, mapOf("message" to e.message))
+            call.respond(HttpStatusCode.Unauthorized, loginBadCredentialsResponse)
         } catch (_: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
         }
