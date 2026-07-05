@@ -7,7 +7,7 @@ import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
-import java.time.LocalDateTime
+import java.time.OffsetDateTime
 
 class UserRepo {
 
@@ -25,7 +25,7 @@ class UserRepo {
                 this.password = password
                 this.avatarImageKey = avatarImageKey
                 this.bio = bio
-                this.createdAt = LocalDateTime.now()
+                this.createdAt = OffsetDateTime.now()
             }
         }
     }

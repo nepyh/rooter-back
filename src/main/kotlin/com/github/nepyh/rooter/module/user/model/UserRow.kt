@@ -4,8 +4,7 @@ import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
 import org.jetbrains.exposed.v1.dao.IntEntity
 import org.jetbrains.exposed.v1.dao.IntEntityClass
-import org.jetbrains.exposed.v1.javatime.datetime
-import java.time.LocalDateTime
+import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
 
 
 object UserTable : IntIdTable("users") {
@@ -14,7 +13,7 @@ object UserTable : IntIdTable("users") {
     val password = char("password", 60)
     val avatarImageKey = varchar("avatar_image_key", 255).nullable()
     val bio = varchar("bio", 500).nullable()
-    val createdAt = datetime("created_at")
+    val createdAt = timestampWithTimeZone("created_at")
 }
 
 class UserRow(id: EntityID<Int>) : IntEntity(id) {
