@@ -80,7 +80,8 @@ class UserService(
             schoolId = profile.school,
             grade = profile.grade,
             classNumber = profile.classNumber,
-            createdAt = user.createdAt.toString()
+            createdAt = user.createdAt.toString(),
+            avatarImageKey = user.avatarImageKey
         )
     }
 
