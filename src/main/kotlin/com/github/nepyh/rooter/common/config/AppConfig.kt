@@ -20,7 +20,11 @@ data class AppConfig(
     val storageType: String,
     val storageBaseDir: String?,
     val storageBaseUrl: String?,
-    val storageBaseRoute: String?
+    val storageBaseRoute: String?,
+
+    // jwt related
+    val jwtSecret: String,
+    val jwtIssuer: String
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
@@ -54,7 +58,10 @@ data class AppConfig(
                 storageType = config.property("storage.type").getString(),
                 storageBaseDir = config.propertyOrNull("storage.baseDir")?.getString(),
                 storageBaseUrl = config.propertyOrNull("storage.baseUrl")?.getString(),
-                storageBaseRoute = config.propertyOrNull("storage.baseRoute")?.getString()
+                storageBaseRoute = config.propertyOrNull("storage.baseRoute")?.getString(),
+
+                jwtSecret = config.property("jwt.secret").getString(),
+                jwtIssuer = config.property("jwt.issuer").getString()
             )
         }
     }
