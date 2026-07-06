@@ -12,12 +12,10 @@ import org.mindrot.jbcrypt.BCrypt
 
 class AuthService(
     private val userRepo: UserRepo,
-    private val userService: UserService
+    private val userService: UserService,
+    val jwtSecret: String,
+    val jwtIssuer: String
 ) {
-
-    private val jwtSecret = System.getenv("JWT_SECRET")
-    private val jwtIssuer = System.getenv("JWT_ISSUER")
-
     fun login(request: UserLoginRequest): UserLoginResponse {
         // 유저 조회
         val user = userRepo.findUserByEmail(request.email)

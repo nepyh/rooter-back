@@ -29,7 +29,7 @@ fun AppModule(appConfig: AppConfig): Module = module {
     )
     // service-related modules
     includes(
-        UserModule()
+        UserModule(appConfig)
     )
 
     single<List<ApiRoute>> { getAll() }
