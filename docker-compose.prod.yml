@@ -11,6 +11,8 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS}
       - DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ISSUER=${JWT_ISSUER}
     depends_on:
       db:
         condition: service_healthy
