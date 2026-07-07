@@ -9,24 +9,21 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
-import java.time.LocalDateTime
+import org.jetbrains.exposed.v1.javatime.CurrentDateTime
 import java.time.format.DateTimeFormatter
 
-// 1. DDL에 맞게 테이블명("plan_boards")과 컬럼(date) 수정!
 object PlanBoards : Table("plan_boards") {
     val id = integer("id").autoIncrement()
     val userId = integer("user_id") // DDL에 있는 필수 유저 외래키
     val title = varchar("title", 100)
     val startDate = date("start_date") // DDL 스펙: date
     val endDate = date("end_date")     // DDL 스펙: date
-    val createdAt = datetime("created_at").default(LocalDateTime.now())
+    val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
 
     override val primaryKey = PrimaryKey(id)
 }
 
 class PlanBoardService {
-
-    // 전체 조회
     suspend fun getAllBoards(): List<PlanBoardResponse> = newSuspendedTransaction {
         PlanBoards.selectAll().map {
             PlanBoardResponse(
