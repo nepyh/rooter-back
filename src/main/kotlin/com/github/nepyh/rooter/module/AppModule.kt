@@ -19,11 +19,11 @@ fun AppModule(appConfig: AppConfig): Module = module {
 
     includes(exampleModule)
     includes(healthModule)
-    includes(planBoardModule) // 👈 우리가 만든 플랜보드 모듈 포함
+    includes(planBoardModule)
 
     single<List<ApiRoute>> { getAll() }
 
-\}
+}
 
 fun Application.configureAppModule() {
     val appConfig: AppConfig by inject()
