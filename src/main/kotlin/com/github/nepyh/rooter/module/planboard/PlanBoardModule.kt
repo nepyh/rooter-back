@@ -1,17 +1,20 @@
 package com.github.nepyh.rooter.module.planboard
 
-import com.github.nepyh.rooter.common.ApiRoute // 👈 이거 임포트 꼭 확인!
+import com.github.nepyh.rooter.common.ApiRoute
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
 val planBoardModule = module {
     single { PlanBoardService() }
+    single { PlanTaskService() }
 
-    // 🆕 ApiRoute 블록으로 감싸고, 그 안에서 registerRoutes()를 호출해 줍니다!
-    single(named("planBoardApi")) {
-        val api = PlanBoardApi(get())
-        ApiRoute {
-            with(api) { registerRoutes() }
-        }
+    single<ApiRoute>(named("planBoardApi")) {
+        val api = PlanBoardApi(get<PlanBoardService>())
+        ApiRoute { with(api) { registerRoutes() } }
+    }
+
+    single<ApiRoute>(named("planTaskApi")) {
+        val api = PlanTaskApi(get<PlanTaskService>())
+        ApiRoute { with(api) { registerRoutes() } }
     }
 }
