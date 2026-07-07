@@ -38,7 +38,7 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
         } catch (e: UserValidationException.WrongPasswordFormatException) {
             call.respond(HttpStatusCode.NotAcceptable, mapOf("message" to e.message))          // 406
         } catch (e: UserValidationException.WrongEmailLengthException) {
-            call.respond(HttpStatusCode.PayloadTooLarge, mapOf("code" to "EMAIL_TOO_LONG", "message" to e.message))  // 413
+            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "EMAIL_TOO_LONG", "message" to e.message)) // 400
         } catch (_: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))  // 500
         }
