@@ -119,10 +119,10 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
         }
     }
 
-    post("{id}/avatar") {
+    put("{id}/avatar") {
         try {
             val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
 
             var fileItem: PartData.FileItem? = null
             call.receiveMultipart().forEachPart { part ->
@@ -134,7 +134,7 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             }
 
             val file = fileItem
-                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "이미지 파일이 필요합니다."))
+                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("message" to "이미지 파일이 필요합니다."))
 
             val response = userService.updateAvatar(id, file)
             file.dispose()
