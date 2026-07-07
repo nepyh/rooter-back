@@ -35,13 +35,27 @@ class PlanBoardService {
         }
     }
 
-    // 게시글 등록 (DDL 스펙에 맞춰 insert)
-    suspend fun createBoard(request: PlanBoardCreateRequest) = newSuspendedTransaction {
-        PlanBoards.insert {
-            it[userId] = 1 // 💡 아직 로그인 연동 전이니 DDL default/FK 통과용으로 임시 1번 유저 세팅!
-            it[title] = request.title
-            it[startDate] = LocalDate.parse(request.startDate) // String -> LocalDate 파싱
-            it[endDate] = LocalDate.parse(request.endDate)     // String -> LocalDate 파싱
+    suspend fun createBoard(request: PlanBoardCreateRequest): Int {
+        if (request.title.isBlank() || request.title.length > 100) {
+            throw ApiException(ErrorCode.BOARD_001)
+        }
+
+        val startDate = runCatching { LocalDate.parse(request.startDate) }
+            .getOrElse { throw ApiException(ErrorCode.BOARD_002) }
+        val endDate = runCatching { LocalDate.parse(request.endDate) }
+            .getOrElse { throw ApiException(ErrorCode.BOARD_002) }
+
+        if (endDate.isBefore(startDate)) {
+            throw ApiException(ErrorCode.BOARD_003)
+        }
+
+        return newSuspendedTransaction {
+            PlanBoards.insert {
+                it[userId] = 1
+                it[title] = request.title
+                it[this.startDate] = startDate
+                it[this.endDate] = endDate
+            } get PlanBoards.id
         }
     }
 }
