@@ -15,11 +15,13 @@ import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.openapi.jsonSchema
+import io.ktor.server.http.content.file
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.routing.openapi.describe
 import io.ktor.utils.io.ExperimentalKtorApi
+import kotlinx.coroutines.flow.fold
 
 
 @OptIn(ExperimentalKtorApi::class)
@@ -124,20 +126,19 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             val id = call.parameters["id"]?.toIntOrNull()
                 ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
 
-            var fileItem: PartData.FileItem? = null
-            call.receiveMultipart().forEachPart { part ->
-                if (part is PartData.FileItem && fileItem == null) {
-                    fileItem = part
-                } else {
-                    part.dispose()
-                }
-            }
+            var fileItem: PartData.FileItem = call
+                .receiveMultipart()
+                .asFlow()
+                .fold(null as PartData.FileItem?) { acc, part ->
+                    when {
+                        acc != null -> { part.dispose(); acc }
+                        part is PartData.FileItem -> part
+                        else -> { part.dispose(); null }
+                    }
+            } ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("message" to "이미지 파일이 필요합니다."))
 
-            val file = fileItem
-                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("message" to "이미지 파일이 필요합니다."))
-
-            val response = userService.updateAvatar(id, file)
-            file.dispose()
+            val response = userService.updateAvatar(id, fileItem)
+            fileItem.dispose()
             call.respond(HttpStatusCode.OK, response)
         } catch (e: UserNotFoundException) {
             call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
