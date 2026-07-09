@@ -1,11 +1,10 @@
 package com.github.nepyh.rooter.module.storage
 
-import io.ktor.http.content.PartData
 import java.io.InputStream
 
 
 interface FileStorage {
-    suspend fun upload(file: PartData.FileItem, directory: String): String
+    suspend fun upload(file: UploadableFile, directory: String): String
     suspend fun <T> readFile(
         fileKey: String,
         block: suspend (stream: InputStream, contentType: String?, contentLength: Long?) -> T,
