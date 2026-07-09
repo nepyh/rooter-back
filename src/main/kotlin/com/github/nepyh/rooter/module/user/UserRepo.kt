@@ -1,6 +1,8 @@
 package com.github.nepyh.rooter.module.user
 
+import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
+import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.user.model.UserRow
@@ -53,7 +55,7 @@ class UserRepo {
     fun updateAvatarImageKey(userId: Int, avatarImageKey: String): UserRow {
         return transaction {
             val user = UserRow.findById(userId)
-                ?: throw com.github.nepyh.rooter.module.user.exception.UserNotFoundException()
+                ?: throw UserNotFoundException()
             user.avatarImageKey = avatarImageKey
             user
         }
@@ -62,7 +64,7 @@ class UserRepo {
     fun findStudentProfileByUserId(userId: Int): StudentProfileRow? {
         return transaction {
             val user = UserRow.findById(userId) ?: return@transaction null
-            StudentProfileRow.find { com.github.nepyh.rooter.module.user.model.StudentProfileTable.user eq user.id }
+            StudentProfileRow.find { StudentProfileTable.user eq user.id }
                 .singleOrNull()
         }
     }
@@ -83,7 +85,7 @@ class UserRepo {
         studyStyle: String? = null
     ): StudentProfileRow {
         return transaction {
-            val user = UserRow.findById(userId) ?: throw com.github.nepyh.rooter.module.user.exception.UserNotFoundException()
+            val user = UserRow.findById(userId) ?: throw UserNotFoundException()
             StudentProfileRow.new {
                 this.user = user
                 this.schoolId = schoolId
@@ -101,7 +103,7 @@ class UserRepo {
         endTime: java.time.LocalTime
     ): UnavailableTimeRow {
         return transaction {
-            val user = UserRow.findById(userId) ?: throw com.github.nepyh.rooter.module.user.exception.UserNotFoundException()
+            val user = UserRow.findById(userId) ?: throw UserNotFoundException()
             UnavailableTimeRow.new {
                 this.user = user
                 this.dayOfWeek = dayOfWeek
