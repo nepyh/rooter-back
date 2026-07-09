@@ -5,7 +5,6 @@ import com.auth0.jwt.algorithms.Algorithm
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginResponse
 import com.github.nepyh.rooter.module.user.dto.UserLogoutResponse
-import com.github.nepyh.rooter.module.user.exception.UserAuthException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import org.mindrot.jbcrypt.BCrypt
@@ -42,17 +41,5 @@ class AuthService(
 
     fun logout(): UserLogoutResponse {
         return UserLogoutResponse(message = "Successfully logged out.")
-    }
-
-    fun auth(token: String): Int {
-        return try {
-            val verifier = JWT.require(Algorithm.HMAC256(jwtSecret))
-                .withIssuer(jwtIssuer)
-                .build()
-            val decoded = verifier.verify(token)
-            decoded.getClaim("userId").asInt()
-        } catch (e: Exception) {
-            throw UserAuthException()
-        }
     }
 }
