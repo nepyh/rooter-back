@@ -139,11 +139,6 @@ class UserService(
     fun addUnavailableTime(userId: Int, request: UnavailableTimeRequest): UnavailableTimeResponse {
         userRepo.findUserById(userId) ?: throw UserNotFoundException()
 
-        // 요일 범위 체크 (user_unavailable_times.day_of_week check 1~7)
-        if (request.dayOfWeek < 1 || request.dayOfWeek > 7) {
-            throw UserValidationException.WrongDayOfWeekException()
-        }
-
         val row = userRepo.insertUnavailableTime(
             userId = userId,
             dayOfWeek = request.dayOfWeek,

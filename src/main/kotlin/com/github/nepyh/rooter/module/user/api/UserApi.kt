@@ -227,9 +227,7 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             call.respond(HttpStatusCode.Created, response)
         } catch (e: UserNotFoundException) {
             call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-        } catch (e: UserValidationException.WrongDayOfWeekException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_DAY_OF_WEEK", "message" to e.message))
-        } catch (e: Exception) {
+        } catch (_: Exception) { // TODO ㅣㅇ거 json 파싱 오류도 그냥 500으로 처박힘
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
         }
     }.describe {

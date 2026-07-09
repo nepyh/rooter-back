@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.user
 
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
+import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
@@ -98,7 +99,7 @@ class UserRepo {
 
     fun insertUnavailableTime(
         userId: Int,
-        dayOfWeek: Short,
+        dayOfWeek: DayOfWeek,
         startTime: java.time.LocalTime,
         endTime: java.time.LocalTime
     ): UnavailableTimeRow {
