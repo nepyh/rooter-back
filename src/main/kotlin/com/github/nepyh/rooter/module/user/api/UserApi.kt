@@ -126,7 +126,7 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             val id = call.parameters["id"]?.toIntOrNull()
                 ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
 
-            var fileItem: PartData.FileItem = call
+            val fileItem: PartData.FileItem = call
                 .receiveMultipart()
                 .asFlow()
                 .fold(null as PartData.FileItem?) { acc, part ->
