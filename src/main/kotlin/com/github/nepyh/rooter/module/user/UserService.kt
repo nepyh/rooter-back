@@ -77,7 +77,7 @@ class UserService(
             id = user.id.value,
             username = user.username,
             email = user.email,
-            schoolId = profile.school,
+            schoolId = profile.schoolId,
             grade = profile.grade,
             classNumber = profile.classNumber,
             createdAt = user.createdAt.toString(),
@@ -117,7 +117,7 @@ class UserService(
         return StudentProfileResponse(
             id = row.id.value,
             userId = userId,
-            schoolId = row.school,
+            schoolId = row.schoolId,
             grade = row.grade,
             classNumber = row.classNumber,
             studyStyle = row.studyStyle

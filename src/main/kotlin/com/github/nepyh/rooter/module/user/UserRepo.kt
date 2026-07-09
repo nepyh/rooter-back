@@ -86,7 +86,7 @@ class UserRepo {
             val user = UserRow.findById(userId) ?: throw com.github.nepyh.rooter.module.user.exception.UserNotFoundException()
             StudentProfileRow.new {
                 this.user = user
-                this.school = schoolId
+                this.schoolId = schoolId
                 this.grade = grade
                 this.classNumber = classNumber
                 this.studyStyle = studyStyle
