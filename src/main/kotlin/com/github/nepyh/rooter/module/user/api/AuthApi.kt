@@ -23,11 +23,11 @@ private val loginBadCredentialsResponse = mapOf(
 )
 
 @OptIn(ExperimentalKtorApi::class)
-fun AuthApi(userAuthService: AuthService) = ApiRoute("auth") {
+fun AuthApi(authService: AuthService) = ApiRoute("auth") {
     post("login") {
         try {
             val request = call.receive<UserLoginRequest>()
-            val response = userAuthService.login(request)
+            val response = authService.login(request)
             call.respond(HttpStatusCode.OK, response)
         } catch (e: UserNotFoundException) {
             call.respond(HttpStatusCode.Unauthorized, loginBadCredentialsResponse)
@@ -62,7 +62,7 @@ fun AuthApi(userAuthService: AuthService) = ApiRoute("auth") {
     }
     post("logout") {
         try {
-            val response = userAuthService.logout()
+            val response = authService.logout()
             call.respond(HttpStatusCode.OK, response)
         } catch (_: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))

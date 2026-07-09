@@ -12,6 +12,7 @@ import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.content.PartData
+import org.mindrot.jbcrypt.BCrypt
 import java.time.LocalTime
 
 class UserService(
@@ -51,9 +52,9 @@ class UserService(
         }
 
         // bcrypt 암호화
-        val hashedPassword = org.mindrot.jbcrypt.BCrypt.hashpw(
+        val hashedPassword = BCrypt.hashpw(
             request.password,
-            org.mindrot.jbcrypt.BCrypt.gensalt()
+            BCrypt.gensalt()
         )
 
         // DB 저장
@@ -77,7 +78,7 @@ class UserService(
             id = user.id.value,
             username = user.username,
             email = user.email,
-            schoolId = profile.school,
+            schoolId = profile.schoolId,
             grade = profile.grade,
             classNumber = profile.classNumber,
             createdAt = user.createdAt.toString(),
@@ -117,7 +118,7 @@ class UserService(
         return StudentProfileResponse(
             id = row.id.value,
             userId = userId,
-            schoolId = row.school,
+            schoolId = row.schoolId,
             grade = row.grade,
             classNumber = row.classNumber,
             studyStyle = row.studyStyle
@@ -138,11 +139,6 @@ class UserService(
 
     fun addUnavailableTime(userId: Int, request: UnavailableTimeRequest): UnavailableTimeResponse {
         userRepo.findUserById(userId) ?: throw UserNotFoundException()
-
-        // 요일 범위 체크 (user_unavailable_times.day_of_week check 1~7)
-        if (request.dayOfWeek < 1 || request.dayOfWeek > 7) {
-            throw UserValidationException.WrongDayOfWeekException()
-        }
 
         val row = userRepo.insertUnavailableTime(
             userId = userId,

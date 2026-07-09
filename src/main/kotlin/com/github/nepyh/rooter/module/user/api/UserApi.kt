@@ -15,11 +15,13 @@ import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.openapi.jsonSchema
+import io.ktor.server.http.content.file
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.routing.openapi.describe
 import io.ktor.utils.io.ExperimentalKtorApi
+import kotlinx.coroutines.flow.fold
 
 
 @OptIn(ExperimentalKtorApi::class)
@@ -38,7 +40,7 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
         } catch (e: UserValidationException.WrongPasswordFormatException) {
             call.respond(HttpStatusCode.NotAcceptable, mapOf("message" to e.message))          // 406
         } catch (e: UserValidationException.WrongEmailLengthException) {
-            call.respond(HttpStatusCode.PayloadTooLarge, mapOf("code" to "EMAIL_TOO_LONG", "message" to e.message))  // 413
+            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "EMAIL_TOO_LONG", "message" to e.message)) // 400
         } catch (_: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))  // 500
         }
@@ -119,25 +121,24 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
         }
     }
 
-    post("{id}/avatar") {
+    put("{id}/avatar") {
         try {
             val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
 
-            var fileItem: PartData.FileItem? = null
-            call.receiveMultipart().forEachPart { part ->
-                if (part is PartData.FileItem && fileItem == null) {
-                    fileItem = part
-                } else {
-                    part.dispose()
-                }
-            }
+            val fileItem: PartData.FileItem = call
+                .receiveMultipart()
+                .asFlow()
+                .fold(null as PartData.FileItem?) { acc, part ->
+                    when {
+                        acc != null -> { part.dispose(); acc }
+                        part is PartData.FileItem -> part
+                        else -> { part.dispose(); null }
+                    }
+            } ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("message" to "이미지 파일이 필요합니다."))
 
-            val file = fileItem
-                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "이미지 파일이 필요합니다."))
-
-            val response = userService.updateAvatar(id, file)
-            file.dispose()
+            val response = userService.updateAvatar(id, fileItem)
+            fileItem.dispose()
             call.respond(HttpStatusCode.OK, response)
         } catch (e: UserNotFoundException) {
             call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
@@ -217,6 +218,53 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
         }
     }
 
+    post("{id}/unavailable-times") {
+        try {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val request = call.receive<UnavailableTimeRequest>()
+            val response = userService.addUnavailableTime(id, request)
+            call.respond(HttpStatusCode.Created, response)
+        } catch (e: UserNotFoundException) {
+            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+        } catch (_: Exception) { // TODO ㅣㅇ거 json 파싱 오류도 그냥 500으로 처박힘
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }.describe {
+        tag("User")
+        summary = "불가능 시간 추가"
+        description = "요일(1~7)과 시작/종료 시간을 등록"
+        parameters {
+            path("id") {
+                description = "유저 ID"
+                required = true
+                schema = jsonSchema<Int>()
+            }
+        }
+        requestBody {
+            ContentType.Application.Json {
+                schema = jsonSchema<UnavailableTimeRequest>()
+            }
+        }
+        responses {
+            HttpStatusCode.Created {
+                description = "등록 성공"
+                ContentType.Application.Json {
+                    schema = jsonSchema<UnavailableTimeResponse>()
+                }
+            }
+            HttpStatusCode.BadRequest {
+                description = "유효하지 않은 ID, 또는 dayOfWeek 가 1~7 범위 밖 (code=INVALID_DAY_OF_WEEK)"
+            }
+            HttpStatusCode.NotFound {
+                description = "존재하지 않는 유저"
+            }
+            HttpStatusCode.InternalServerError {
+                description = "서버 오류"
+            }
+        }
+    }
+
     post("{id}/profile") {
         try {
             val id = call.parameters["id"]?.toIntOrNull()
@@ -255,55 +303,6 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             }
             HttpStatusCode.BadRequest {
                 description = "유효하지 않은 ID, 또는 schoolId 가 10자 초과 (code=INVALID_SCHOOL_ID)"
-            }
-            HttpStatusCode.NotFound {
-                description = "존재하지 않는 유저"
-            }
-            HttpStatusCode.InternalServerError {
-                description = "서버 오류"
-            }
-        }
-    }
-
-    post("{id}/unavailable-times") {
-        try {
-            val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
-            val request = call.receive<UnavailableTimeRequest>()
-            val response = userService.addUnavailableTime(id, request)
-            call.respond(HttpStatusCode.Created, response)
-        } catch (e: UserNotFoundException) {
-            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-        } catch (e: UserValidationException.WrongDayOfWeekException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_DAY_OF_WEEK", "message" to e.message))
-        } catch (e: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-        }
-    }.describe {
-        tag("User")
-        summary = "불가능 시간 추가"
-        description = "요일(1~7)과 시작/종료 시간을 등록"
-        parameters {
-            path("id") {
-                description = "유저 ID"
-                required = true
-                schema = jsonSchema<Int>()
-            }
-        }
-        requestBody {
-            ContentType.Application.Json {
-                schema = jsonSchema<UnavailableTimeRequest>()
-            }
-        }
-        responses {
-            HttpStatusCode.Created {
-                description = "등록 성공"
-                ContentType.Application.Json {
-                    schema = jsonSchema<UnavailableTimeResponse>()
-                }
-            }
-            HttpStatusCode.BadRequest {
-                description = "유효하지 않은 ID, 또는 dayOfWeek 가 1~7 범위 밖 (code=INVALID_DAY_OF_WEEK)"
             }
             HttpStatusCode.NotFound {
                 description = "존재하지 않는 유저"
