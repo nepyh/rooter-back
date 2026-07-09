@@ -12,6 +12,7 @@ import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.content.PartData
+import org.mindrot.jbcrypt.BCrypt
 import java.time.LocalTime
 
 class UserService(
@@ -51,9 +52,9 @@ class UserService(
         }
 
         // bcrypt 암호화
-        val hashedPassword = org.mindrot.jbcrypt.BCrypt.hashpw(
+        val hashedPassword = BCrypt.hashpw(
             request.password,
-            org.mindrot.jbcrypt.BCrypt.gensalt()
+            BCrypt.gensalt()
         )
 
         // DB 저장
