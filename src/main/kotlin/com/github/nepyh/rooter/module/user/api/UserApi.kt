@@ -218,54 +218,6 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
         }
     }
 
-    post("{id}/profile") {
-        try {
-            val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
-            val request = call.receive<StudentProfileRequest>()
-            val response = userService.createStudentProfile(id, request)
-            call.respond(HttpStatusCode.Created, response)
-        } catch (e: UserNotFoundException) {
-            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-        } catch (e: UserValidationException.WrongSchoolIdException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_SCHOOL_ID", "message" to e.message))
-        } catch (_: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-        }
-    }.describe {
-        tag("User")
-        summary = "학생 프로필 생성"
-        parameters {
-            path("id") {
-                description = "유저 ID"
-                required = true
-                schema = jsonSchema<Int>()
-            }
-        }
-        requestBody {
-            ContentType.Application.Json {
-                schema = jsonSchema<StudentProfileRequest>()
-            }
-        }
-        responses {
-            HttpStatusCode.Created {
-                description = "생성 성공"
-                ContentType.Application.Json {
-                    schema = jsonSchema<StudentProfileResponse>()
-                }
-            }
-            HttpStatusCode.BadRequest {
-                description = "유효하지 않은 ID, 또는 schoolId 가 10자 초과 (code=INVALID_SCHOOL_ID)"
-            }
-            HttpStatusCode.NotFound {
-                description = "존재하지 않는 유저"
-            }
-            HttpStatusCode.InternalServerError {
-                description = "서버 오류"
-            }
-        }
-    }
-
     post("{id}/unavailable-times") {
         try {
             val id = call.parameters["id"]?.toIntOrNull()
@@ -305,6 +257,54 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             }
             HttpStatusCode.BadRequest {
                 description = "유효하지 않은 ID, 또는 dayOfWeek 가 1~7 범위 밖 (code=INVALID_DAY_OF_WEEK)"
+            }
+            HttpStatusCode.NotFound {
+                description = "존재하지 않는 유저"
+            }
+            HttpStatusCode.InternalServerError {
+                description = "서버 오류"
+            }
+        }
+    }
+
+    post("{id}/profile") {
+        try {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val request = call.receive<StudentProfileRequest>()
+            val response = userService.createStudentProfile(id, request)
+            call.respond(HttpStatusCode.Created, response)
+        } catch (e: UserNotFoundException) {
+            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+        } catch (e: UserValidationException.WrongSchoolIdException) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_SCHOOL_ID", "message" to e.message))
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }.describe {
+        tag("User")
+        summary = "학생 프로필 생성"
+        parameters {
+            path("id") {
+                description = "유저 ID"
+                required = true
+                schema = jsonSchema<Int>()
+            }
+        }
+        requestBody {
+            ContentType.Application.Json {
+                schema = jsonSchema<StudentProfileRequest>()
+            }
+        }
+        responses {
+            HttpStatusCode.Created {
+                description = "생성 성공"
+                ContentType.Application.Json {
+                    schema = jsonSchema<StudentProfileResponse>()
+                }
+            }
+            HttpStatusCode.BadRequest {
+                description = "유효하지 않은 ID, 또는 schoolId 가 10자 초과 (code=INVALID_SCHOOL_ID)"
             }
             HttpStatusCode.NotFound {
                 description = "존재하지 않는 유저"
