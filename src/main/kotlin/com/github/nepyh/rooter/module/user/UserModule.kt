@@ -15,7 +15,7 @@ fun UserModule(appConfig: AppConfig) = module {
             get(),
             get(),
             appConfig.jwtSecret,
-            appConfig.jwtSecret
+            appConfig.jwtIssuer
         )
     }
     single(named("userApi")) { UserApi(get()) }
