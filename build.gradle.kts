@@ -4,6 +4,7 @@ import java.util.Properties
 plugins {
     kotlin("jvm") version "2.3.0"
     id("com.gradleup.shadow") version "9.0.0"
+    kotlin("plugin.serialization") version "2.3.0"
     application
 }
 
@@ -29,6 +30,7 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
     implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
     implementation("io.ktor:ktor-server-swagger:$ktorVersion")
 
@@ -37,11 +39,14 @@ dependencies {
 
     implementation("org.jetbrains.exposed:exposed-core:${exposedVersion}")
     implementation("org.jetbrains.exposed:exposed-dao:${exposedVersion}")
-    implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
+    implementation("org.jetbrains.exposed:exposed-java-time:${exposedVersion}")
+    implementation("org.mindrot:jbcrypt:0.4")
     // exposed jdbc driver using different version name
     implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
 
     implementation("org.postgresql:postgresql:42.7.2")
+    //jwt
+    implementation("com.auth0:java-jwt:4.4.0")
 
     // test dependencies
     testImplementation("io.kotest:kotest-runner-junit5:6.2.0")

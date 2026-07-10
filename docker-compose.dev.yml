@@ -1,7 +1,7 @@
 services:
   app:
     container_name: rooter-back-dev-app
-    build: .
+    image: 208367987268.dkr.ecr.ap-northeast-2.amazonaws.com/rooter:latest
     restart: always
     ports:
       - "8080:8080"
@@ -11,6 +11,8 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - ALLOWED_HOSTS=와언더테일아시는구나 # dev 세팅에서 ALLOWED_HOSTS 는 짜피 anyHost 로 설정 되기에 씹힘
       - DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ISSUER=${JWT_ISSUER}
     depends_on:
       db:
         condition: service_healthy

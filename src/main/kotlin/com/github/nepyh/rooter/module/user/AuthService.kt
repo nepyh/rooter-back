@@ -1,0 +1,45 @@
+package com.github.nepyh.rooter.module.user
+
+import com.auth0.jwt.JWT
+import com.auth0.jwt.algorithms.Algorithm
+import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
+import com.github.nepyh.rooter.module.user.dto.UserLoginResponse
+import com.github.nepyh.rooter.module.user.dto.UserLogoutResponse
+import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
+import com.github.nepyh.rooter.module.user.exception.UserValidationException
+import org.mindrot.jbcrypt.BCrypt
+
+class AuthService(
+    private val userRepo: UserRepo,
+    private val userService: UserService,
+    val jwtSecret: String,
+    val jwtIssuer: String
+) {
+    fun login(request: UserLoginRequest): UserLoginResponse {
+        // 유저 조회
+        val user = userRepo.findUserByEmail(request.email)
+            ?: throw UserNotFoundException()
+
+        // 비밀번호 검증
+        if (!BCrypt.checkpw(request.password, user.password)) {
+            throw UserValidationException.WrongPasswordException()
+        }
+
+        // JWT 토큰 발급
+        val token = JWT.create()
+            .withIssuer(jwtIssuer)
+            .withClaim("userId", user.id.value)
+            .withClaim("email", user.email)
+            .sign(Algorithm.HMAC256(jwtSecret))
+
+        return UserLoginResponse(
+            email = user.email,
+            username = user.username,
+            token = token
+        )
+    }
+
+    fun logout(): UserLogoutResponse {
+        return UserLogoutResponse(message = "Successfully logged out.")
+    }
+}
