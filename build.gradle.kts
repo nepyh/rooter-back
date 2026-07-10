@@ -47,6 +47,9 @@ dependencies {
     testImplementation("io.kotest:kotest-runner-junit5:6.2.0")
     testImplementation("io.kotest:kotest-assertions-core:6.2.0")
     testImplementation("io.kotest:kotest-property:6.2.0")
+
+    // aws sdk (for s3 connection)
+    implementation(awssdk.services.s3)
 }
 
 tasks.test {
