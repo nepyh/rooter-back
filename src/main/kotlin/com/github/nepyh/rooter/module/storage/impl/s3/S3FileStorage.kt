@@ -21,10 +21,10 @@ import kotlin.time.Duration.Companion.minutes
 
 class S3FileStorage(
     region: String,
-    private val bucket: String,
-    private val presignDuration: Duration = 15.minutes,
+    val bucket: String,
+    val presignDuration: Duration = 15.minutes,
 ) : FileStorage {
-    private val s3 = S3Client {
+    val s3 = S3Client {
         this.region = region
     }
 
