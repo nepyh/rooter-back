@@ -11,9 +11,9 @@ enum class FileStorageType {
 
 sealed class StorageConfig(val storageType: FileStorageType) {
     data class LocalFileStorageConfig(
-        val storageBaseDir: String,
-        val storageBaseUrl: String,
-        val storageBaseRoute: String
+        val baseDir: String,
+        val baseUrl: String,
+        val baseRoute: String
     ) : StorageConfig(FileStorageType.LOCAL) {
         companion object {
             fun fromApplicationConfig(config: ApplicationConfig) =
