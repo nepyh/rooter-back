@@ -2,35 +2,33 @@ package com.github.nepyh.rooter.module.storage
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.config.StorageConfig
 import com.github.nepyh.rooter.module.storage.impl.local.LocalFileStorageApi
 import com.github.nepyh.rooter.module.storage.impl.local.LocalFileStorageImpl
+import com.github.nepyh.rooter.module.storage.impl.s3.S3FileStorage
 import org.koin.dsl.module
 import java.nio.file.Paths
 
 
 fun FileStorageModule(appConfig: AppConfig) = module {
-    val storageType = try {
-        FileStorageType.valueOf(appConfig.storageType.uppercase())
-    } catch (e: IllegalArgumentException) {
-        throw IllegalArgumentException("Storage type name \"${appConfig.storageType}\" does not exist", e)
-    }
+    val storageConfig = appConfig.storageConfig
 
     single<FileStorage> {
-        when (storageType) {
-            FileStorageType.LOCAL -> {
+        when (storageConfig) {
+            is StorageConfig.LocalFileStorageConfig -> {
                 LocalFileStorageImpl(
-                    baseDir = Paths.get(appConfig.storageBaseDir!!),
-                    baseUrl = appConfig.storageBaseUrl!!
+                    baseDir = Paths.get(storageConfig.baseDir),
+                    baseUrl = storageConfig.baseUrl
                 )
             }
         }
     }
 
-    if (storageType ==  FileStorageType.LOCAL) {
+    if (storageConfig is StorageConfig.LocalFileStorageConfig) {
         single<ApiRoute> {
             LocalFileStorageApi(
-                baseDir = Paths.get(appConfig.storageBaseDir!!),
-                baseRoute = appConfig.storageBaseRoute!!.trim('/')
+                baseDir = Paths.get(storageConfig.baseDir),
+                baseRoute = storageConfig.baseUrl.trim('/')
             )
         }
     }
