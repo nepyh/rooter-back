@@ -21,6 +21,12 @@ fun FileStorageModule(appConfig: AppConfig) = module {
                     baseUrl = storageConfig.baseUrl
                 )
             }
+            is StorageConfig.S3FileStorageConfig -> {
+                S3FileStorage(
+                    region = storageConfig.region,
+                    bucket = storageConfig.bucket
+                )
+            }
         }
     }
 
