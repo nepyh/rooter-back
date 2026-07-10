@@ -8,11 +8,6 @@ import org.koin.dsl.module
 import java.nio.file.Paths
 
 
-enum class FileStorageType {
-    LOCAL,
-    ;
-}
-
 fun FileStorageModule(appConfig: AppConfig) = module {
     val storageType = try {
         FileStorageType.valueOf(appConfig.storageType.uppercase())
