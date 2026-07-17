@@ -1,12 +1,12 @@
 package com.github.nepyh.rooter.module
 
 import com.github.nepyh.rooter.common.ApiRoute
-import com.github.nepyh.rooter.config.AppConfig
-import com.github.nepyh.rooter.module.database.DatabaseConfig
-import com.github.nepyh.rooter.module.database.DatabaseManager
-import com.github.nepyh.rooter.module.example.exampleModule
-import com.github.nepyh.rooter.module.health.healthModule
-import com.github.nepyh.rooter.module.planboard.planBoardModule
+import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.database.DatabaseConfig
+import com.github.nepyh.rooter.common.database.DatabaseManager
+import com.github.nepyh.rooter.module.example.ExampleModule
+import com.github.nepyh.rooter.module.health.HealthModule
+import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
 import org.koin.core.module.Module
@@ -17,9 +17,9 @@ import org.koin.ktor.ext.inject
 fun AppModule(appConfig: AppConfig): Module = module {
     single { appConfig }
 
-    includes(exampleModule)
-    includes(healthModule)
-    includes(planBoardModule)
+    includes(ExampleModule())
+    includes(HealthModule())
+    includes(PlanBoardModule())
 
     single<List<ApiRoute>> { getAll() }
 
