@@ -1,4 +1,4 @@
-package com.github.nepyh.rooter.config
+package com.github.nepyh.rooter.common.config
 
 
 enum class EnvironmentMode {
