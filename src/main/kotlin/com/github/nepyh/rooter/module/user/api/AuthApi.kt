@@ -10,6 +10,7 @@ import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
+import io.ktor.server.auth.authenticate
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.openapi.describe
@@ -60,25 +61,31 @@ fun AuthApi(authService: AuthService) = ApiRoute("auth") {
             }
         }
     }
-    post("logout") {
-        try {
-            val response = authService.logout()
-            call.respond(HttpStatusCode.OK, response)
-        } catch (_: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-        }
-    }.describe {
-        tag("Auth")
-        summary = "로그아웃"
-        responses {
-            HttpStatusCode.OK {
-                description = "로그아웃 성공"
-                ContentType.Application.Json {
-                    schema = jsonSchema<UserLogoutResponse>()
-                }
+    authenticate("auth-jwt") {
+        post("logout") {
+            try {
+                val response = authService.logout()
+                call.respond(HttpStatusCode.OK, response)
+            } catch (_: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
             }
-            HttpStatusCode.InternalServerError {
-                description = "서버 오류"
+        }.describe {
+            tag("Auth")
+            summary = "로그아웃"
+            description = "Authorization: Bearer 헤더로 전달된 JWT 가 유효해야 호출 가능"
+            responses {
+                HttpStatusCode.OK {
+                    description = "로그아웃 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<UserLogoutResponse>()
+                    }
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "Authorization 헤더 누락 또는 유효하지 않은 토큰"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
             }
         }
     }
