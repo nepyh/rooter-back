@@ -3,37 +3,19 @@ package com.github.nepyh.rooter.module.planboard
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
-import org.jetbrains.exposed.v1.core.Table
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
+import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
+import com.github.nepyh.rooter.module.planboard.model.DailyPlans
+import com.github.nepyh.rooter.module.planboard.model.PlanBoards
+import com.github.nepyh.rooter.module.planboard.model.PlanTasks
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.javatime.date
-import org.jetbrains.exposed.v1.javatime.time
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-
-object DailyPlans : Table("daily_plans") {
-    val id = integer("id").autoIncrement()
-    val planBoardId = integer("plan_board_id") references PlanBoards.id
-    val planDate = date("plan_date")
-
-    override val primaryKey = PrimaryKey(id)
-}
-
-object PlanTasks : Table("plan_tasks") {
-    val id = integer("id").autoIncrement()
-    val dailyPlanId = integer("daily_plan_id") references DailyPlans.id
-    val taskName = varchar("task_name", 150)
-    val startTime = time("start_time")   // DDL 스펙: time
-    val endTime = time("end_time")
-    val estimatedMinutes = integer("estimated_minutes")
-    val isCompleted = bool("is_completed").default(false)
-
-    override val primaryKey = PrimaryKey(id)
-}
 
 class PlanTaskService {
 
@@ -63,26 +45,26 @@ class PlanTaskService {
         val board = PlanBoards.selectAll()
             .where { PlanBoards.id eq request.planBoardId }
             .firstOrNull()
-            ?: throw ApiException(ErrorCode.BOARD_004)
+            ?: throw PlanBoardNotFoundException()
 
         if (request.taskName.isBlank() || request.taskName.length > 150) {
-            throw ApiException(ErrorCode.TASK_001)
+            throw PlanTaskValidationException.InvalidTaskNameException()
         }
 
         val date = runCatching { LocalDate.parse(request.planDate) }
-            .getOrElse { throw ApiException(ErrorCode.TASK_002) }
+            .getOrElse { throw PlanTaskValidationException.InvalidPlanDateException() }
 
         val startTime = runCatching { LocalTime.parse(request.startTime) }
-            .getOrElse { throw ApiException(ErrorCode.TASK_003) }
+            .getOrElse { throw PlanTaskValidationException.InvalidTimeFormatException() }
         val endTime = runCatching { LocalTime.parse(request.endTime) }
-            .getOrElse { throw ApiException(ErrorCode.TASK_003) }
+            .getOrElse { throw PlanTaskValidationException.InvalidTimeFormatException() }
 
         if (request.estimatedMinutes < 1) {
-            throw ApiException(ErrorCode.TASK_004)
+            throw PlanTaskValidationException.InvalidEstimatedMinutesException()
         }
 
         if (date.isBefore(board[PlanBoards.startDate]) || date.isAfter(board[PlanBoards.endDate])) {
-            throw ApiException(ErrorCode.TASK_005)
+            throw PlanTaskValidationException.PlanDateOutOfRangeException()
         }
 
         val dailyPlanId = DailyPlans.selectAll()
