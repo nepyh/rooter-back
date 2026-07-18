@@ -8,6 +8,7 @@ import com.github.nepyh.rooter.common.database.DatabaseConfig
 import com.github.nepyh.rooter.common.database.DatabaseManager
 import com.github.nepyh.rooter.module.AppModule
 import com.github.nepyh.rooter.module.configureAppModule
+import com.github.nepyh.rooter.module.user.UserRepo
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -16,6 +17,7 @@ import io.ktor.server.auth.jwt.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.response.*
+import org.koin.ktor.ext.inject
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
 
@@ -27,6 +29,8 @@ fun Application.appEntryModule() {
         slf4jLogger()
         modules(AppModule(appConfig))
     }
+
+    val userRepo: UserRepo by inject()
 
     install(ContentNegotiation) {
         json()
@@ -61,7 +65,11 @@ fun Application.appEntryModule() {
                     .build()
             )
             validate { credential ->
-                if (credential.payload.getClaim("userId").asInt() != null) {
+                val userId = credential.payload.getClaim("userId").asInt()
+                val tokenVersion = credential.payload.getClaim("tokenVersion").asInt()
+                val user = userId?.let { userRepo.findUserById(it) }
+
+                if (user != null && tokenVersion == user.tokenVersion) {
                     JWTPrincipal(credential.payload)
                 } else {
                     null

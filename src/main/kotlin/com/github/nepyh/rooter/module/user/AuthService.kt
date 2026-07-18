@@ -30,6 +30,7 @@ class AuthService(
             .withIssuer(jwtIssuer)
             .withClaim("userId", user.id.value)
             .withClaim("email", user.email)
+            .withClaim("tokenVersion", user.tokenVersion)
             .sign(Algorithm.HMAC256(jwtSecret))
 
         return UserLoginResponse(
@@ -39,7 +40,8 @@ class AuthService(
         )
     }
 
-    fun logout(): UserLogoutResponse {
+    fun logout(userId: Int): UserLogoutResponse {
+        userRepo.incrementTokenVersion(userId)
         return UserLogoutResponse(message = "Successfully logged out.")
     }
 }

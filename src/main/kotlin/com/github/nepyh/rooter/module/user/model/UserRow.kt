@@ -14,6 +14,7 @@ object UserTable : IntIdTable("users") {
     val avatarImageKey = varchar("avatar_image_key", 255).nullable()
     val bio = varchar("bio", 500).nullable()
     val createdAt = timestampWithTimeZone("created_at")
+    val tokenVersion = integer("token_version").default(0)
 }
 
 class UserRow(id: EntityID<Int>) : IntEntity(id) {
@@ -25,4 +26,5 @@ class UserRow(id: EntityID<Int>) : IntEntity(id) {
     var avatarImageKey by UserTable.avatarImageKey
     var bio by UserTable.bio
     var createdAt by UserTable.createdAt
+    var tokenVersion by UserTable.tokenVersion
 }

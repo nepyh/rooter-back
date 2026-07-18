@@ -62,6 +62,15 @@ class UserRepo {
         }
     }
 
+    fun incrementTokenVersion(userId: Int): UserRow {
+        return transaction {
+            val user = UserRow.findById(userId)
+                ?: throw UserNotFoundException()
+            user.tokenVersion += 1
+            user
+        }
+    }
+
     fun findStudentProfileByUserId(userId: Int): StudentProfileRow? {
         return transaction {
             val user = UserRow.findById(userId) ?: return@transaction null

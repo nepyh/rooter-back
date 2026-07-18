@@ -11,6 +11,8 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
 import io.ktor.server.auth.authenticate
+import io.ktor.server.auth.jwt.JWTPrincipal
+import io.ktor.server.auth.principal
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.openapi.describe
@@ -64,15 +66,18 @@ fun AuthApi(authService: AuthService) = ApiRoute("auth") {
     authenticate("auth-jwt") {
         post("logout") {
             try {
-                val response = authService.logout()
+                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+                val response = authService.logout(userId)
                 call.respond(HttpStatusCode.OK, response)
+            } catch (e: UserNotFoundException) {
+                call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
             } catch (_: Exception) {
                 call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
             }
         }.describe {
             tag("Auth")
             summary = "로그아웃"
-            description = "Authorization: Bearer 헤더로 전달된 JWT 가 유효해야 호출 가능"
+            description = "Authorization: Bearer 헤더로 전달된 JWT 가 유효해야 호출 가능. 로그아웃 시 해당 유저의 토큰 버전을 올려 그 시점 이전에 발급된 모든 토큰을 무효화함"
             responses {
                 HttpStatusCode.OK {
                     description = "로그아웃 성공"
@@ -82,6 +87,9 @@ fun AuthApi(authService: AuthService) = ApiRoute("auth") {
                 }
                 HttpStatusCode.Unauthorized {
                     description = "Authorization 헤더 누락 또는 유효하지 않은 토큰"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
