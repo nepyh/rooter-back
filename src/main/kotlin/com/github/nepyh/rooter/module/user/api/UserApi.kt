@@ -38,8 +38,6 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             call.respond(HttpStatusCode.BadRequest, mapOf("message" to e.message))           // 400
         } catch (e: UserValidationException.DuplicatedEmailException) {
             call.respond(HttpStatusCode.Conflict, mapOf("message" to e.message))              // 409
-        } catch (e: UserValidationException.WrongUsernameAlreadyException) {
-            call.respond(HttpStatusCode.UnprocessableEntity, mapOf("message" to e.message))    // 422
         } catch (e: UserValidationException.WrongPasswordFormatException) {
             call.respond(HttpStatusCode.NotAcceptable, mapOf("message" to e.message))          // 406
         } catch (e: UserValidationException.WrongEmailLengthException) {
@@ -67,9 +65,6 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             }
             HttpStatusCode.Conflict {
                 description = "이미 사용 중인 이메일"
-            }
-            HttpStatusCode.UnprocessableEntity {
-                description = "이미 있는 사용자 이름"
             }
             HttpStatusCode.NotAcceptable {
                 description = "비밀번호 형식이 올바르지 않음"
