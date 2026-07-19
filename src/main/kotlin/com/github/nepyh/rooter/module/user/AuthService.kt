@@ -8,6 +8,8 @@ import com.github.nepyh.rooter.module.user.dto.UserLogoutResponse
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import org.mindrot.jbcrypt.BCrypt
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 class AuthService(
     private val userRepo: UserRepo,
@@ -15,6 +17,10 @@ class AuthService(
     val jwtSecret: String,
     val jwtIssuer: String
 ) {
+    companion object {
+        private const val TOKEN_EXPIRATION_DAYS = 14L
+    }
+
     fun login(request: UserLoginRequest): UserLoginResponse {
         // 유저 조회
         val user = userRepo.findUserByEmail(request.email)
@@ -31,6 +37,7 @@ class AuthService(
             .withClaim("userId", user.id.value)
             .withClaim("email", user.email)
             .withClaim("tokenVersion", user.tokenVersion)
+            .withExpiresAt(Instant.now().plus(TOKEN_EXPIRATION_DAYS, ChronoUnit.DAYS))
             .sign(Algorithm.HMAC256(jwtSecret))
 
         return UserLoginResponse(

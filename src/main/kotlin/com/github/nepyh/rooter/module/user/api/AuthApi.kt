@@ -42,7 +42,7 @@ fun AuthApi(authService: AuthService) = ApiRoute("auth") {
     }.describe {
         tag("Auth")
         summary = "로그인"
-        description = "이메일/비밀번호로 로그인하고 JWT 토큰을 발급"
+        description = "이메일/비밀번호로 로그인하고 JWT 토큰을 발급 (발급 후 14일간 유효)"
         requestBody {
             ContentType.Application.Json {
                 schema = jsonSchema<UserLoginRequest>()
