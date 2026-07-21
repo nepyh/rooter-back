@@ -11,6 +11,8 @@ object PlanBoards : Table("plan_boards") {
     val title = varchar("title", 100)
     val startDate = date("start_date") // DDL 스펙: date
     val endDate = date("end_date")     // DDL 스펙: date
+    val examDate = date("exam_date").nullable() // 실제 시험 날짜 (end_date 와 별개일 수 있음)
+    val isCramMode = bool("is_cram_mode").default(false)
     val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
 
     override val primaryKey = PrimaryKey(id)
