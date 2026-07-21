@@ -4,6 +4,7 @@ import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.database.DatabaseConfig
 import com.github.nepyh.rooter.common.database.DatabaseManager
+import com.github.nepyh.rooter.module.calendar.CalendarModule
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
@@ -20,6 +21,7 @@ fun AppModule(appConfig: AppConfig): Module = module {
     includes(ExampleModule())
     includes(HealthModule())
     includes(PlanBoardModule())
+    includes(CalendarModule())
 
     single<List<ApiRoute>> { getAll() }
 
