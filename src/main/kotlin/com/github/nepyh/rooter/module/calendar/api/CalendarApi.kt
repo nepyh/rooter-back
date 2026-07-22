@@ -2,15 +2,21 @@ package com.github.nepyh.rooter.module.calendar.api
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.module.calendar.CalendarService
+import com.github.nepyh.rooter.module.calendar.dto.CalendarEventCreateRequest
+import com.github.nepyh.rooter.module.calendar.dto.CalendarEventResponse
 import com.github.nepyh.rooter.module.calendar.dto.CalendarRangeResponse
 import com.github.nepyh.rooter.module.calendar.dto.DailyCompletionResponse
+import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundException
 import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
+import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.openapi.describe
+import io.ktor.server.routing.post
 import io.ktor.utils.io.ExperimentalKtorApi
 import java.time.LocalDate
 
@@ -42,8 +48,8 @@ fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
         }
     }.describe {
         tag("Calendar")
-        summary = "기간별 캘린더 조회 (일별 공부 시간 + 시험 D-Day)"
-        description = "start~end 범위의 날짜별 계획 공부 시간(estimatedMinutes 합)과, 그 범위 안에 있는 시험 일정(D-Day)을 함께 반환"
+        summary = "기간별 캘린더 조회 (일별 공부 시간 + 시험 D-Day + 개인 일정)"
+        description = "start~end 범위의 날짜별 계획 공부 시간(estimatedMinutes 합), 시험 일정(D-Day), 사용자가 등록한 개인 일정을 함께 반환"
         parameters {
             query("start") {
                 description = "조회 시작일 (yyyy-MM-dd)"
@@ -90,7 +96,7 @@ fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
     }.describe {
         tag("Calendar")
         summary = "특정 날짜 학습 이행 요약 조회"
-        description = "해당 날짜의 태스크 완료 개수/비율을 그때그때 계산해서 반환"
+        description = "해당 날짜의 태스크 완료 개수/비율을 그때그때 계산해서 반환하고, 그 날짜의 개인 일정도 함께 반환"
         parameters {
             path("date") {
                 description = "조회할 날짜 (yyyy-MM-dd)"
@@ -107,6 +113,82 @@ fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
             }
             HttpStatusCode.BadRequest {
                 description = "날짜 형식이 올바르지 않음 (code=CALENDAR_002)"
+            }
+            HttpStatusCode.InternalServerError {
+                description = "서버 오류"
+            }
+        }
+    }
+
+    post("events") {
+        try {
+            val request = call.receive<CalendarEventCreateRequest>()
+            val userId = 1 // 💡 로그인 연동 전 임시 유저
+            val response = calendarService.createEvent(userId, request)
+            call.respond(HttpStatusCode.Created, response)
+        } catch (e: CalendarValidationException.InvalidTitleException) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "CALENDAR_004", "message" to e.message))
+        } catch (e: CalendarValidationException.InvalidDateFormatException) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "CALENDAR_002", "message" to e.message))
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }.describe {
+        tag("Calendar")
+        summary = "개인 일정 추가"
+        description = "생일, 약속 등 plan_board 와 무관한 개인 일정을 캘린더에 추가"
+        requestBody {
+            ContentType.Application.Json {
+                schema = jsonSchema<CalendarEventCreateRequest>()
+            }
+        }
+        responses {
+            HttpStatusCode.Created {
+                description = "생성 성공"
+                ContentType.Application.Json {
+                    schema = jsonSchema<CalendarEventResponse>()
+                }
+            }
+            HttpStatusCode.BadRequest {
+                description = "제목이 1~100자를 벗어남 (code=CALENDAR_004), 또는 날짜 형식 오류 (code=CALENDAR_002)"
+            }
+            HttpStatusCode.InternalServerError {
+                description = "서버 오류"
+            }
+        }
+    }
+
+    delete("events/{id}") {
+        try {
+            val eventId = call.parameters["id"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val userId = 1 // 💡 로그인 연동 전 임시 유저
+            calendarService.deleteEvent(userId, eventId)
+            call.respond(HttpStatusCode.OK, mapOf("message" to "삭제되었습니다."))
+        } catch (e: CalendarEventNotFoundException) {
+            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }.describe {
+        tag("Calendar")
+        summary = "개인 일정 삭제"
+        parameters {
+            path("id") {
+                description = "일정 ID"
+                required = true
+                schema = jsonSchema<Int>()
+            }
+        }
+        responses {
+            HttpStatusCode.OK {
+                description = "삭제 성공"
+            }
+            HttpStatusCode.BadRequest {
+                description = "유효하지 않은 ID"
+            }
+            HttpStatusCode.NotFound {
+                description = "존재하지 않는 일정"
             }
             HttpStatusCode.InternalServerError {
                 description = "서버 오류"

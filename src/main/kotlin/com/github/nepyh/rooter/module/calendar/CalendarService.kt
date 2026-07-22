@@ -1,10 +1,14 @@
 package com.github.nepyh.rooter.module.calendar
 
 import com.github.nepyh.rooter.module.calendar.dto.CalendarDayResponse
+import com.github.nepyh.rooter.module.calendar.dto.CalendarEventCreateRequest
+import com.github.nepyh.rooter.module.calendar.dto.CalendarEventResponse
 import com.github.nepyh.rooter.module.calendar.dto.CalendarExamResponse
 import com.github.nepyh.rooter.module.calendar.dto.CalendarRangeResponse
 import com.github.nepyh.rooter.module.calendar.dto.DailyCompletionResponse
+import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundException
 import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
+import com.github.nepyh.rooter.module.calendar.model.CalendarEvents
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.model.DailyPlans
 import com.github.nepyh.rooter.module.planboard.model.PlanBoards
@@ -12,8 +16,11 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTasks
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.isNotNull
 import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.jdbc.deleteWhere
+import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
@@ -64,7 +71,15 @@ class CalendarService {
                     )
                 }
 
-            CalendarRangeResponse(days = days, exams = exams)
+            val events = CalendarEvents.selectAll()
+                .where {
+                    (CalendarEvents.userId eq userId) and
+                        (CalendarEvents.eventDate greaterEq start) and
+                        (CalendarEvents.eventDate lessEq end)
+                }
+                .map { it.toCalendarEventResponse() }
+
+            CalendarRangeResponse(days = days, exams = exams, events = events)
         }
     }
 
@@ -89,13 +104,56 @@ class CalendarService {
             val completedTasks = tasks.count { it.isCompleted }
             val completionRate = if (totalTasks == 0) 0.0 else (completedTasks.toDouble() / totalTasks) * 100
 
+            val events = CalendarEvents.selectAll()
+                .where { (CalendarEvents.userId eq userId) and (CalendarEvents.eventDate eq date) }
+                .map { it.toCalendarEventResponse() }
+
             DailyCompletionResponse(
                 date = date.toString(),
                 totalTasks = totalTasks,
                 completedTasks = completedTasks,
                 completionRate = completionRate,
-                tasks = tasks
+                tasks = tasks,
+                events = events
             )
         }
     }
+
+    suspend fun createEvent(userId: Int, request: CalendarEventCreateRequest): CalendarEventResponse {
+        if (request.title.isBlank() || request.title.length > 100) {
+            throw CalendarValidationException.InvalidTitleException()
+        }
+
+        val eventDate = runCatching { LocalDate.parse(request.eventDate) }
+            .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
+
+        return newSuspendedTransaction {
+            val id = CalendarEvents.insert {
+                it[this.userId] = userId
+                it[title] = request.title
+                it[this.eventDate] = eventDate
+                it[memo] = request.memo
+            } get CalendarEvents.id
+
+            CalendarEventResponse(id = id, title = request.title, eventDate = eventDate.toString(), memo = request.memo)
+        }
+    }
+
+    suspend fun deleteEvent(userId: Int, eventId: Int) {
+        newSuspendedTransaction {
+            val deletedRows = CalendarEvents.deleteWhere {
+                (CalendarEvents.id eq eventId) and (CalendarEvents.userId eq userId)
+            }
+            if (deletedRows == 0) {
+                throw CalendarEventNotFoundException()
+            }
+        }
+    }
+
+    private fun ResultRow.toCalendarEventResponse() = CalendarEventResponse(
+        id = this[CalendarEvents.id],
+        title = this[CalendarEvents.title],
+        eventDate = this[CalendarEvents.eventDate].toString(),
+        memo = this[CalendarEvents.memo]
+    )
 }

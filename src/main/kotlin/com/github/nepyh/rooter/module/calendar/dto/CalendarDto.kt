@@ -20,7 +20,8 @@ data class CalendarExamResponse(
 @Serializable
 data class CalendarRangeResponse(
     val days: List<CalendarDayResponse>,
-    val exams: List<CalendarExamResponse>
+    val exams: List<CalendarExamResponse>,
+    val events: List<CalendarEventResponse>
 )
 
 @Serializable
@@ -29,5 +30,21 @@ data class DailyCompletionResponse(
     val totalTasks: Int,
     val completedTasks: Int,
     val completionRate: Double,  // 0~100
-    val tasks: List<PlanTaskResponse>
+    val tasks: List<PlanTaskResponse>,
+    val events: List<CalendarEventResponse>
+)
+
+@Serializable
+data class CalendarEventCreateRequest(
+    val title: String,
+    val eventDate: String,     // "2026-07-01"
+    val memo: String? = null
+)
+
+@Serializable
+data class CalendarEventResponse(
+    val id: Int,
+    val title: String,
+    val eventDate: String,
+    val memo: String?
 )
