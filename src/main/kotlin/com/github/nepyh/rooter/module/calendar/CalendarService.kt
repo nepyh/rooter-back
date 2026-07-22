@@ -5,7 +5,6 @@ import com.github.nepyh.rooter.module.calendar.dto.CalendarExamResponse
 import com.github.nepyh.rooter.module.calendar.dto.CalendarRangeResponse
 import com.github.nepyh.rooter.module.calendar.dto.DailyCompletionResponse
 import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
-import com.github.nepyh.rooter.module.calendar.model.DailyCompletionSummary
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.model.DailyPlans
 import com.github.nepyh.rooter.module.planboard.model.PlanBoards
@@ -15,11 +14,8 @@ import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.isNotNull
 import org.jetbrains.exposed.v1.core.lessEq
-import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
-import org.jetbrains.exposed.v1.jdbc.update
-import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
@@ -93,8 +89,6 @@ class CalendarService {
             val completedTasks = tasks.count { it.isCompleted }
             val completionRate = if (totalTasks == 0) 0.0 else (completedTasks.toDouble() / totalTasks) * 100
 
-            upsertCompletionSummary(userId, date, completionRate)
-
             DailyCompletionResponse(
                 date = date.toString(),
                 totalTasks = totalTasks,
@@ -102,27 +96,6 @@ class CalendarService {
                 completionRate = completionRate,
                 tasks = tasks
             )
-        }
-    }
-
-    private fun upsertCompletionSummary(userId: Int, date: LocalDate, rate: Double) {
-        val rateValue = BigDecimal.valueOf(rate)
-        val existing = DailyCompletionSummary.selectAll()
-            .where { (DailyCompletionSummary.userId eq userId) and (DailyCompletionSummary.summaryDate eq date) }
-            .firstOrNull()
-
-        if (existing != null) {
-            DailyCompletionSummary.update({
-                (DailyCompletionSummary.userId eq userId) and (DailyCompletionSummary.summaryDate eq date)
-            }) {
-                it[completionRate] = rateValue
-            }
-        } else {
-            DailyCompletionSummary.insert {
-                it[this.userId] = userId
-                it[summaryDate] = date
-                it[completionRate] = rateValue
-            }
         }
     }
 }

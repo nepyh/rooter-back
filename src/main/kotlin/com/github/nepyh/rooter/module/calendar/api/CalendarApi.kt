@@ -90,7 +90,7 @@ fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
     }.describe {
         tag("Calendar")
         summary = "특정 날짜 학습 이행 요약 조회"
-        description = "해당 날짜의 태스크 완료 개수/비율을 반환하고, daily_completion_summary 에도 반영(upsert)"
+        description = "해당 날짜의 태스크 완료 개수/비율을 그때그때 계산해서 반환"
         parameters {
             path("date") {
                 description = "조회할 날짜 (yyyy-MM-dd)"
