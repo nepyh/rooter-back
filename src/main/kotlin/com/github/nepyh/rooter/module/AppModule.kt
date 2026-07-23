@@ -6,6 +6,8 @@ import com.github.nepyh.rooter.common.database.DatabaseConfig
 import com.github.nepyh.rooter.common.database.DatabaseManager
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
+import com.github.nepyh.rooter.module.notification.NotificationModule
+import com.github.nepyh.rooter.module.notification.NotificationScheduler
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
@@ -20,6 +22,7 @@ fun AppModule(appConfig: AppConfig): Module = module {
     includes(ExampleModule())
     includes(HealthModule())
     includes(PlanBoardModule())
+    includes(NotificationModule())
 
     single<List<ApiRoute>> { getAll() }
 
@@ -37,6 +40,9 @@ fun Application.configureAppModule() {
             maxPoolSize = appConfig.dbMaxPoolSize
         )
     )
+
+    val notificationScheduler: NotificationScheduler by inject()
+    notificationScheduler.start()
 
     val apiRoutes: List<ApiRoute> by inject()
 
