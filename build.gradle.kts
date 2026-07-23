@@ -46,6 +46,9 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
 
     implementation("org.postgresql:postgresql:42.7.2")
+
+    // push notifications
+    implementation("com.google.firebase:firebase-admin:9.4.3")
 }
 
 kotlin {
