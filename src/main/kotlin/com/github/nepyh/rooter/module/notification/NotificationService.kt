@@ -16,6 +16,7 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.v1.jdbc.update
+import org.slf4j.LoggerFactory
 import java.time.LocalDate
 import java.time.LocalTime
 
@@ -24,6 +25,8 @@ class NotificationService(private val pushSender: PushSender) {
     companion object {
         private const val REMINDER_LEAD_MINUTES = 5L
     }
+
+    private val logger = LoggerFactory.getLogger(NotificationService::class.java)
 
     suspend fun registerDeviceToken(userId: Int, request: DeviceTokenRegisterRequest) {
         val platform = request.platform.uppercase()
@@ -92,7 +95,11 @@ class NotificationService(private val pushSender: PushSender) {
             }
 
             tokens.forEach { token ->
-                pushSender.send(token, "곧 공부 시간이에요!", "${REMINDER_LEAD_MINUTES}분 후 '$taskName' 시작 시간입니다.")
+                runCatching {
+                    pushSender.send(token, "곧 공부 시간이에요!", "${REMINDER_LEAD_MINUTES}분 후 '$taskName' 시작 시간입니다.")
+                }.onFailure {
+                    logger.warn("푸시 발송 실패 (planTaskId=$planTaskId)", it)
+                }
             }
         }
     }

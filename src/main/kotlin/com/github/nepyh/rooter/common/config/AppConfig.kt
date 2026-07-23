@@ -14,10 +14,7 @@ data class AppConfig(
 
     // cors related
     val corsAllowedHosts: List<String>,
-    val corsMaxAgeSeconds: Long,
-
-    // push notification related
-    val firebaseCredentialsPath: String?
+    val corsMaxAgeSeconds: Long
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
@@ -46,9 +43,7 @@ data class AppConfig(
                 dbMaxPoolSize = config.property("database.dbMaxPoolSize").getString().toInt(),
 
                 corsAllowedHosts = allowedHosts,
-                corsMaxAgeSeconds = config.property("cors.maxAgeSeconds").getString().toLong(),
-
-                firebaseCredentialsPath = config.propertyOrNull("firebase.credentialsPath")?.getString()
+                corsMaxAgeSeconds = config.property("cors.maxAgeSeconds").getString().toLong()
             )
         }
     }

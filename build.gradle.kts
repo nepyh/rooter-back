@@ -47,8 +47,10 @@ dependencies {
 
     implementation("org.postgresql:postgresql:42.7.2")
 
-    // push notifications
-    implementation("com.google.firebase:firebase-admin:9.4.3")
+    // push notifications (Expo Push API)
+    implementation("io.ktor:ktor-client-core:$ktorVersion")
+    implementation("io.ktor:ktor-client-cio:$ktorVersion")
+    implementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
 }
 
 kotlin {
