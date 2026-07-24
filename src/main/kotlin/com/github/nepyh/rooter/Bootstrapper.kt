@@ -30,8 +30,6 @@ fun Application.appEntryModule() {
         modules(AppModule(appConfig))
     }
 
-    val jwtValidator: JwtValidator by inject()
-
     install(ContentNegotiation) {
         json()
     }
@@ -55,6 +53,8 @@ fun Application.appEntryModule() {
 
         allowCredentials = true
     }
+
+    val jwtValidator: JwtValidator by inject()
 
     install(Authentication) {
         jwt("auth-jwt") {
