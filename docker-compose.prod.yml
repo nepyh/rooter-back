@@ -11,6 +11,9 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS}
       - DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
+      # I believe nobody gonna use a local storage in the production environment
+      - AWS_REGION=${AWS_REGION}
+      - AWS_BUCKET=${AWS_BUCKET}
     depends_on:
       db:
         condition: service_healthy

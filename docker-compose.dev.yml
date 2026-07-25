@@ -11,6 +11,9 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - ALLOWED_HOSTS=와언더테일아시는구나 # dev 세팅에서 ALLOWED_HOSTS 는 짜피 anyHost 로 설정 되기에 씹힘
       - DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
+      # These settings will be ignored when using a local storage
+      - AWS_REGION=${AWS_REGION}
+      - AWS_BUCKET=${AWS_BUCKET}
     depends_on:
       db:
         condition: service_healthy
