@@ -15,6 +15,7 @@ import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.openapi.jsonSchema
+import io.ktor.server.application.log
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.principal
@@ -42,7 +43,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             call.respond(HttpStatusCode.NotAcceptable, mapOf("message" to e.message))          // 406
         } catch (e: UserValidationException.WrongEmailLengthException) {
             call.respond(HttpStatusCode.BadRequest, mapOf("code" to "EMAIL_TOO_LONG", "message" to e.message)) // 400
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            call.application.log.error("회원가입 처리 중 예외 발생", e)
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))  // 500
         }
     }.describe {
@@ -91,7 +93,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 call.respond(HttpStatusCode.OK, response)
             } catch (e: UserNotFoundException) {
                 call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                call.application.log.error("유저 정보 조회 중 예외 발생 (id=${call.parameters["id"]})", e)
                 call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
             }
         }.describe {
@@ -155,7 +158,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 call.respond(HttpStatusCode.OK, response)
             } catch (e: UserNotFoundException) {
                 call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                call.application.log.error("아바타 이미지 업로드 중 예외 발생 (id=${call.parameters["id"]})", e)
                 call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
             }
         }.describe {
@@ -209,7 +213,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 call.respond(HttpStatusCode.OK, response)
             } catch (e: UserNotFoundException) {
                 call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                call.application.log.error("불가능 시간 목록 조회 중 예외 발생 (id=${call.parameters["id"]})", e)
                 call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
             }
         }.describe {
@@ -261,7 +266,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 call.respond(HttpStatusCode.Created, response)
             } catch (e: UserNotFoundException) {
                 call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-            } catch (_: Exception) { // TODO ㅣㅇ거 json 파싱 오류도 그냥 500으로 처박힘
+            } catch (e: Exception) { // TODO ㅣㅇ거 json 파싱 오류도 그냥 500으로 처박힘
+                call.application.log.error("불가능 시간 추가 중 예외 발생 (id=${call.parameters["id"]})", e)
                 call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
             }
         }.describe {
@@ -320,7 +326,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
             } catch (e: UserValidationException.WrongSchoolIdException) {
                 call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_SCHOOL_ID", "message" to e.message))
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                call.application.log.error("학생 프로필 생성 중 예외 발생 (id=${call.parameters["id"]})", e)
                 call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
             }
         }.describe {

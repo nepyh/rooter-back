@@ -10,6 +10,7 @@ import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
+import io.ktor.server.application.log
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.principal
@@ -36,7 +37,8 @@ fun AuthApi(authService: AuthService) = ApiRoute("auth") {
             call.respond(HttpStatusCode.Unauthorized, loginBadCredentialsResponse)
         } catch (e: UserValidationException.WrongPasswordException) {
             call.respond(HttpStatusCode.Unauthorized, loginBadCredentialsResponse)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            call.application.log.error("로그인 처리 중 예외 발생", e)
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
         }
     }.describe {
@@ -71,7 +73,8 @@ fun AuthApi(authService: AuthService) = ApiRoute("auth") {
                 call.respond(HttpStatusCode.OK, response)
             } catch (e: UserNotFoundException) {
                 call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                call.application.log.error("로그아웃 처리 중 예외 발생", e)
                 call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
             }
         }.describe {
