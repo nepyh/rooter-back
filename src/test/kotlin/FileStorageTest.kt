@@ -28,17 +28,17 @@ class FileStorageTest : StringSpec({
     var fileKey = "게스"
 
     "로컬 스토리지 서비스 바나나 사진 업로드 및 테스트" {
-        val fileItem = createMockFileItem("banana.png")
+        val file = createMockUploadableFile("banana.png")
 
         shouldNotThrow<Exception> {
-            fileKey = fileStorage.upload(fileItem, "asdf")
+            fileKey = fileStorage.upload(file, "asdf")
         }
     }
 
     "파일을 올리면서 얻어진 fileKey 로 바나나 사진 파일 떙겨와 지는지 테스트" {
         shouldNotThrow<Exception> {
             shouldNotBeNull {
-                fileStorage.getFile(fileKey)
+                fileStorage.readFile(fileKey) { stream, _, _ -> stream.readBytes() }
             }
         }
     }
