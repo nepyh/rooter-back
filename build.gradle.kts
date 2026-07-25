@@ -54,6 +54,20 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+
+    val envFile = File(projectDir, ".env")
+    if (envFile.exists()) {
+        envFile.bufferedReader().use { reader ->
+            val properties = Properties()
+            properties.load(reader)
+            properties.forEach { (key, value) ->
+                environment(key.toString(), value.toString())
+            }
+        }
+    } else {
+        logger.warn("테스트 실행을 위한 .env 파일을 프로젝트 루트에서 찾을수 없습니다.")
+        logger.warn("테스트 안돌릴거면 상관 없는데 테스트 돌릴려다가 이 메세지가 뜨면 리드미를 보삼")
+    }
 }
 
 kotlin {
@@ -67,7 +81,6 @@ application {
 }
 tasks.named<JavaExec>("run") {
     val envFile = File(projectDir, ".env")
-
     if (envFile.exists()) {
         envFile.bufferedReader().use { reader ->
             val properties = Properties()
