@@ -46,18 +46,20 @@ class UserRepo {
         }
     }
 
-    fun findUserByUsername(username: String): UserRow? {
-        return transaction {
-            UserRow.find { UserTable.username eq username }
-                .singleOrNull()
-        }
-    }
-
     fun updateAvatarImageKey(userId: Int, avatarImageKey: String): UserRow {
         return transaction {
             val user = UserRow.findById(userId)
                 ?: throw UserNotFoundException()
             user.avatarImageKey = avatarImageKey
+            user
+        }
+    }
+
+    fun incrementTokenVersion(userId: Int): UserRow {
+        return transaction {
+            val user = UserRow.findById(userId)
+                ?: throw UserNotFoundException()
+            user.tokenVersion += 1
             user
         }
     }
