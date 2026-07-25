@@ -4,7 +4,6 @@ import io.kotest.core.spec.IsolationMode
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.core.test.TestCaseOrder
 import io.kotest.matchers.nulls.shouldNotBeNull
-import java.nio.file.Files
 import java.nio.file.Paths
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.deleteRecursively
@@ -21,7 +20,6 @@ class FileStorageTest : StringSpec({
 
     beforeSpec {
         if (workingDir.exists()) workingDir.deleteRecursively()
-        Files.createDirectories(workingDir)
     }
 
     val fileStorage = LocalFileStorageImpl(workingDir, "/")
