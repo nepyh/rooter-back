@@ -1,7 +1,7 @@
 services:
   app:
     container_name: rooter-back-app
-    build: .
+    image: 208367987268.dkr.ecr.ap-northeast-2.amazonaws.com/rooter:latest
     restart: always
     ports:
       - "${SERVICE_HOST}:${SERVICE_PORT}:8080"
@@ -11,6 +11,8 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS}
       - DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ISSUER=${JWT_ISSUER}
     depends_on:
       db:
         condition: service_healthy
@@ -25,8 +27,6 @@ services:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
       - POSTGRES_DB=${DB_NAME}
-    volumes:
-      - storage:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 10s
@@ -35,9 +35,6 @@ services:
     stop_grace_period: 1m
     networks:
       - app-network
-
-volumes:
-  storage:
 
 networks:
   app-network:

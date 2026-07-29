@@ -14,12 +14,22 @@ data class AppConfig(
 
     // cors related
     val corsAllowedHosts: List<String>,
-    val corsMaxAgeSeconds: Long
+    val corsMaxAgeSeconds: Long,
+
+    // storage related
+    val storageType: String,
+    val storageBaseDir: String?,
+    val storageBaseUrl: String?,
+    val storageBaseRoute: String?,
+
+    // jwt related
+    val jwtSecret: String,
+    val jwtIssuer: String
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
-            val envMode = EnvironmentMode.fromString(
-                config.property("ktor.deployment.environment").getString()
+            val envMode = EnvironmentMode.valueOf(
+                config.property("ktor.deployment.environment").getString().uppercase()
             )
 
             val allowedHosts = config.property("cors.allowedHosts")
@@ -43,7 +53,15 @@ data class AppConfig(
                 dbMaxPoolSize = config.property("database.dbMaxPoolSize").getString().toInt(),
 
                 corsAllowedHosts = allowedHosts,
-                corsMaxAgeSeconds = config.property("cors.maxAgeSeconds").getString().toLong()
+                corsMaxAgeSeconds = config.property("cors.maxAgeSeconds").getString().toLong(),
+
+                storageType = config.property("storage.type").getString(),
+                storageBaseDir = config.propertyOrNull("storage.baseDir")?.getString(),
+                storageBaseUrl = config.propertyOrNull("storage.baseUrl")?.getString(),
+                storageBaseRoute = config.propertyOrNull("storage.baseRoute")?.getString(),
+
+                jwtSecret = config.property("jwt.secret").getString(),
+                jwtIssuer = config.property("jwt.issuer").getString()
             )
         }
     }
