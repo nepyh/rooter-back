@@ -24,7 +24,12 @@ data class AppConfig(
 
     // jwt related
     val jwtSecret: String,
-    val jwtIssuer: String
+    val jwtIssuer: String,
+
+    // llm related (퀴즈 자동 생성용)
+    val llmBaseUrl: String,
+    val llmApiKey: String,
+    val llmModel: String
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
@@ -61,7 +66,11 @@ data class AppConfig(
                 storageBaseRoute = config.propertyOrNull("storage.baseRoute")?.getString(),
 
                 jwtSecret = config.property("jwt.secret").getString(),
-                jwtIssuer = config.property("jwt.issuer").getString()
+                jwtIssuer = config.property("jwt.issuer").getString(),
+
+                llmBaseUrl = config.property("llm.baseUrl").getString(),
+                llmApiKey = config.property("llm.apiKey").getString(),
+                llmModel = config.property("llm.model").getString()
             )
         }
     }

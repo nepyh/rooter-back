@@ -6,6 +6,7 @@ import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
+import com.github.nepyh.rooter.module.quiz.QuizModule
 import com.github.nepyh.rooter.module.storage.FileStorageModule
 import com.github.nepyh.rooter.module.swagger.SwaggerDocsModule
 import com.github.nepyh.rooter.module.user.UserModule
@@ -31,7 +32,8 @@ fun AppModule(appConfig: AppConfig): Module = module {
     // service-related modules
     includes(
         UserModule(appConfig),
-        PlanBoardModule()
+        PlanBoardModule(),
+        QuizModule(appConfig)
     )
 
     single<List<ApiRoute>> { getAll() }
