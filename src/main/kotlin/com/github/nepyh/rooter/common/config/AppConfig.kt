@@ -14,7 +14,10 @@ data class AppConfig(
 
     // cors related
     val corsAllowedHosts: List<String>,
-    val corsMaxAgeSeconds: Long
+    val corsMaxAgeSeconds: Long,
+
+    // neis (school) api
+    val neisApiKey: String
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
@@ -43,7 +46,9 @@ data class AppConfig(
                 dbMaxPoolSize = config.property("database.dbMaxPoolSize").getString().toInt(),
 
                 corsAllowedHosts = allowedHosts,
-                corsMaxAgeSeconds = config.property("cors.maxAgeSeconds").getString().toLong()
+                corsMaxAgeSeconds = config.property("cors.maxAgeSeconds").getString().toLong(),
+
+                neisApiKey = config.property("neis.apiKey").getString()
             )
         }
     }
