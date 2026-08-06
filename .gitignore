@@ -47,3 +47,4 @@ bin/
 
 .idea/
 .env
+openocode.json
