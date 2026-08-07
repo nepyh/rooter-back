@@ -10,7 +10,7 @@ object StudentProfileTable : IntIdTable("student_profiles") {
     val schoolId = char("school_id", 10)
     val grade = integer("grade")
     val classNumber = integer("class_number")
-    val studyStyle = varchar("study_style", 50).nullable()
+    // study_style 컬럼은 DDL에서 제거되고 study_style_answers 테이블로 대체됨
 }
 
 class StudentProfileRow(id: EntityID<Int>) : IntEntity(id) {
@@ -20,5 +20,4 @@ class StudentProfileRow(id: EntityID<Int>) : IntEntity(id) {
     var schoolId by StudentProfileTable.schoolId
     var grade by StudentProfileTable.grade
     var classNumber by StudentProfileTable.classNumber
-    var studyStyle by StudentProfileTable.studyStyle
 }

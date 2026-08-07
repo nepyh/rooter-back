@@ -84,8 +84,7 @@ class UserRepo {
         userId: Int,
         schoolId: String,
         grade: Int,
-        classNumber: Int,
-        studyStyle: String? = null
+        classNumber: Int
     ): StudentProfileRow {
         return transaction {
             val user = UserRow.findById(userId) ?: throw UserNotFoundException()
@@ -94,7 +93,6 @@ class UserRepo {
                 this.schoolId = schoolId
                 this.grade = grade
                 this.classNumber = classNumber
-                this.studyStyle = studyStyle
             }
         }
     }
