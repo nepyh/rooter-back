@@ -23,4 +23,5 @@ USER appuser
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "app.jar", "-config=dev.conf"]
+ENTRYPOINT ["java", "-jar", "app.jar"]
+CMD ["-config=dev.conf"]
