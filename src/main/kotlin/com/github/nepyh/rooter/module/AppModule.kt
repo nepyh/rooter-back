@@ -5,6 +5,8 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
+import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
+import com.github.nepyh.rooter.module.scheduler.SchedulerModule
 import com.github.nepyh.rooter.module.storage.FileStorageModule
 import com.github.nepyh.rooter.module.swagger.SwaggerDocsModule
 import com.github.nepyh.rooter.module.user.UserModule
@@ -25,7 +27,8 @@ fun AppModule(appConfig: AppConfig): Module = module {
     // infra-related modules
     includes(
         HealthModule(),
-        FileStorageModule(appConfig)
+        FileStorageModule(appConfig),
+        SchedulerModule()
     )
     // service-related modules
     includes(
@@ -44,4 +47,8 @@ fun Application.configureAppModule() {
             }
         }
     }
+
+    // scheduler 엔진 시작 (애플리케이션 라이프사이클과 함께 종료됨)
+    val schedulerEngine: SchedulerEngine by inject()
+    schedulerEngine.start(this)
 }
