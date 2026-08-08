@@ -69,7 +69,7 @@ fun Application.configureAppModule() {
     }
 }
 
-private suspend fun io.ktor.server.application.ApplicationCall.respondError(
+private suspend fun ApplicationCall.respondError(
     status: HttpStatusCode,
     code: String,
     message: String?
