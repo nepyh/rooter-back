@@ -9,17 +9,13 @@ import com.github.nepyh.rooter.common.database.DatabaseConfig
 import com.github.nepyh.rooter.common.database.DatabaseManager
 import com.github.nepyh.rooter.module.AppModule
 import com.github.nepyh.rooter.module.configureAppModule
-import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
-import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
-import io.ktor.server.plugins.ContentTransformationException
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
-import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
 import org.koin.ktor.ext.inject
 import org.koin.ktor.plugin.Koin
@@ -36,40 +32,6 @@ fun Application.appEntryModule() {
 
     install(ContentNegotiation) {
         json()
-    }
-
-    install(StatusPages) {
-        exception<UserNotFoundException> { call, cause ->
-            call.respond(HttpStatusCode.NotFound, mapOf("message" to cause.message))
-        }
-        exception<UserValidationException.BadCredentialsException> { call, cause ->
-            call.respond(HttpStatusCode.Unauthorized, mapOf("code" to "BAD_CREDENTIALS", "message" to cause.message))
-        }
-        exception<UserValidationException.DuplicatedEmailException> { call, cause ->
-            call.respond(HttpStatusCode.Conflict, mapOf("message" to cause.message))
-        }
-        exception<UserValidationException.WrongUsernameException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("message" to cause.message))
-        }
-        exception<UserValidationException.WrongPasswordFormatException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("message" to cause.message))
-        }
-        exception<UserValidationException.WrongEmailLengthException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "EMAIL_TOO_LONG", "message" to cause.message))
-        }
-        exception<UserValidationException.WrongSchoolIdException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_SCHOOL_ID", "message" to cause.message))
-        }
-        exception<UserValidationException.WrongDayOfWeekException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_DAY_OF_WEEK", "message" to cause.message))
-        }
-        exception<ContentTransformationException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("message" to "요청 형식이 올바르지 않습니다."))
-        }
-        exception<Throwable> { call, cause ->
-            call.application.log.error("Unhandled exception", cause)
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-        }
     }
 
     install(CORS) {
