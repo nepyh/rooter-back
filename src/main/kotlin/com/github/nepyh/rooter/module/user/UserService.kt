@@ -11,6 +11,7 @@ import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
+import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import io.ktor.http.content.PartData
 import org.mindrot.jbcrypt.BCrypt
 import java.time.LocalTime
@@ -134,9 +135,15 @@ class UserService(
     fun addUnavailableTime(userId: Int, request: UnavailableTimeRequest): UnavailableTimeResponse {
         userRepo.findUserById(userId) ?: throw UserNotFoundException()
 
+        val dayOfWeek = try {
+            DayOfWeek.fromCode(request.dayOfWeek)
+        } catch (_: IllegalArgumentException) {
+            throw UserValidationException.WrongDayOfWeekException()
+        }
+
         val row = userRepo.insertUnavailableTime(
             userId = userId,
-            dayOfWeek = request.dayOfWeek,
+            dayOfWeek = dayOfWeek,
             startTime = LocalTime.parse(request.startTime),
             endTime = LocalTime.parse(request.endTime)
         )
