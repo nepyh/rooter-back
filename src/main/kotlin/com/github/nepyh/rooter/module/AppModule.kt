@@ -6,6 +6,8 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
+import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
+import com.github.nepyh.rooter.module.scheduler.SchedulerModule
 import com.github.nepyh.rooter.module.storage.FileStorageModule
 import com.github.nepyh.rooter.module.swagger.SwaggerDocsModule
 import com.github.nepyh.rooter.module.user.UserModule
@@ -32,7 +34,8 @@ fun AppModule(appConfig: AppConfig): Module = module {
     // infra-related modules
     includes(
         HealthModule(),
-        FileStorageModule(appConfig)
+        FileStorageModule(appConfig),
+        SchedulerModule()
     )
     // service-related modules
     includes(
@@ -51,7 +54,7 @@ fun Application.configureAppModule() {
             }
         }
     }
-
+    
     install(StatusPages) {
         exception<UserNotFoundException> { call, cause ->
             call.respondError(HttpStatusCode.NotFound, "USER_NOT_FOUND", cause.message)
@@ -67,6 +70,9 @@ fun Application.configureAppModule() {
             call.respondError(HttpStatusCode.InternalServerError, "INTERNAL_SERVER_ERROR", "서버 오류가 발생했습니다.")
         }
     }
+    
+    val schedulerEngine: SchedulerEngine by inject()
+    schedulerEngine.start(this)
 }
 
 private suspend fun ApplicationCall.respondError(
