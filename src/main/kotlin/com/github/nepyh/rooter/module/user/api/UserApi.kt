@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.user.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
@@ -47,10 +48,10 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 }
             }
             HttpStatusCode.BadRequest {
-                description = "사용할 수 없는 사용자 이름 (12자 초과), 비밀번호 형식 오류, 또는 이메일 320자 초과 (code=EMAIL_TOO_LONG)"
+                description = "사용할 수 없는 사용자 이름 (12자 초과, code=INVALID_USERNAME), 비밀번호 형식 오류 (code=INVALID_PASSWORD_FORMAT), 또는 이메일 320자 초과 (code=EMAIL_TOO_LONG)"
             }
             HttpStatusCode.Conflict {
-                description = "이미 사용 중인 이메일"
+                description = "이미 사용 중인 이메일 (code=DUPLICATED_EMAIL)"
             }
             HttpStatusCode.InternalServerError {
                 description = "서버 오류"
@@ -61,10 +62,10 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
     authenticate("auth-jwt") {
         get("{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
             if (principalUserId != id) {
-                return@get call.respond(HttpStatusCode.Forbidden, mapOf("message" to "본인 정보만 조회할 수 있습니다."))
+                return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 조회할 수 있습니다."))
             }
             val response = userService.getUserInfo(id)
             call.respond(HttpStatusCode.OK, response)
@@ -106,10 +107,10 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
 
         put("{id}/avatar") {
             val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@put call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
             if (principalUserId != id) {
-                return@put call.respond(HttpStatusCode.Forbidden, mapOf("message" to "본인 정보만 수정할 수 있습니다."))
+                return@put call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 수정할 수 있습니다."))
             }
 
             val fileItem: PartData.FileItem = call
@@ -121,7 +122,7 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                         part is PartData.FileItem -> part
                         else -> { part.dispose(); null }
                     }
-            } ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("message" to "이미지 파일이 필요합니다."))
+            } ?: return@put call.respond(HttpStatusCode.BadRequest, ErrorResponse("IMAGE_REQUIRED", "이미지 파일이 필요합니다."))
 
             val response = userService.updateAvatar(id, fileItem)
             fileItem.dispose()
@@ -167,10 +168,10 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
 
         get("{id}/unavailable-times") {
             val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
             if (principalUserId != id) {
-                return@get call.respond(HttpStatusCode.Forbidden, mapOf("message" to "본인 정보만 조회할 수 있습니다."))
+                return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 조회할 수 있습니다."))
             }
             val response = userService.getUnavailableTimes(id)
             call.respond(HttpStatusCode.OK, response)
@@ -212,10 +213,10 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
 
         post("{id}/unavailable-times") {
             val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
             if (principalUserId != id) {
-                return@post call.respond(HttpStatusCode.Forbidden, mapOf("message" to "본인 정보만 등록할 수 있습니다."))
+                return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 등록할 수 있습니다."))
             }
             val request = call.receive<UnavailableTimeRequest>()
             val response = userService.addUnavailableTime(id, request)
@@ -263,10 +264,10 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
 
         post("{id}/profile") {
             val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
             if (principalUserId != id) {
-                return@post call.respond(HttpStatusCode.Forbidden, mapOf("message" to "본인 정보만 등록할 수 있습니다."))
+                return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 등록할 수 있습니다."))
             }
             val request = call.receive<StudentProfileRequest>()
             val response = userService.createStudentProfile(id, request)

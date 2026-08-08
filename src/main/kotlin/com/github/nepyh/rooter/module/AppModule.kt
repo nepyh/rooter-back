@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.example.ExampleModule
@@ -53,35 +54,25 @@ fun Application.configureAppModule() {
 
     install(StatusPages) {
         exception<UserNotFoundException> { call, cause ->
-            call.respond(HttpStatusCode.NotFound, mapOf("message" to cause.message))
+            call.respondError(HttpStatusCode.NotFound, "USER_NOT_FOUND", cause.message)
         }
-        exception<UserValidationException.BadCredentialsException> { call, cause ->
-            call.respond(HttpStatusCode.Unauthorized, mapOf("code" to "BAD_CREDENTIALS", "message" to cause.message))
+        exception<UserValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
         }
-        exception<UserValidationException.DuplicatedEmailException> { call, cause ->
-            call.respond(HttpStatusCode.Conflict, mapOf("message" to cause.message))
-        }
-        exception<UserValidationException.WrongUsernameException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("message" to cause.message))
-        }
-        exception<UserValidationException.WrongPasswordFormatException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("message" to cause.message))
-        }
-        exception<UserValidationException.WrongEmailLengthException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "EMAIL_TOO_LONG", "message" to cause.message))
-        }
-        exception<UserValidationException.WrongSchoolIdException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_SCHOOL_ID", "message" to cause.message))
-        }
-        exception<UserValidationException.WrongDayOfWeekException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "INVALID_DAY_OF_WEEK", "message" to cause.message))
-        }
-        exception<ContentTransformationException> { call, cause ->
-            call.respond(HttpStatusCode.BadRequest, mapOf("message" to "요청 형식이 올바르지 않습니다."))
+        exception<ContentTransformationException> { call, _ ->
+            call.respondError(HttpStatusCode.BadRequest, "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다.")
         }
         exception<Throwable> { call, cause ->
             call.application.log.error("Unhandled exception", cause)
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+            call.respondError(HttpStatusCode.InternalServerError, "INTERNAL_SERVER_ERROR", "서버 오류가 발생했습니다.")
         }
     }
+}
+
+private suspend fun io.ktor.server.application.ApplicationCall.respondError(
+    status: HttpStatusCode,
+    code: String,
+    message: String?
+) {
+    respond(status, ErrorResponse(code, message ?: "알 수 없는 오류입니다."))
 }
