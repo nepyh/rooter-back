@@ -13,7 +13,7 @@ import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
-import io.ktor.server.plugins.ContentTransformationException
+import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 import io.ktor.server.routing.*
@@ -59,7 +59,7 @@ fun Application.configureAppModule() {
         exception<UserValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
-        exception<ContentTransformationException> { call, _ ->
+        exception<BadRequestException> { call, _ ->
             call.respondError(HttpStatusCode.BadRequest, "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다.")
         }
         exception<Throwable> { call, cause ->
