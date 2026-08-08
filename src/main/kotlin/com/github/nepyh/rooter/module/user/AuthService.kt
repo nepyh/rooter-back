@@ -5,7 +5,6 @@ import com.auth0.jwt.algorithms.Algorithm
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginResponse
 import com.github.nepyh.rooter.module.user.dto.UserLogoutResponse
-import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import org.mindrot.jbcrypt.BCrypt
 import java.time.Instant
@@ -22,13 +21,12 @@ class AuthService(
     }
 
     fun login(request: UserLoginRequest): UserLoginResponse {
-        // 유저 조회
+        // 유저 조회 + 비밀번호 검증 (실패 시 동일 예외로 통합: 계정 존재 여부 노출 방지)
         val user = userRepo.findUserByEmail(request.email)
-            ?: throw UserNotFoundException()
+            ?: throw UserValidationException.BadCredentialsException()
 
-        // 비밀번호 검증
         if (!BCrypt.checkpw(request.password, user.password)) {
-            throw UserValidationException.WrongPasswordException()
+            throw UserValidationException.BadCredentialsException()
         }
 
         // JWT 토큰 발급
