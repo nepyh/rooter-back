@@ -1,7 +1,7 @@
 services:
   app:
     container_name: rooter-back-dev-app
-    image: 208367987268.dkr.ecr.ap-northeast-2.amazonaws.com/rooter:latest
+    build: .
     restart: always
     ports:
       - "8080:8080"
