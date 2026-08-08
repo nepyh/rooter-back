@@ -8,6 +8,8 @@ import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
 import com.github.nepyh.rooter.module.scheduler.SchedulerModule
+import com.github.nepyh.rooter.module.school.SchoolModule
+import com.github.nepyh.rooter.module.school.exception.NiceApiException
 import com.github.nepyh.rooter.module.storage.FileStorageModule
 import com.github.nepyh.rooter.module.swagger.SwaggerDocsModule
 import com.github.nepyh.rooter.module.user.UserModule
@@ -35,7 +37,8 @@ fun AppModule(appConfig: AppConfig): Module = module {
     includes(
         HealthModule(),
         FileStorageModule(appConfig),
-        SchedulerModule()
+        SchedulerModule(),
+        SchoolModule(appConfig)
     )
     // service-related modules
     includes(
@@ -60,6 +63,9 @@ fun Application.configureAppModule() {
             call.respondError(HttpStatusCode.NotFound, "USER_NOT_FOUND", cause.message)
         }
         exception<UserValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<NiceApiException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<BadRequestException> { call, _ ->
