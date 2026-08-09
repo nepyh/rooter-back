@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.school.dto
 
 import com.github.nepyh.rooter.module.school.exception.NiceApiException
+import com.github.nepyh.rooter.module.school.model.SchoolKind
 import kotlinx.serialization.Serializable
 
 /**
@@ -15,7 +16,7 @@ data class School(
     val officeName: String,
     val schoolCode: String,
     val name: String,
-    val kind: String,
+    val kind: SchoolKind,
     val region: String,
     val foundation: String?
 ) {
@@ -31,7 +32,7 @@ data class School(
             officeName: String,
             schoolCode: String,
             name: String,
-            kind: String,
+            kind: SchoolKind,
             region: String,
             foundation: String?
         ): School = School(

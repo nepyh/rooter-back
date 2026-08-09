@@ -5,6 +5,9 @@ import com.github.nepyh.rooter.module.school.dto.SchoolEvent
 import com.github.nepyh.rooter.module.school.dto.TimetableEntry
 import com.github.nepyh.rooter.module.school.exception.NiceApiException
 import com.github.nepyh.rooter.module.school.model.SchoolKind
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 /**
  * 학교 데이터 fetcher.
@@ -35,7 +38,8 @@ class SchoolDataFetcher(
                 officeName = row.officeName,
                 schoolCode = row.schoolCode,
                 name = row.name,
-                kind = row.kind,
+                // NICE 가 예상 밖 종류(특수학교 등) 를 주면 요청한 필터 값으로 대체
+                kind = SchoolKind.entries.firstOrNull { it.code == row.kind } ?: kind,
                 region = row.region,
                 foundation = row.foundation
             )
@@ -65,7 +69,7 @@ class SchoolDataFetcher(
         }
         return niceClient.getRows("misTimetable", params, TimetableRow.serializer()).map { row ->
             TimetableEntry(
-                date = row.date,
+                date = parseNiceDate(row.date, "ALL_TI_YMD"),
                 period = row.period.toIntOrNull() ?: 0,
                 subject = row.subject,
                 className = row.className
@@ -103,7 +107,16 @@ class SchoolDataFetcher(
             date?.let { put("AA_YMD", it) }
         }
         return niceClient.getRows("SchoolSchedule", params, SchoolEventRow.serializer()).map { row ->
-            SchoolEvent(date = row.date, name = row.name)
+            SchoolEvent(date = parseNiceDate(row.date, "AA_YMD"), name = row.name)
+        }
+    }
+
+    /** NICE 날짜(YYYYMMDD) 를 LocalDate 로 파싱한다. 형식 오류는 조용히 넘기지 않고 예외로 드러낸다. */
+    private fun parseNiceDate(raw: String, field: String): LocalDate {
+        return try {
+            LocalDate.parse(raw, DateTimeFormatter.BASIC_ISO_DATE)
+        } catch (e: DateTimeParseException) {
+            throw NiceApiException.UnexpectedResponseException("NICE 응답의 날짜 형식이 올바르지 않습니다 ($field): $raw")
         }
     }
 }
