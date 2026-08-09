@@ -1,7 +1,6 @@
-package com.github.nepyh.rooter.module.school.dto
+package com.github.nepyh.rooter.module.school.model
 
 import com.github.nepyh.rooter.module.school.exception.NiceApiException
-import com.github.nepyh.rooter.module.school.model.SchoolKind
 import kotlinx.serialization.Serializable
 
 /**

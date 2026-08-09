@@ -1,4 +1,4 @@
-package com.github.nepyh.rooter.module.school.dto
+package com.github.nepyh.rooter.module.school.model
 
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.PrimitiveKind

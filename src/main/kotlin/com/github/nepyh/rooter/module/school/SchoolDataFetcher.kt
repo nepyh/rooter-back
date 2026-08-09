@@ -1,8 +1,8 @@
 package com.github.nepyh.rooter.module.school
 
-import com.github.nepyh.rooter.module.school.dto.School
-import com.github.nepyh.rooter.module.school.dto.SchoolEvent
-import com.github.nepyh.rooter.module.school.dto.TimetableEntry
+import com.github.nepyh.rooter.module.school.model.School
+import com.github.nepyh.rooter.module.school.model.SchoolEvent
+import com.github.nepyh.rooter.module.school.model.TimetableEntry
 import com.github.nepyh.rooter.module.school.exception.NiceApiException
 import com.github.nepyh.rooter.module.school.model.SchoolKind
 import java.time.LocalDate
