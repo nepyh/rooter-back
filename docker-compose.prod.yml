@@ -14,6 +14,7 @@ services:
       - DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ISSUER=${JWT_ISSUER}
+      - NICE_API_KEY=${NICE_API_KEY}
     depends_on:
       db:
         condition: service_healthy
