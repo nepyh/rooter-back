@@ -1,5 +1,3 @@
-package com.github.nepyh.rooter
-
 import com.github.nepyh.rooter.module.scheduler.model.SchedulePeriod
 import com.github.nepyh.rooter.module.scheduler.model.ScheduleSpec
 import io.kotest.assertions.throwables.shouldThrow
@@ -9,6 +7,7 @@ import java.time.DayOfWeek
 import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+
 
 class ScheduleSpecTest : StringSpec({
 
