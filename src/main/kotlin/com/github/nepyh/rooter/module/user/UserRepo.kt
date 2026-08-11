@@ -55,6 +55,25 @@ class UserRepo {
         }
     }
 
+    fun updateProfile(userId: Int, username: String?, bio: String?): UserRow {
+        return transaction {
+            val user = UserRow.findById(userId)
+                ?: throw UserNotFoundException()
+            username?.let { user.username = it }
+            bio?.let { user.bio = it }
+            user
+        }
+    }
+
+    fun updatePassword(userId: Int, hashedPassword: String): UserRow {
+        return transaction {
+            val user = UserRow.findById(userId)
+                ?: throw UserNotFoundException()
+            user.password = hashedPassword
+            user
+        }
+    }
+
     fun incrementTokenVersion(userId: Int): UserRow {
         return transaction {
             val user = UserRow.findById(userId)
