@@ -6,7 +6,11 @@ import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeResponse
+import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
+import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
+import com.github.nepyh.rooter.module.user.dto.UpdateProfileRequest
 import com.github.nepyh.rooter.module.user.dto.UserInfoResponse
+import com.github.nepyh.rooter.module.user.dto.UserProfileUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
@@ -77,8 +81,52 @@ class UserService(
             grade = profile.grade,
             classNumber = profile.classNumber,
             createdAt = user.createdAt.toString(),
-            avatarImageKey = user.avatarImageKey
+            avatarImageKey = user.avatarImageKey,
+            bio = user.bio
         )
+    }
+
+    fun updateProfile(userId: Int, request: UpdateProfileRequest): UserProfileUpdateResponse {
+        request.username?.let {
+            if (it.isBlank() || it.length > 12) {
+                throw UserValidationException.WrongUsernameException()
+            }
+        }
+        request.bio?.let {
+            if (it.length > 500) {
+                throw UserValidationException.WrongBioLengthException()
+            }
+        }
+
+        val row = userRepo.updateProfile(
+            userId = userId,
+            username = request.username,
+            bio = request.bio
+        )
+
+        return UserProfileUpdateResponse(
+            id = row.id.value,
+            username = row.username,
+            bio = row.bio
+        )
+    }
+
+    fun changePassword(userId: Int, request: ChangePasswordRequest): PasswordUpdateResponse {
+        val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        if (!BCrypt.checkpw(request.currentPassword, user.password)) {
+            throw UserValidationException.WrongCurrentPasswordException()
+        }
+
+        val passwordRegex = Regex("^(?=.*[A-Za-z])(?=.*\\d).{8,}$")
+        if (!passwordRegex.matches(request.newPassword)) {
+            throw UserValidationException.WrongPasswordFormatException()
+        }
+
+        val hashedPassword = BCrypt.hashpw(request.newPassword, BCrypt.gensalt())
+        userRepo.updatePassword(userId, hashedPassword)
+
+        return PasswordUpdateResponse(message = "비밀번호가 변경되었습니다.")
     }
 
     fun getUnavailableTimes(id: Int): List<UnavailableTimeResponse> {

@@ -4,11 +4,15 @@ import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
+import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
+import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeResponse
+import com.github.nepyh.rooter.module.user.dto.UpdateProfileRequest
 import com.github.nepyh.rooter.module.user.dto.UserInfoResponse
+import com.github.nepyh.rooter.module.user.dto.UserProfileUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
 import io.ktor.http.*
@@ -92,6 +96,108 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 정보가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        patch("{id}") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@patch call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 수정할 수 있습니다."))
+            }
+            val request = call.receive<UpdateProfileRequest>()
+            val response = userService.updateProfile(id, request)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("User")
+            summary = "이름/소개 수정"
+            description = "username, bio 중 전달된 필드만 수정. 본인 정보만 수정 가능"
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<UpdateProfileRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "수정 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<UserProfileUpdateResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID, username 12자 초과 (code=INVALID_USERNAME), 또는 bio 500자 초과 (code=BIO_TOO_LONG)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 정보가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        put("{id}/password") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@put call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@put call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 수정할 수 있습니다."))
+            }
+            val request = call.receive<ChangePasswordRequest>()
+            val response = userService.changePassword(id, request)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("User")
+            summary = "비밀번호 변경"
+            description = "현재 비밀번호 확인 후 새 비밀번호로 변경. 본인 정보만 변경 가능"
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<ChangePasswordRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "변경 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<PasswordUpdateResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID, 또는 새 비밀번호 형식이 올바르지 않음 (code=INVALID_PASSWORD_FORMAT)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음, 또는 현재 비밀번호 불일치 (code=WRONG_CURRENT_PASSWORD)"
                 }
                 HttpStatusCode.Forbidden {
                     description = "본인 정보가 아님"

@@ -42,4 +42,14 @@ sealed class UserValidationException(
         "INVALID_DAY_OF_WEEK",
         "요일 값은 1~7 사이여야 합니다."
     )
+    class WrongBioLengthException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "BIO_TOO_LONG",
+        "소개는 500자를 초과할 수 없습니다."
+    )
+    class WrongCurrentPasswordException : UserValidationException(
+        HttpStatusCode.Unauthorized,
+        "WRONG_CURRENT_PASSWORD",
+        "현재 비밀번호가 일치하지 않습니다."
+    )
 }
