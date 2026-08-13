@@ -3,6 +3,7 @@ package com.github.nepyh.rooter.module.planboard
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.planboard.model.DailyPlans
@@ -41,11 +42,15 @@ class PlanTaskService {
             DailyPlanResponse(planDate = date.toString(), tasks = tasks)
         }
 
-    suspend fun createTask(request: PlanTaskCreateRequest) = newSuspendedTransaction {
+    suspend fun createTask(userId: Int, request: PlanTaskCreateRequest) = newSuspendedTransaction {
         val board = PlanBoards.selectAll()
             .where { PlanBoards.id eq request.planBoardId }
             .firstOrNull()
             ?: throw PlanBoardNotFoundException()
+
+        if (board[PlanBoards.userId] != userId) {
+            throw PlanBoardForbiddenException()
+        }
 
         if (request.taskName.isBlank() || request.taskName.length > 150) {
             throw PlanTaskValidationException.InvalidTaskNameException()

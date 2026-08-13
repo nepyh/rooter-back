@@ -2,7 +2,10 @@ package com.github.nepyh.rooter.module.planboard
 
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.model.DailyPlans
+import com.github.nepyh.rooter.module.planboard.model.PlanBoards
 import com.github.nepyh.rooter.module.planboard.model.PlanTasks
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -12,7 +15,17 @@ import java.time.LocalDate
 
 class DailyPlanService {
 
-    suspend fun getDailyPlan(boardId: Int, targetDate: LocalDate): DailyPlanResponse = newSuspendedTransaction {
+    suspend fun getDailyPlan(userId: Int, boardId: Int, targetDate: LocalDate): DailyPlanResponse = newSuspendedTransaction {
+        // 0. 플랜보드 존재 + 소유권 확인
+        val board = PlanBoards.selectAll()
+            .where { PlanBoards.id eq boardId }
+            .firstOrNull()
+            ?: throw PlanBoardNotFoundException()
+
+        if (board[PlanBoards.userId] != userId) {
+            throw PlanBoardForbiddenException()
+        }
+
         // 1. boardId + date 로 해당 daily_plan 찾기
         val dailyPlan = DailyPlans.selectAll()
             .where { (DailyPlans.planBoardId eq boardId) and (DailyPlans.planDate eq targetDate) }

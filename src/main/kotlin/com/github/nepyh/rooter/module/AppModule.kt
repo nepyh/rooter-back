@@ -8,6 +8,7 @@ import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
@@ -81,6 +82,9 @@ fun Application.configureAppModule() {
         }
         exception<PlanBoardValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<PlanBoardForbiddenException> { call, cause ->
+            call.respondError(HttpStatusCode.Forbidden, "FORBIDDEN", cause.message)
         }
         exception<PlanTaskValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
