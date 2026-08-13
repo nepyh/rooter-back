@@ -1,0 +1,58 @@
+package com.github.nepyh.rooter.module.planboard.api
+
+import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.module.planboard.DailyPlanService
+import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
+import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
+import io.ktor.openapi.jsonSchema
+import io.ktor.server.response.respond
+import io.ktor.server.routing.get
+import io.ktor.server.routing.openapi.describe
+import io.ktor.utils.io.ExperimentalKtorApi
+import java.time.LocalDate
+
+@OptIn(ExperimentalKtorApi::class)
+fun DailyPlanApi(dailyPlanService: DailyPlanService) = ApiRoute("plan-boards") {
+
+    get("/{boardId}/daily") {
+        try {
+            val boardId = call.parameters["boardId"]?.toIntOrNull()
+            if (boardId == null) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("message" to "잘못된 boardId 입니다."))
+                return@get
+            }
+
+            // date 쿼리 파라미터 (없으면 오늘)
+            val dateParam = call.request.queryParameters["date"]
+            val date = try {
+                if (dateParam != null) LocalDate.parse(dateParam) else LocalDate.now()
+            } catch (_: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("message" to "날짜 형식이 잘못되었습니다. (예: 2026-07-23)"))
+                return@get
+            }
+
+            val plan = dailyPlanService.getDailyPlan(boardId, date)
+            call.respond(HttpStatusCode.OK, plan)
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }.describe {
+        tag("DailyPlan")
+        summary = "오늘의 스터디 플랜 조회"
+        responses {
+            HttpStatusCode.OK {
+                description = "조회 성공 (해당 날짜 계획이 없으면 tasks 빈 배열)"
+                ContentType.Application.Json {
+                    schema = jsonSchema<DailyPlanResponse>()
+                }
+            }
+            HttpStatusCode.BadRequest {
+                description = "잘못된 boardId 또는 날짜 형식"
+            }
+            HttpStatusCode.InternalServerError {
+                description = "서버 오류"
+            }
+        }
+    }
+}
