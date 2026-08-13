@@ -6,12 +6,15 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
-import com.github.nepyh.rooter.module.planboard.model.DailyPlans
-import com.github.nepyh.rooter.module.planboard.model.PlanBoards
-import com.github.nepyh.rooter.module.planboard.model.PlanTasks
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
@@ -24,18 +27,22 @@ class PlanTaskService {
 
     suspend fun getDailyPlan(userId: Int, date: LocalDate): DailyPlanResponse =
         newSuspendedTransaction {
-            val tasks = (PlanTasks innerJoin DailyPlans innerJoin PlanBoards)
+            val user = UserRow.findById(userId)
+                ?: return@newSuspendedTransaction DailyPlanResponse(planDate = date.toString(), tasks = emptyList())
+
+            val tasks = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
                 .selectAll()
-                .where { (DailyPlans.planDate eq date) and (PlanBoards.userId eq userId) }
-                .orderBy(PlanTasks.startTime)
+                .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq user.id) }
+                .orderBy(PlanTaskTable.startTime)
+                .map { PlanTaskRow.wrapRow(it) }
                 .map {
                     PlanTaskResponse(
-                        id = it[PlanTasks.id],
-                        taskName = it[PlanTasks.taskName],
-                        startTime = it[PlanTasks.startTime].format(timeFormat),
-                        endTime = it[PlanTasks.endTime].format(timeFormat),
-                        estimatedMinutes = it[PlanTasks.estimatedMinutes],
-                        isCompleted = it[PlanTasks.isCompleted]
+                        id = it.id.value,
+                        taskName = it.taskName,
+                        startTime = it.startTime.format(timeFormat),
+                        endTime = it.endTime.format(timeFormat),
+                        estimatedMinutes = it.estimatedMinutes,
+                        isCompleted = it.isCompleted
                     )
                 }
 
@@ -43,12 +50,10 @@ class PlanTaskService {
         }
 
     suspend fun createTask(userId: Int, request: PlanTaskCreateRequest) = newSuspendedTransaction {
-        val board = PlanBoards.selectAll()
-            .where { PlanBoards.id eq request.planBoardId }
-            .firstOrNull()
+        val board = PlanBoardRow.findById(request.planBoardId)
             ?: throw PlanBoardNotFoundException()
 
-        if (board[PlanBoards.userId] != userId) {
+        if (board.user.id.value != userId) {
             throw PlanBoardForbiddenException()
         }
 
@@ -68,26 +73,24 @@ class PlanTaskService {
             throw PlanTaskValidationException.InvalidEstimatedMinutesException()
         }
 
-        if (date.isBefore(board[PlanBoards.startDate]) || date.isAfter(board[PlanBoards.endDate])) {
+        if (date.isBefore(board.startDate) || date.isAfter(board.endDate)) {
             throw PlanTaskValidationException.PlanDateOutOfRangeException()
         }
 
-        val dailyPlanId = DailyPlans.selectAll()
-            .where {
-                (DailyPlans.planBoardId eq request.planBoardId) and (DailyPlans.planDate eq date)
+        val dailyPlan = DailyPlanRow.find {
+            (DailyPlanTable.planBoardId eq board.id) and (DailyPlanTable.planDate eq date)
+        }.firstOrNull()
+            ?: DailyPlanRow.new {
+                planBoard = board
+                planDate = date
             }
-            .firstOrNull()?.get(DailyPlans.id)
-            ?: DailyPlans.insert {
-                it[planBoardId] = request.planBoardId
-                it[planDate] = date
-            } get DailyPlans.id
 
-        PlanTasks.insert {
-            it[this.dailyPlanId] = dailyPlanId
-            it[taskName] = request.taskName
-            it[this.startTime] = startTime
-            it[this.endTime] = endTime
-            it[estimatedMinutes] = request.estimatedMinutes
+        PlanTaskRow.new {
+            this.dailyPlan = dailyPlan
+            taskName = request.taskName
+            this.startTime = startTime
+            this.endTime = endTime
+            estimatedMinutes = request.estimatedMinutes
         }
     }
 }

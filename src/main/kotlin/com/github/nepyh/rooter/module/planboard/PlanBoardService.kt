@@ -3,24 +3,27 @@ package com.github.nepyh.rooter.module.planboard
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
-import com.github.nepyh.rooter.module.planboard.model.PlanBoards
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.insert
-import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
 class PlanBoardService {
     suspend fun getAllBoards(userId: Int): List<PlanBoardResponse> = newSuspendedTransaction {
-        PlanBoards.selectAll()
-            .where { PlanBoards.userId eq userId }
+        val user = UserRow.findById(userId)
+            ?: return@newSuspendedTransaction emptyList()
+
+        PlanBoardRow.find { PlanBoardTable.userId eq user.id }
             .map {
                 PlanBoardResponse(
-                    id = it[PlanBoards.id],
-                    title = it[PlanBoards.title],
-                    content = "시작: ${it[PlanBoards.startDate]}, 종료: ${it[PlanBoards.endDate]}", // DTO 호환용 임시 처리
-                    createdAt = it[PlanBoards.createdAt].format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                    id = it.id.value,
+                    title = it.title,
+                    content = "시작: ${it.startDate}, 종료: ${it.endDate}", // DTO 호환용 임시 처리
+                    createdAt = it.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
                 )
             }
     }
@@ -40,12 +43,13 @@ class PlanBoardService {
         }
 
         return newSuspendedTransaction {
-            PlanBoards.insert {
-                it[this.userId] = userId
-                it[title] = request.title
-                it[this.startDate] = startDate
-                it[this.endDate] = endDate
-            } get PlanBoards.id
+            PlanBoardRow.new {
+                user = UserRow[userId]
+                title = request.title
+                this.startDate = startDate
+                this.endDate = endDate
+                createdAt = OffsetDateTime.now()
+            }.id.value
         }
     }
 }
