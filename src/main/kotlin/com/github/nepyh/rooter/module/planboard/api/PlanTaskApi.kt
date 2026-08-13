@@ -4,7 +4,7 @@ import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
-import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -20,23 +20,17 @@ import java.time.LocalDate
 @OptIn(ExperimentalKtorApi::class)
 fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
     get("") {
-        try {
-            val dateParam = call.request.queryParameters["date"]
-            val date = if (dateParam != null) {
-                runCatching { LocalDate.parse(dateParam) }
-                    .getOrElse { throw PlanTaskValidationException.InvalidDateParamException() }
-            } else {
-                LocalDate.now()
-            }
-
-            val userId = 1 // 💡 로그인 연동 전 임시 유저
-            val dailyPlan = planTaskService.getDailyPlan(userId, date)
-            call.respond(HttpStatusCode.OK, dailyPlan)
-        } catch (e: PlanTaskValidationException.InvalidDateParamException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "TASK_006", "message" to e.message))
-        } catch (_: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        val dateParam = call.request.queryParameters["date"]
+        val date = if (dateParam != null) {
+            runCatching { LocalDate.parse(dateParam) }
+                .getOrElse { throw PlanTaskValidationException.InvalidDateParamException() }
+        } else {
+            LocalDate.now()
         }
+
+        val userId = 1 // 💡 로그인 연동 전 임시 유저
+        val dailyPlan = planTaskService.getDailyPlan(userId, date)
+        call.respond(HttpStatusCode.OK, dailyPlan)
     }.describe {
         tag("PlanTask")
         summary = "일일 태스크 목록 조회"
@@ -65,25 +59,9 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
     }
 
     post("") {
-        try {
-            val request = call.receive<PlanTaskCreateRequest>()
-            planTaskService.createTask(request)
-            call.respond(HttpStatusCode.Created, mapOf("message" to "성공적으로 등록되었습니다."))
-        } catch (e: PlanBoardNotFoundException) {
-            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-        } catch (e: PlanTaskValidationException.InvalidTaskNameException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "TASK_001", "message" to e.message))
-        } catch (e: PlanTaskValidationException.InvalidPlanDateException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "TASK_002", "message" to e.message))
-        } catch (e: PlanTaskValidationException.InvalidTimeFormatException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "TASK_003", "message" to e.message))
-        } catch (e: PlanTaskValidationException.InvalidEstimatedMinutesException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "TASK_004", "message" to e.message))
-        } catch (e: PlanTaskValidationException.PlanDateOutOfRangeException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "TASK_005", "message" to e.message))
-        } catch (_: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-        }
+        val request = call.receive<PlanTaskCreateRequest>()
+        planTaskService.createTask(request)
+        call.respond(HttpStatusCode.Created, PlanTaskCreateResponse("성공적으로 등록되었습니다."))
     }.describe {
         tag("PlanTask")
         summary = "태스크 생성"

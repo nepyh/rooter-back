@@ -7,6 +7,9 @@ import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
+import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
 import com.github.nepyh.rooter.module.scheduler.SchedulerModule
 import com.github.nepyh.rooter.module.school.SchoolModule
@@ -71,6 +74,15 @@ fun Application.configureAppModule() {
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<NiceApiException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<PlanBoardNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "PLAN_BOARD_NOT_FOUND", cause.message)
+        }
+        exception<PlanBoardValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<PlanTaskValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<BadRequestException> { call, _ ->

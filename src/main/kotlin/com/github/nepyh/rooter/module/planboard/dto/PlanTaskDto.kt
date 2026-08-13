@@ -27,3 +27,8 @@ data class PlanTaskCreateRequest(
     val endTime: String,
     val estimatedMinutes: Int
 )
+
+@Serializable
+data class PlanTaskCreateResponse(
+    val message: String
+)
