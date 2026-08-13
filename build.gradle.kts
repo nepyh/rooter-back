@@ -20,20 +20,27 @@ repositories {
 }
 
 dependencies {
-    testImplementation(kotlin("test"))
-
-    // logging, structure, ktor
+    // logging
     implementation("ch.qos.logback:logback-classic:1.5.32")
 
+    // koin
     implementation("io.insert-koin:koin-ktor:$koinVersion")
     implementation("io.insert-koin:koin-logger-slf4j:$koinVersion")
 
+    // ktor
+    // TODO 의존성이 증식하고 있음. 조만간 gradle 버전 카탈로그로 바꾸는게 나을지도
     implementation("io.ktor:ktor-server-cors:$ktorVersion")
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
     implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
     implementation("io.ktor:ktor-server-swagger:$ktorVersion")
+    implementation("io.ktor:ktor-server-status-pages:$ktorVersion")
+    implementation("io.ktor:ktor-client-core:$ktorVersion")
+    implementation("io.ktor:ktor-client-cio:$ktorVersion")
+    implementation("io.ktor:ktor-server-auth:$ktorVersion")
+    implementation("io.ktor:ktor-server-auth-jwt:$ktorVersion")
 
     // database, orm
     implementation("com.zaxxer:HikariCP:5.1.0")
@@ -42,10 +49,23 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-dao:${exposedVersion}")
     implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
     implementation("org.jetbrains.exposed:exposed-java-time:${exposedVersion}")
-    // exposed jdbc driver using different version name
-    implementation("org.jetbrains.exposed:exposed-jdbc:${exposedVersion}")
 
     implementation("org.postgresql:postgresql:42.7.2")
+
+    implementation("org.mindrot:jbcrypt:0.4")
+
+    //jwt
+    implementation("com.auth0:java-jwt:4.4.0")
+
+    // test dependencies
+    testImplementation("io.kotest:kotest-runner-junit5:6.2.0")
+    testImplementation("io.kotest:kotest-assertions-core:6.2.0")
+    testImplementation("io.kotest:kotest-property:6.2.0")
+    testImplementation("io.ktor:ktor-client-mock:$ktorVersion")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 kotlin {
@@ -85,8 +105,4 @@ tasks.withType<ShadowJar> {
 //    configurations = listOf(project.configurations.runtimeClasspath.get())
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     mergeServiceFiles()
-}
-
-tasks.test {
-    useJUnitPlatform()
 }
