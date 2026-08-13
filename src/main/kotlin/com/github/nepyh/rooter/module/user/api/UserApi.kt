@@ -6,6 +6,7 @@ import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
 import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
+import com.github.nepyh.rooter.module.user.dto.StreakResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
@@ -15,6 +16,7 @@ import com.github.nepyh.rooter.module.user.dto.UserInfoResponse
 import com.github.nepyh.rooter.module.user.dto.UserProfileUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
+import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.openapi.jsonSchema
@@ -28,6 +30,7 @@ import io.ktor.server.routing.*
 import io.ktor.server.routing.openapi.describe
 import io.ktor.utils.io.ExperimentalKtorApi
 import kotlinx.coroutines.flow.fold
+import java.time.LocalDate
 
 
 @OptIn(ExperimentalKtorApi::class)
@@ -93,6 +96,72 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 정보가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        get("{id}/streak") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 조회할 수 있습니다."))
+            }
+
+            val startParam = call.request.queryParameters["start"]
+            val endParam = call.request.queryParameters["end"]
+            if (startParam == null || endParam == null) {
+                return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("MISSING_RANGE_PARAM", "start, end 파라미터가 필요합니다."))
+            }
+            val start = runCatching { LocalDate.parse(startParam) }
+                .getOrElse { throw UserValidationException.WrongDateFormatException() }
+            val end = runCatching { LocalDate.parse(endParam) }
+                .getOrElse { throw UserValidationException.WrongDateFormatException() }
+
+            val response = userService.getStreak(id, start, end)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("User")
+            summary = "잔디 심기 (기간별 학습 완료율)"
+            description = "start~end 범위의 날짜별 태스크 완료율을 반환. 본인 정보만 조회 가능. 마이페이지 잔디 그리드용"
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+                query("start") {
+                    description = "조회 시작일 (yyyy-MM-dd)"
+                    required = true
+                    schema = jsonSchema<String>()
+                }
+                query("end") {
+                    description = "조회 종료일 (yyyy-MM-dd)"
+                    required = true
+                    schema = jsonSchema<String>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "조회 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<StreakResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID, start/end 누락 (code=MISSING_RANGE_PARAM), 날짜 형식 오류 (code=INVALID_DATE_FORMAT), 또는 start 가 end 보다 늦음 (code=INVALID_DATE_RANGE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
