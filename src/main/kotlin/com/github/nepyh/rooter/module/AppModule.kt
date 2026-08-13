@@ -5,6 +5,8 @@ import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.calendar.CalendarModule
+import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundException
+import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
@@ -71,6 +73,12 @@ fun Application.configureAppModule() {
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<NiceApiException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<CalendarEventNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "CALENDAR_EVENT_NOT_FOUND", cause.message)
+        }
+        exception<CalendarValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<BadRequestException> { call, _ ->

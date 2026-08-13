@@ -1,12 +1,12 @@
 package com.github.nepyh.rooter.module.calendar.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.calendar.CalendarService
 import com.github.nepyh.rooter.module.calendar.dto.CalendarEventCreateRequest
 import com.github.nepyh.rooter.module.calendar.dto.CalendarEventResponse
 import com.github.nepyh.rooter.module.calendar.dto.CalendarRangeResponse
 import com.github.nepyh.rooter.module.calendar.dto.DailyCompletionResponse
-import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundException
 import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -23,29 +23,19 @@ import java.time.LocalDate
 @OptIn(ExperimentalKtorApi::class)
 fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
     get("") {
-        try {
-            val startParam = call.request.queryParameters["start"]
-            val endParam = call.request.queryParameters["end"]
-            if (startParam == null || endParam == null) {
-                throw CalendarValidationException.MissingRangeParamException()
-            }
-            val start = runCatching { LocalDate.parse(startParam) }
-                .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
-            val end = runCatching { LocalDate.parse(endParam) }
-                .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
-
-            val userId = 1 // 💡 로그인 연동 전 임시 유저
-            val response = calendarService.getRange(userId, start, end)
-            call.respond(HttpStatusCode.OK, response)
-        } catch (e: CalendarValidationException.MissingRangeParamException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "CALENDAR_001", "message" to e.message))
-        } catch (e: CalendarValidationException.InvalidDateFormatException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "CALENDAR_002", "message" to e.message))
-        } catch (e: CalendarValidationException.InvalidDateRangeException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "CALENDAR_003", "message" to e.message))
-        } catch (_: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        val startParam = call.request.queryParameters["start"]
+        val endParam = call.request.queryParameters["end"]
+        if (startParam == null || endParam == null) {
+            throw CalendarValidationException.MissingRangeParamException()
         }
+        val start = runCatching { LocalDate.parse(startParam) }
+            .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
+        val end = runCatching { LocalDate.parse(endParam) }
+            .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
+
+        val userId = 1 // 💡 로그인 연동 전 임시 유저
+        val response = calendarService.getRange(userId, start, end)
+        call.respond(HttpStatusCode.OK, response)
     }.describe {
         tag("Calendar")
         summary = "기간별 캘린더 조회 (일별 공부 시간 + 시험 D-Day + 개인 일정)"
@@ -79,20 +69,14 @@ fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
     }
 
     get("{date}") {
-        try {
-            val dateParam = call.parameters["date"]
-                ?: throw CalendarValidationException.InvalidDateFormatException()
-            val date = runCatching { LocalDate.parse(dateParam) }
-                .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
+        val dateParam = call.parameters["date"]
+            ?: throw CalendarValidationException.InvalidDateFormatException()
+        val date = runCatching { LocalDate.parse(dateParam) }
+            .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
 
-            val userId = 1 // 💡 로그인 연동 전 임시 유저
-            val response = calendarService.getDaySummary(userId, date)
-            call.respond(HttpStatusCode.OK, response)
-        } catch (e: CalendarValidationException.InvalidDateFormatException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "CALENDAR_002", "message" to e.message))
-        } catch (_: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-        }
+        val userId = 1 // 💡 로그인 연동 전 임시 유저
+        val response = calendarService.getDaySummary(userId, date)
+        call.respond(HttpStatusCode.OK, response)
     }.describe {
         tag("Calendar")
         summary = "특정 날짜 학습 이행 요약 조회"
@@ -121,18 +105,10 @@ fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
     }
 
     post("events") {
-        try {
-            val request = call.receive<CalendarEventCreateRequest>()
-            val userId = 1 // 💡 로그인 연동 전 임시 유저
-            val response = calendarService.createEvent(userId, request)
-            call.respond(HttpStatusCode.Created, response)
-        } catch (e: CalendarValidationException.InvalidTitleException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "CALENDAR_004", "message" to e.message))
-        } catch (e: CalendarValidationException.InvalidDateFormatException) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "CALENDAR_002", "message" to e.message))
-        } catch (_: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-        }
+        val request = call.receive<CalendarEventCreateRequest>()
+        val userId = 1 // 💡 로그인 연동 전 임시 유저
+        val response = calendarService.createEvent(userId, request)
+        call.respond(HttpStatusCode.Created, response)
     }.describe {
         tag("Calendar")
         summary = "개인 일정 추가"
@@ -159,20 +135,15 @@ fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
     }
 
     delete("events/{id}") {
-        try {
-            val eventId = call.parameters["id"]?.toIntOrNull()
-                ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
-            val userId = 1 // 💡 로그인 연동 전 임시 유저
-            calendarService.deleteEvent(userId, eventId)
-            call.respond(HttpStatusCode.OK, mapOf("message" to "삭제되었습니다."))
-        } catch (e: CalendarEventNotFoundException) {
-            call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-        } catch (_: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-        }
+        val eventId = call.parameters["id"]?.toIntOrNull()
+            ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+        val userId = 1 // 💡 로그인 연동 전 임시 유저
+        calendarService.deleteEvent(userId, eventId)
+        call.respond(HttpStatusCode.OK, mapOf("message" to "삭제되었습니다."))
     }.describe {
         tag("Calendar")
         summary = "개인 일정 삭제"
+        description = "본인 소유의 일정만 삭제 가능"
         parameters {
             path("id") {
                 description = "일정 ID"
@@ -188,7 +159,7 @@ fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
                 description = "유효하지 않은 ID"
             }
             HttpStatusCode.NotFound {
-                description = "존재하지 않는 일정"
+                description = "존재하지 않거나 본인 소유가 아닌 일정"
             }
             HttpStatusCode.InternalServerError {
                 description = "서버 오류"
