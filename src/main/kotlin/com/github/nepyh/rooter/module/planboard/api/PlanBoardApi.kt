@@ -19,7 +19,8 @@ import io.ktor.utils.io.ExperimentalKtorApi
 fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
     get("") {
         try {
-            val boards = planBoardService.getAllBoards()
+            val userId = 1 // 💡 로그인 연동 전 임시 유저
+            val boards = planBoardService.getAllBoards(userId)
             call.respond(HttpStatusCode.OK, boards)
         } catch (_: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
