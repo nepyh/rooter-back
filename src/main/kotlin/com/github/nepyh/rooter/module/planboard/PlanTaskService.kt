@@ -54,9 +54,9 @@ class PlanTaskService {
         val date = runCatching { LocalDate.parse(request.planDate) }
             .getOrElse { throw PlanTaskValidationException.InvalidPlanDateException() }
 
-        val startTime = runCatching { LocalTime.parse(request.startTime) }
+        val startTime = runCatching { LocalTime.parse(request.startTime, timeFormat) }
             .getOrElse { throw PlanTaskValidationException.InvalidTimeFormatException() }
-        val endTime = runCatching { LocalTime.parse(request.endTime) }
+        val endTime = runCatching { LocalTime.parse(request.endTime, timeFormat) }
             .getOrElse { throw PlanTaskValidationException.InvalidTimeFormatException() }
 
         if (request.estimatedMinutes < 1) {
