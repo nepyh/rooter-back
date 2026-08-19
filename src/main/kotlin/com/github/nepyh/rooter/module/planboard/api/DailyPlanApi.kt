@@ -3,6 +3,7 @@ package com.github.nepyh.rooter.module.planboard.api
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.module.planboard.DailyPlanService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
@@ -32,14 +33,18 @@ fun DailyPlanApi(dailyPlanService: DailyPlanService) = ApiRoute("plan-boards") {
                 return@get
             }
 
-            val plan = dailyPlanService.getDailyPlan(boardId, date)
+            val userId = 1 // 💡 로그인 연동 전 임시 유저
+            val plan = dailyPlanService.getDailyPlan(userId, boardId, date)
             call.respond(HttpStatusCode.OK, plan)
+        } catch (_: PlanBoardNotFoundException) {
+            call.respond(HttpStatusCode.NotFound, mapOf("message" to "존재하지 않는 플랜보드입니다."))
         } catch (_: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
         }
     }.describe {
         tag("DailyPlan")
         summary = "오늘의 스터디 플랜 조회"
+        description = "본인 소유의 플랜보드만 조회 가능"
         responses {
             HttpStatusCode.OK {
                 description = "조회 성공 (해당 날짜 계획이 없으면 tasks 빈 배열)"
@@ -49,6 +54,9 @@ fun DailyPlanApi(dailyPlanService: DailyPlanService) = ApiRoute("plan-boards") {
             }
             HttpStatusCode.BadRequest {
                 description = "잘못된 boardId 또는 날짜 형식"
+            }
+            HttpStatusCode.NotFound {
+                description = "존재하지 않거나 본인 소유가 아닌 플랜보드"
             }
             HttpStatusCode.InternalServerError {
                 description = "서버 오류"
