@@ -77,6 +77,8 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
             call.respond(HttpStatusCode.BadRequest, mapOf("code" to "TASK_002", "message" to e.message))
         } catch (e: PlanTaskValidationException.InvalidTimeFormatException) {
             call.respond(HttpStatusCode.BadRequest, mapOf("code" to "TASK_003", "message" to e.message))
+        } catch (e: PlanTaskValidationException.InvalidTimeRangeException) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("code" to "TASK_007", "message" to e.message))
         } catch (e: PlanTaskValidationException.InvalidEstimatedMinutesException) {
             call.respond(HttpStatusCode.BadRequest, mapOf("code" to "TASK_004", "message" to e.message))
         } catch (e: PlanTaskValidationException.PlanDateOutOfRangeException) {
@@ -101,7 +103,8 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
             }
             HttpStatusCode.BadRequest {
                 description = "태스크 이름 오류 (code=TASK_001), 계획 날짜 형식 오류 (code=TASK_002), 시간 형식 오류 (code=TASK_003), " +
-                    "예상 소요 시간 오류 (code=TASK_004), 또는 계획 날짜가 플랜보드 기간을 벗어남 (code=TASK_005)"
+                    "예상 소요 시간 오류 (code=TASK_004), 계획 날짜가 플랜보드 기간을 벗어남 (code=TASK_005), " +
+                    "또는 종료 시간이 시작 시간보다 빠르거나 같음 (code=TASK_007)"
             }
             HttpStatusCode.InternalServerError {
                 description = "서버 오류"
