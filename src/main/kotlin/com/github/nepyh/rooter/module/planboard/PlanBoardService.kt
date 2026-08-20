@@ -25,7 +25,7 @@ class PlanBoardService {
         }
     }
 
-    suspend fun createBoard(request: PlanBoardCreateRequest): Int {
+    suspend fun createBoard(userId: Int, request: PlanBoardCreateRequest): Int {
         if (request.title.isBlank() || request.title.length > 100) {
             throw PlanBoardValidationException.InvalidTitleException()
         }
@@ -41,7 +41,7 @@ class PlanBoardService {
 
         return newSuspendedTransaction {
             PlanBoards.insert {
-                it[userId] = 1
+                it[this.userId] = userId
                 it[title] = request.title
                 it[this.startDate] = startDate
                 it[this.endDate] = endDate

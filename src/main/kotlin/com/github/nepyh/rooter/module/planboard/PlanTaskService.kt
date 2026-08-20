@@ -41,9 +41,9 @@ class PlanTaskService {
             DailyPlanResponse(planDate = date.toString(), tasks = tasks)
         }
 
-    suspend fun createTask(request: PlanTaskCreateRequest) = newSuspendedTransaction {
+    suspend fun createTask(userId: Int, request: PlanTaskCreateRequest) = newSuspendedTransaction {
         val board = PlanBoards.selectAll()
-            .where { PlanBoards.id eq request.planBoardId }
+            .where { (PlanBoards.id eq request.planBoardId) and (PlanBoards.userId eq userId) }
             .firstOrNull()
             ?: throw PlanBoardNotFoundException()
 
