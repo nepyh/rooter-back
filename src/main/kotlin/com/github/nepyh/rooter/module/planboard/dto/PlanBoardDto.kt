@@ -16,3 +16,9 @@ data class PlanBoardResponse(
     val content: String,
     val createdAt: String
 )
+
+@Serializable
+data class PlanBoardCreateResponse(
+    val id: Int,
+    val message: String
+)
