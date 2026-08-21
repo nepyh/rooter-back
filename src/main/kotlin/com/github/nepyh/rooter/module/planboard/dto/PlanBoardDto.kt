@@ -13,7 +13,8 @@ data class PlanBoardCreateRequest(
 data class PlanBoardResponse(
     val id: Int,
     val title: String,
-    val content: String,
+    val startDate: String,
+    val endDate: String,
     val createdAt: String
 )
 

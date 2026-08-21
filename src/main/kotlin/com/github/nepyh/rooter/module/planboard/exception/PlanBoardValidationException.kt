@@ -9,17 +9,17 @@ sealed class PlanBoardValidationException(
 ) : Exception(message) {
     class InvalidTitleException : PlanBoardValidationException(
         HttpStatusCode.BadRequest,
-        "BOARD_001",
+        "INVALID_TITLE",
         "제목은 1~100자여야 합니다."
     )
     class InvalidDateFormatException : PlanBoardValidationException(
         HttpStatusCode.BadRequest,
-        "BOARD_002",
+        "INVALID_DATE_FORMAT",
         "날짜 형식이 올바르지 않습니다. (yyyy-MM-dd)"
     )
     class InvalidDateRangeException : PlanBoardValidationException(
         HttpStatusCode.BadRequest,
-        "BOARD_003",
+        "INVALID_DATE_RANGE",
         "종료일은 시작일보다 빠를 수 없습니다."
     )
 }

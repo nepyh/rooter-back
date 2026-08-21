@@ -68,7 +68,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.BadRequest {
-                    description = "제목이 1~100자를 벗어남 (code=BOARD_001), 날짜 형식이 잘못됨 (code=BOARD_002), 또는 종료일이 시작일보다 빠름 (code=BOARD_003)"
+                    description = "제목이 1~100자를 벗어남 (code=INVALID_TITLE), 날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠름 (code=INVALID_DATE_RANGE)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"

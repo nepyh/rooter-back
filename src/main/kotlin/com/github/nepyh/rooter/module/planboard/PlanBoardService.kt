@@ -22,7 +22,8 @@ class PlanBoardService {
                 PlanBoardResponse(
                     id = it.id.value,
                     title = it.title,
-                    content = "시작: ${it.startDate}, 종료: ${it.endDate}", // DTO 호환용 임시 처리
+                    startDate = it.startDate.toString(),
+                    endDate = it.endDate.toString(),
                     createdAt = it.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
                 )
             }
