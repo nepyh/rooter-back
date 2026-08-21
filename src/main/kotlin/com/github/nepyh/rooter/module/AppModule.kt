@@ -5,6 +5,7 @@ import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.example.ExampleModule
+import com.github.nepyh.rooter.module.feedback.FeedbackModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
@@ -33,7 +34,8 @@ fun AppModule(appConfig: AppConfig): Module = module {
     // service-related modules
     includes(
         UserModule(appConfig),
-        PlanBoardModule()
+        PlanBoardModule(),
+        FeedbackModule()
     )
     // infra-related modules
     includes(
