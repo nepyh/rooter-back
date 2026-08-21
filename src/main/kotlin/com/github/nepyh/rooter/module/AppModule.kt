@@ -7,8 +7,8 @@ import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
-import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
@@ -20,32 +20,17 @@ import com.github.nepyh.rooter.module.swagger.SwaggerDocsModule
 import com.github.nepyh.rooter.module.user.UserModule
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
-import io.ktor.http.*
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
-import io.ktor.server.plugins.*
+import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.statuspages.StatusPages
-import io.ktor.server.response.*
+import io.ktor.server.response.respond
 import io.ktor.server.routing.*
 import org.koin.core.module.Module
 import org.koin.dsl.module
 import org.koin.ktor.ext.inject
 
-
 fun AppModule(appConfig: AppConfig): Module = module {
-    single { appConfig }
-
-    // service-related modules
-    includes(
-        UserModule(appConfig),
-        PlanBoardModule()
-    )
-    // infra-related modules
-    includes(
-        HealthModule(),
-        FileStorageModule(appConfig),
-        SchedulerModule(),
-        SchoolModule(appConfig)
-    )
     // dev-related modules
     if (appConfig.environment == EnvironmentMode.DEV) {
         includes(
@@ -53,6 +38,18 @@ fun AppModule(appConfig: AppConfig): Module = module {
             SwaggerDocsModule()
         )
     }
+    // infra-related modules
+    includes(
+        HealthModule(),
+        FileStorageModule(appConfig),
+        SchedulerModule(),
+        SchoolModule(appConfig)
+    )
+    // service-related modules
+    includes(
+        UserModule(appConfig),
+        PlanBoardModule()
+    )
 
     single<List<ApiRoute>> { getAll() }
 }
@@ -66,7 +63,7 @@ fun Application.configureAppModule() {
             }
         }
     }
-
+    
     install(StatusPages) {
         exception<UserNotFoundException> { call, cause ->
             call.respondError(HttpStatusCode.NotFound, "USER_NOT_FOUND", cause.message)
