@@ -16,6 +16,7 @@ import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
@@ -93,13 +94,15 @@ class PlanTaskService {
             throw PlanTaskValidationException.PlanDateOutOfRangeException()
         }
 
+        // 동시 요청에도 daily_plan 이 중복 생성되지 않도록 insertIgnore (DDL 유니크 제약과 짝)
+        DailyPlanTable.insertIgnore {
+            it[planBoardId] = board.id
+            it[planDate] = date
+        }
+
         val dailyPlan = DailyPlanRow.find {
             (DailyPlanTable.planBoardId eq board.id) and (DailyPlanTable.planDate eq date)
-        }.firstOrNull()
-            ?: DailyPlanRow.new {
-                planBoard = board
-                planDate = date
-            }
+        }.first()
 
         PlanTaskRow.new {
             this.dailyPlan = dailyPlan
