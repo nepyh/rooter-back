@@ -2,7 +2,7 @@ package com.github.nepyh.rooter.module.planboard.api
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
-import com.github.nepyh.rooter.module.planboard.DailyPlanService
+import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import io.ktor.http.ContentType
@@ -19,7 +19,7 @@ import io.ktor.utils.io.ExperimentalKtorApi
 import java.time.LocalDate
 
 @OptIn(ExperimentalKtorApi::class)
-fun DailyPlanApi(dailyPlanService: DailyPlanService) = ApiRoute("plan-boards") {
+fun DailyPlanApi(planTaskService: PlanTaskService) = ApiRoute("plan-boards") {
 
     authenticate("auth-jwt") {
         get("/{boardId}/daily") {
@@ -34,7 +34,7 @@ fun DailyPlanApi(dailyPlanService: DailyPlanService) = ApiRoute("plan-boards") {
                 LocalDate.now()
             }
 
-            val plan = dailyPlanService.getDailyPlan(call.userId(), boardId, date)
+            val plan = planTaskService.getBoardDailyPlan(call.userId(), boardId, date)
             call.respond(HttpStatusCode.OK, plan)
         }.describe {
             tag("DailyPlan")

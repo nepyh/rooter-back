@@ -7,15 +7,15 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
 class PlanBoardService {
-    suspend fun getAllBoards(userId: Int): List<PlanBoardResponse> = newSuspendedTransaction {
+    fun getAllBoards(userId: Int): List<PlanBoardResponse> = transaction {
         val user = UserRow.findById(userId)
-            ?: return@newSuspendedTransaction emptyList()
+            ?: return@transaction emptyList()
 
         PlanBoardRow.find { PlanBoardTable.userId eq user.id }
             .map {
@@ -29,7 +29,7 @@ class PlanBoardService {
             }
     }
 
-    suspend fun createBoard(userId: Int, request: PlanBoardCreateRequest): Int {
+    fun createBoard(userId: Int, request: PlanBoardCreateRequest): Int {
         if (request.title.isBlank() || request.title.length > 100) {
             throw PlanBoardValidationException.InvalidTitleException()
         }
@@ -43,7 +43,7 @@ class PlanBoardService {
             throw PlanBoardValidationException.InvalidDateRangeException()
         }
 
-        return newSuspendedTransaction {
+        return transaction {
             PlanBoardRow.new {
                 user = UserRow[userId]
                 title = request.title
