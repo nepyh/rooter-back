@@ -10,9 +10,9 @@ import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundEx
 import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
 import com.github.nepyh.rooter.module.calendar.model.CalendarEvents
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
-import com.github.nepyh.rooter.module.planboard.model.DailyPlans
-import com.github.nepyh.rooter.module.planboard.model.PlanBoards
-import com.github.nepyh.rooter.module.planboard.model.PlanTasks
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
@@ -22,27 +22,27 @@ import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
 class CalendarService {
 
-    suspend fun getRange(userId: Int, start: LocalDate, end: LocalDate): CalendarRangeResponse {
+    fun getRange(userId: Int, start: LocalDate, end: LocalDate): CalendarRangeResponse {
         if (end.isBefore(start)) {
             throw CalendarValidationException.InvalidDateRangeException()
         }
 
-        return newSuspendedTransaction {
-            val minutesByDate = (PlanTasks innerJoin DailyPlans innerJoin PlanBoards)
+        return transaction {
+            val minutesByDate = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
                 .selectAll()
                 .where {
-                    (PlanBoards.userId eq userId) and
-                        (DailyPlans.planDate greaterEq start) and
-                        (DailyPlans.planDate lessEq end)
+                    (PlanBoardTable.userId eq userId) and
+                        (DailyPlanTable.planDate greaterEq start) and
+                        (DailyPlanTable.planDate lessEq end)
                 }
-                .groupBy { it[DailyPlans.planDate] }
-                .mapValues { (_, rows) -> rows.sumOf { it[PlanTasks.estimatedMinutes] } }
+                .groupBy { it[DailyPlanTable.planDate] }
+                .mapValues { (_, rows) -> rows.sumOf { it[PlanTaskTable.estimatedMinutes] } }
 
             val days = generateSequence(start) { it.plusDays(1) }
                 .takeWhile { !it.isAfter(end) }
@@ -54,18 +54,18 @@ class CalendarService {
                 }
                 .toList()
 
-            val exams = PlanBoards.selectAll()
+            val exams = PlanBoardTable.selectAll()
                 .where {
-                    (PlanBoards.userId eq userId) and
-                        (PlanBoards.examDate.isNotNull()) and
-                        (PlanBoards.examDate greaterEq start) and
-                        (PlanBoards.examDate lessEq end)
+                    (PlanBoardTable.userId eq userId) and
+                        (PlanBoardTable.examDate.isNotNull()) and
+                        (PlanBoardTable.examDate greaterEq start) and
+                        (PlanBoardTable.examDate lessEq end)
                 }
                 .map {
-                    val examDate = it[PlanBoards.examDate]!!
+                    val examDate = it[PlanBoardTable.examDate]!!
                     CalendarExamResponse(
-                        planBoardId = it[PlanBoards.id],
-                        title = it[PlanBoards.title],
+                        planBoardId = it[PlanBoardTable.id].value,
+                        title = it[PlanBoardTable.title],
                         examDate = examDate.toString(),
                         dDay = ChronoUnit.DAYS.between(LocalDate.now(), examDate).toInt()
                     )
@@ -83,20 +83,20 @@ class CalendarService {
         }
     }
 
-    suspend fun getDaySummary(userId: Int, date: LocalDate): DailyCompletionResponse {
-        return newSuspendedTransaction {
-            val tasks = (PlanTasks innerJoin DailyPlans innerJoin PlanBoards)
+    fun getDaySummary(userId: Int, date: LocalDate): DailyCompletionResponse {
+        return transaction {
+            val tasks = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
                 .selectAll()
-                .where { (PlanBoards.userId eq userId) and (DailyPlans.planDate eq date) }
-                .orderBy(PlanTasks.startTime)
+                .where { (PlanBoardTable.userId eq userId) and (DailyPlanTable.planDate eq date) }
+                .orderBy(PlanTaskTable.startTime)
                 .map {
                     PlanTaskResponse(
-                        id = it[PlanTasks.id],
-                        taskName = it[PlanTasks.taskName],
-                        startTime = it[PlanTasks.startTime].toString(),
-                        endTime = it[PlanTasks.endTime].toString(),
-                        estimatedMinutes = it[PlanTasks.estimatedMinutes],
-                        isCompleted = it[PlanTasks.isCompleted]
+                        id = it[PlanTaskTable.id].value,
+                        taskName = it[PlanTaskTable.taskName],
+                        startTime = it[PlanTaskTable.startTime].toString(),
+                        endTime = it[PlanTaskTable.endTime].toString(),
+                        estimatedMinutes = it[PlanTaskTable.estimatedMinutes],
+                        isCompleted = it[PlanTaskTable.isCompleted]
                     )
                 }
 
@@ -119,7 +119,7 @@ class CalendarService {
         }
     }
 
-    suspend fun createEvent(userId: Int, request: CalendarEventCreateRequest): CalendarEventResponse {
+    fun createEvent(userId: Int, request: CalendarEventCreateRequest): CalendarEventResponse {
         if (request.title.isBlank() || request.title.length > 100) {
             throw CalendarValidationException.InvalidTitleException()
         }
@@ -127,7 +127,7 @@ class CalendarService {
         val eventDate = runCatching { LocalDate.parse(request.eventDate) }
             .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
 
-        return newSuspendedTransaction {
+        return transaction {
             val id = CalendarEvents.insert {
                 it[this.userId] = userId
                 it[title] = request.title
@@ -139,8 +139,8 @@ class CalendarService {
         }
     }
 
-    suspend fun deleteEvent(userId: Int, eventId: Int) {
-        newSuspendedTransaction {
+    fun deleteEvent(userId: Int, eventId: Int) {
+        transaction {
             val deletedRows = CalendarEvents.deleteWhere {
                 (CalendarEvents.id eq eventId) and (CalendarEvents.userId eq userId)
             }
