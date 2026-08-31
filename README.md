@@ -55,3 +55,35 @@ CONTAINER ID  IMAGE                                 COMMAND     CREATED         
 ```
 
 4. `./gradlew run --args="-config=dev.conf"`
+# 개발 컨벤션
+
+## ORM 테이블 정의
+
+프로젝트 전역에서 테이블 정의는 아래 패턴 하나로 통일한다.
+
+- 하나의 테이블을 정의하는 코틀린 파일은 `~Table` 형태의 이름을 사용한다. (예: `UserTable.kt`, `JobRunTable.kt`)
+- 파일 내에는 파일 이름과 동일한 이름의 테이블 정의 클래스가 존재한다.
+- 테이블 정의 클래스는 `~IdTable` 사용을 지향한다. PK 는 `~IdTable` 이 자동으로 설정한다.
+- 테이블 정의 클래스와 쌍을 이루는 `~Row` 클래스가 같은 파일에 존재한다.
+- 외부 파일에서 ORM 을 사용할 때는 `~Row` 클래스를 기본으로 사용하고, `~Table` 클래스는 필요할 때만 사용한다.
+
+```kotlin
+// UserTable.kt — 테이블 정의 클래스(~Table) 와 엔티티(~Row) 가 같은 파일에 존재한다.
+object UserTable : IntIdTable("users") {
+    val email = varchar("email", 320).uniqueIndex()
+    val username = varchar("username", 12)
+    val createdAt = timestampWithTimeZone("created_at")
+}
+
+class UserRow(id: EntityID<Int>) : IntEntity(id) {
+    companion object : IntEntityClass<UserRow>(UserTable)
+
+    var email by UserTable.email
+    var username by UserTable.username
+    var createdAt by UserTable.createdAt
+}
+```
+
+- 외부 파일에서는 `UserRow.find { UserTable.email eq ... }`, `UserRow.new { ... }` 처럼 `~Row` 를 기본으로 사용한다.
+- `~Table` 은 `insertIgnore` 처럼 DAO 로 표현할 수 없는 연산에서만 직접 사용한다.
+  (`JobRunTable.insertIgnore { ... }` — ON CONFLICT DO NOTHING 중복 방지 claim)
