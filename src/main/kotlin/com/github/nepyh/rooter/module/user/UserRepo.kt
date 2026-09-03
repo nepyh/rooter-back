@@ -1,8 +1,8 @@
 package com.github.nepyh.rooter.module.user
 
-import com.github.nepyh.rooter.module.planboard.model.DailyPlans
-import com.github.nepyh.rooter.module.planboard.model.PlanBoards
-import com.github.nepyh.rooter.module.planboard.model.PlanTasks
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
@@ -127,14 +127,14 @@ class UserRepo {
 
     fun findTaskRowsByDateRange(userId: Int, start: LocalDate, end: LocalDate): Map<LocalDate, List<ResultRow>> {
         return transaction {
-            (PlanTasks innerJoin DailyPlans innerJoin PlanBoards)
+            (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
                 .selectAll()
                 .where {
-                    (PlanBoards.userId eq userId) and
-                        (DailyPlans.planDate greaterEq start) and
-                        (DailyPlans.planDate lessEq end)
+                    (PlanBoardTable.userId eq userId) and
+                        (DailyPlanTable.planDate greaterEq start) and
+                        (DailyPlanTable.planDate lessEq end)
                 }
-                .groupBy { it[DailyPlans.planDate] }
+                .groupBy { it[DailyPlanTable.planDate] }
         }
     }
 

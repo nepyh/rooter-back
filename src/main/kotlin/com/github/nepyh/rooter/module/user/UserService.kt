@@ -6,7 +6,7 @@ import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeResponse
-import com.github.nepyh.rooter.module.planboard.model.PlanTasks
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
 import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.StreakDayResponse
@@ -146,7 +146,7 @@ class UserService(
             .map { date ->
                 val rows = tasksByDate[date].orEmpty()
                 val totalTasks = rows.size
-                val completedTasks = rows.count { it[PlanTasks.isCompleted] }
+                val completedTasks = rows.count { it[PlanTaskTable.isCompleted] }
                 val completionRate = if (totalTasks == 0) 0.0 else (completedTasks.toDouble() / totalTasks) * 100
 
                 StreakDayResponse(date = date.toString(), completionRate = completionRate)
