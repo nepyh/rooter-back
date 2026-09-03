@@ -4,6 +4,9 @@ import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
+import com.github.nepyh.rooter.module.calendar.CalendarModule
+import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundException
+import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
@@ -48,7 +51,8 @@ fun AppModule(appConfig: AppConfig): Module = module {
     // service-related modules
     includes(
         UserModule(appConfig),
-        PlanBoardModule()
+        PlanBoardModule(),
+        CalendarModule()
     )
 
     single<List<ApiRoute>> { getAll() }
@@ -63,7 +67,7 @@ fun Application.configureAppModule() {
             }
         }
     }
-    
+
     install(StatusPages) {
         exception<UserNotFoundException> { call, cause ->
             call.respondError(HttpStatusCode.NotFound, "USER_NOT_FOUND", cause.message)
@@ -72,6 +76,12 @@ fun Application.configureAppModule() {
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<NiceApiException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<CalendarEventNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "CALENDAR_EVENT_NOT_FOUND", cause.message)
+        }
+        exception<CalendarValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<PlanBoardNotFoundException> { call, cause ->
