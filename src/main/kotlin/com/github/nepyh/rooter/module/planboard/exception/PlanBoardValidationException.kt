@@ -22,4 +22,24 @@ sealed class PlanBoardValidationException(
         "INVALID_DATE_RANGE",
         "종료일은 시작일보다 빠를 수 없습니다."
     )
+    class SubjectsRequiredException : PlanBoardValidationException(
+        HttpStatusCode.BadRequest,
+        "SUBJECTS_REQUIRED",
+        "과목 범위를 1개 이상 입력해주세요."
+    )
+    class InvalidSubjectRangeException : PlanBoardValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_SUBJECT_RANGE",
+        "존재하지 않는 교과서/단원이거나, 시작 단원이 끝 단원보다 뒤에 있습니다."
+    )
+    class MissingDateInfoException : PlanBoardValidationException(
+        HttpStatusCode.BadRequest,
+        "MISSING_DATE_INFO",
+        "examDate 또는 daysRemaining 중 하나는 반드시 입력해야 합니다."
+    )
+    class GenerationFailedException : PlanBoardValidationException(
+        HttpStatusCode.BadGateway,
+        "GENERATION_FAILED",
+        "AI 계획 생성에 실패했습니다. 잠시 후 다시 시도해주세요."
+    )
 }

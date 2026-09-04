@@ -9,11 +9,13 @@ import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundEx
 import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
+import com.github.nepyh.rooter.module.leveltest.LevelTestModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
+import com.github.nepyh.rooter.module.quiz.QuizModule
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
 import com.github.nepyh.rooter.module.scheduler.SchedulerModule
 import com.github.nepyh.rooter.module.school.SchoolModule
@@ -51,8 +53,10 @@ fun AppModule(appConfig: AppConfig): Module = module {
     // service-related modules
     includes(
         UserModule(appConfig),
-        PlanBoardModule(),
-        CalendarModule()
+        PlanBoardModule(appConfig),
+        QuizModule(appConfig),
+        CalendarModule(),
+        LevelTestModule(appConfig)
     )
 
     single<List<ApiRoute>> { getAll() }
