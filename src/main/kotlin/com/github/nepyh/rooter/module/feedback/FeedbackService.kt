@@ -7,8 +7,8 @@ import com.github.nepyh.rooter.module.feedback.exception.FeedbackAlreadySubmitte
 import com.github.nepyh.rooter.module.feedback.exception.FeedbackNotFoundException
 import com.github.nepyh.rooter.module.feedback.exception.FeedbackValidationException
 import com.github.nepyh.rooter.module.feedback.model.DailyFeedbacks
-import com.github.nepyh.rooter.module.planboard.model.DailyPlans
-import com.github.nepyh.rooter.module.planboard.model.PlanBoards
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -21,9 +21,9 @@ private val VALID_DIFFICULTIES = setOf("쉬움", "적당", "어려움")
 class FeedbackService {
 
     private suspend fun requireOwnedDailyPlan(userId: Int, dailyPlanId: Int) =
-        (DailyPlans innerJoin PlanBoards)
+        (DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
-            .where { (DailyPlans.id eq dailyPlanId) and (PlanBoards.userId eq userId) }
+            .where { (DailyPlanTable.id eq dailyPlanId) and (PlanBoardTable.userId eq userId) }
             .firstOrNull()
             ?: throw DailyPlanNotFoundException()
 
