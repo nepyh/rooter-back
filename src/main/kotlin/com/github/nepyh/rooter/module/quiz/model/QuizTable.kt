@@ -1,12 +1,12 @@
 package com.github.nepyh.rooter.module.quiz.model
 
-import com.github.nepyh.rooter.module.planboard.model.DailyPlans
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
 
 object DailyQuizQuestions : Table("daily_quiz_questions") {
     val id = integer("id").autoIncrement()
-    val dailyPlanId = integer("daily_plan_id") references DailyPlans.id
+    val dailyPlanId = integer("daily_plan_id").references(DailyPlanTable.id)
     val questionText = text("question_text")
 
     override val primaryKey = PrimaryKey(id)

@@ -1,10 +1,10 @@
 package com.github.nepyh.rooter.module.quiz
 
 import com.github.nepyh.rooter.module.planboard.model.Chapters
-import com.github.nepyh.rooter.module.planboard.model.DailyPlans
-import com.github.nepyh.rooter.module.planboard.model.PlanBoards
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjects
-import com.github.nepyh.rooter.module.planboard.model.PlanTasks
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.quiz.dto.InsertedReviewTaskResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizAnswerSubmission
 import com.github.nepyh.rooter.module.quiz.dto.QuizChoiceResponse
@@ -37,19 +37,19 @@ class QuizService(
 ) {
 
     suspend fun generateQuiz(userId: Int, date: LocalDate): QuizResponse = newSuspendedTransaction {
-        val dailyPlanRow = (DailyPlans innerJoin PlanBoards)
+        val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
-            .where { (DailyPlans.planDate eq date) and (PlanBoards.userId eq userId) }
+            .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq userId) }
             .firstOrNull()
             ?: throw QuizValidationException.NoPlanForDateException()
 
-        val dailyPlanId = dailyPlanRow[DailyPlans.id]
-        val planBoardId = dailyPlanRow[DailyPlans.planBoardId]
+        val dailyPlanId = dailyPlanRow[DailyPlanTable.id].value
+        val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
 
         val chapterNames = chapterNamesForPlanBoard(planBoardId)
-        val completedTaskNames = PlanTasks.selectAll()
-            .where { (PlanTasks.dailyPlanId eq dailyPlanId) and (PlanTasks.isCompleted eq true) }
-            .map { it[PlanTasks.taskName] }
+        val completedTaskNames = PlanTaskTable.selectAll()
+            .where { (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq true) }
+            .map { it[PlanTaskTable.taskName] }
 
         val context = buildString {
             appendLine("학습 범위: ${chapterNames.joinToString(", ").ifBlank { "지정 안 됨" }}")
@@ -80,9 +80,9 @@ class QuizService(
     }
 
     suspend fun getQuiz(userId: Int, dailyPlanId: Int): QuizResponse = newSuspendedTransaction {
-        val dailyPlanRow = (DailyPlans innerJoin PlanBoards)
+        val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
-            .where { (DailyPlans.id eq dailyPlanId) and (PlanBoards.userId eq userId) }
+            .where { (DailyPlanTable.id eq dailyPlanId) and (PlanBoardTable.userId eq userId) }
             .firstOrNull()
             ?: throw QuizNotFoundException()
 
@@ -103,7 +103,7 @@ class QuizService(
 
         if (questions.isEmpty()) throw QuizNotFoundException()
 
-        QuizResponse(dailyPlanId = dailyPlanId, quizDate = dailyPlanRow[DailyPlans.planDate].toString(), questions = questions)
+        QuizResponse(dailyPlanId = dailyPlanId, quizDate = dailyPlanRow[DailyPlanTable.planDate].toString(), questions = questions)
     }
 
     suspend fun submitQuiz(
@@ -111,14 +111,14 @@ class QuizService(
         dailyPlanId: Int,
         answers: List<QuizAnswerSubmission>
     ): QuizResultResponse = newSuspendedTransaction {
-        val dailyPlanRow = (DailyPlans innerJoin PlanBoards)
+        val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
-            .where { (DailyPlans.id eq dailyPlanId) and (PlanBoards.userId eq userId) }
+            .where { (DailyPlanTable.id eq dailyPlanId) and (PlanBoardTable.userId eq userId) }
             .firstOrNull()
             ?: throw QuizNotFoundException()
 
-        val planBoardId = dailyPlanRow[DailyPlans.planBoardId]
-        val quizDate = dailyPlanRow[DailyPlans.planDate]
+        val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
+        val quizDate = dailyPlanRow[DailyPlanTable.planDate]
 
         val questionIds = DailyQuizQuestions.selectAll()
             .where { DailyQuizQuestions.dailyPlanId eq dailyPlanId }
@@ -167,9 +167,9 @@ class QuizService(
 
         if (wrongQuestionTexts.isNotEmpty()) {
             val chapterNames = chapterNamesForPlanBoard(planBoardId)
-            val boardEndDate = PlanBoards.selectAll()
-                .where { PlanBoards.id eq planBoardId }
-                .first()[PlanBoards.endDate]
+            val boardEndDate = PlanBoardTable.selectAll()
+                .where { PlanBoardTable.id eq planBoardId }
+                .first()[PlanBoardTable.endDate]
 
             val suggestions = llmClient.analyzeWeakAreas(wrongQuestionTexts, chapterNames)
 
@@ -186,8 +186,8 @@ class QuizService(
                 val startTime = lastTaskEndTime(targetDailyPlan.first) ?: LocalTime.of(9, 0)
                 val endTime = startTime.plusMinutes(REVIEW_TASK_MINUTES.toLong())
 
-                PlanTasks.insert {
-                    it[PlanTasks.dailyPlanId] = targetDailyPlan.first
+                PlanTaskTable.insert {
+                    it[PlanTaskTable.dailyPlanId] = targetDailyPlan.first
                     it[this.taskName] = taskName
                     it[this.startTime] = startTime
                     it[this.endTime] = endTime
@@ -240,30 +240,30 @@ class QuizService(
         afterDate: LocalDate,
         boardEndDate: LocalDate
     ): Pair<Int, LocalDate>? {
-        val existing = DailyPlans.selectAll()
-            .where { (DailyPlans.planBoardId eq planBoardId) and (DailyPlans.planDate greater afterDate) }
-            .orderBy(DailyPlans.planDate to SortOrder.ASC)
+        val existing = DailyPlanTable.selectAll()
+            .where { (DailyPlanTable.planBoardId eq planBoardId) and (DailyPlanTable.planDate greater afterDate) }
+            .orderBy(DailyPlanTable.planDate to SortOrder.ASC)
             .firstOrNull()
 
         if (existing != null) {
-            return existing[DailyPlans.id] to existing[DailyPlans.planDate]
+            return existing[DailyPlanTable.id].value to existing[DailyPlanTable.planDate]
         }
 
         val nextDate = afterDate.plusDays(1)
         if (nextDate.isAfter(boardEndDate)) return null
 
-        val newId = DailyPlans.insert {
+        val newId = DailyPlanTable.insert {
             it[this.planBoardId] = planBoardId
             it[planDate] = nextDate
-        } get DailyPlans.id
+        } get DailyPlanTable.id
 
-        return newId to nextDate
+        return newId.value to nextDate
     }
 
     private fun lastTaskEndTime(dailyPlanId: Int): LocalTime? =
-        PlanTasks.selectAll()
-            .where { PlanTasks.dailyPlanId eq dailyPlanId }
-            .orderBy(PlanTasks.endTime to SortOrder.DESC)
+        PlanTaskTable.selectAll()
+            .where { PlanTaskTable.dailyPlanId eq dailyPlanId }
+            .orderBy(PlanTaskTable.endTime to SortOrder.DESC)
             .firstOrNull()
-            ?.get(PlanTasks.endTime)
+            ?.get(PlanTaskTable.endTime)
 }
