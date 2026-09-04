@@ -21,6 +21,7 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.v1.jdbc.update
 import java.time.OffsetDateTime
+import kotlin.math.roundToInt
 
 class LevelTestService(
     private val llmClient: LevelTestLlmClient
@@ -131,7 +132,9 @@ class LevelTestService(
                 LevelTestResults.insert {
                     it[this.userId] = userId
                     it[this.subjectId] = subjectId
-                    it[score] = correctCount
+                    // score는 0~100 정답률(%)로 저장한다. 문항 수가 시도마다 다를 수 있어 원시 정답
+                    // 개수만 저장하면 나중에 총 문항 수 없이는 등급을 다시 계산할 수 없기 때문.
+                    it[score] = ((correctCount.toDouble() / totalCount) * 100).roundToInt()
                     it[createdAt] = OffsetDateTime.now()
                 }
 

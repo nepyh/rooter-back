@@ -41,7 +41,7 @@ object LevelTestResults : Table("level_test_results") {
     val id = integer("id").autoIncrement()
     val userId = integer("user_id").references(UserTable.id)
     val subjectId = integer("subject_id").references(Subjects.id)
-    val score = integer("score")
+    val score = integer("score") // 0~100 정답률(%). 시도마다 문항 수가 달라질 수 있어 원시 정답 개수가 아닌 비율로 저장
     val createdAt = timestampWithTimeZone("created_at")
 
     override val primaryKey = PrimaryKey(id)
