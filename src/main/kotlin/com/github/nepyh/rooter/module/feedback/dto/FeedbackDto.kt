@@ -16,5 +16,13 @@ data class FeedbackResponse(
     val difficulty: String,
     val timeSpentMinutes: Int?,
     val focusLevel: Int?,
-    val createdAt: String
+    val createdAt: String,
+    val insertedAdjustmentTasks: List<ReplanAdjustmentResponse> = emptyList()
+)
+
+@Serializable
+data class ReplanAdjustmentResponse(
+    val dailyPlanId: Int,
+    val planDate: String,
+    val taskName: String
 )

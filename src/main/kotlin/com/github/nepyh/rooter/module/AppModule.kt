@@ -56,7 +56,7 @@ fun AppModule(appConfig: AppConfig): Module = module {
         PlanBoardModule(),
         QuizModule(appConfig),
         CalendarModule(),
-        FeedbackModule()
+        FeedbackModule(appConfig)
     )
 
     single<List<ApiRoute>> { getAll() }

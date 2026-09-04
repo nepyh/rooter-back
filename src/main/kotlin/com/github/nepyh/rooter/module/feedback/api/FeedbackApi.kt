@@ -54,7 +54,8 @@ fun FeedbackApi(feedbackService: FeedbackService) = ApiRoute("daily-plans") {
         }.describe {
             tag("Feedback")
             summary = "일일 학습 피드백 설문 제출"
-            description = "퀴즈 완료 후 당일 학습 난이도/소요시간/집중도에 대한 설문을 제출. 본인 소유의 일일 계획에만 제출 가능, 계획당 1회만 제출 가능"
+            description = "퀴즈 완료 후 당일 학습 난이도/소요시간/집중도에 대한 설문을 제출. 본인 소유의 일일 계획에만 제출 가능, 계획당 1회만 제출 가능. " +
+                "제출 직후 오늘 틀린 퀴즈 문제와 설문 응답을 근거로 AI가 남은 날짜에 보충/심화 태스크를 자동 추가한다 (insertedAdjustmentTasks, AI 호출 실패 시 빈 배열)"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<FeedbackSubmitRequest>()
