@@ -15,6 +15,7 @@ import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenExce
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
+import com.github.nepyh.rooter.module.quiz.QuizModule
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
 import com.github.nepyh.rooter.module.scheduler.SchedulerModule
 import com.github.nepyh.rooter.module.school.SchoolModule
@@ -53,6 +54,7 @@ fun AppModule(appConfig: AppConfig): Module = module {
     includes(
         UserModule(appConfig),
         PlanBoardModule(),
+        QuizModule(appConfig),
         CalendarModule(),
         FeedbackModule()
     )
