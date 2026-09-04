@@ -1,0 +1,89 @@
+{
+  "containerDefinitions": [
+    {
+      "name": "Main",
+      "image": "208367987268.dkr.ecr.ap-northeast-2.amazonaws.com/rooter:09312d9ad738a7b33e311cd8cb51161ce4c721a9",
+      "cpu": 768,
+      "memory": 3072,
+      "memoryReservation": 3072,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp",
+          "name": "main-80-tcp"
+        }
+      ],
+      "essential": true,
+      "command": [],
+      "environment": [
+        {
+          "name": "JDBC_URL",
+          "value": "jdbc:postgresql://rooter-db.cp8m4cggqxir.ap-northeast-2.rds.amazonaws.com:5432/postgres"
+        },
+        {
+          "name": "SERVICE_HOST",
+          "value": "0.0.0.0"
+        },
+        {
+          "name": "JWT_SECRET",
+          "value": "qowbnfqlwkfksnalsbalsf123qsda"
+        },
+        {
+          "name": "DB_MAX_POOL_SIZE",
+          "value": "10"
+        },
+        {
+          "name": "DB_USER",
+          "value": "postgres"
+        },
+        {
+          "name": "ALLOWED_HOSTS",
+          "value": "*"
+        },
+        {
+          "name": "JWT_ISSUER",
+          "value": "rooter"
+        },
+        {
+          "name": "DB_NAME",
+          "value": "postgres"
+        },
+        {
+          "name": "SERVICE_PORT",
+          "value": "8080"
+        },
+        {
+          "name": "DB_PASSWORD",
+          "value": "q1w2e3r4"
+        }
+      ],
+      "mountPoints": [],
+      "volumesFrom": [],
+      "secrets": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/rooter",
+          "awslogs-region": "ap-northeast-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "systemControls": []
+    }
+  ],
+  "family": "default-rooter-7ca8",
+  "executionRoleArn": "arn:aws:iam::208367987268:role/service-role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "volumes": [],
+  "placementConstraints": [],
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "1024",
+  "memory": "4096"
+}

@@ -29,7 +29,11 @@ data class AppConfig(
     // llm related (퀴즈 자동 생성용)
     val llmBaseUrl: String,
     val llmApiKey: String,
-    val llmModel: String
+    val llmModel: String,
+
+    // nice (나이스 교육정보 개방포털) related
+    val niceApiKey: String,
+    val niceBaseUrl: String
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
@@ -70,7 +74,11 @@ data class AppConfig(
 
                 llmBaseUrl = config.property("llm.baseUrl").getString(),
                 llmApiKey = config.property("llm.apiKey").getString(),
-                llmModel = config.property("llm.model").getString()
+                llmModel = config.property("llm.model").getString(),
+
+                niceApiKey = config.property("nice.apiKey").getString(),
+                niceBaseUrl = config.propertyOrNull("nice.baseUrl")?.getString()
+                    ?: "https://open.neis.go.kr/hub"
             )
         }
     }

@@ -35,6 +35,7 @@ dependencies {
     implementation("io.ktor:ktor-server-swagger:$ktorVersion")
     implementation("io.ktor:ktor-server-auth:$ktorVersion")
     implementation("io.ktor:ktor-server-auth-jwt:$ktorVersion")
+    implementation("io.ktor:ktor-server-status-pages:$ktorVersion")
 
     // http client (LLM API 호출용)
     implementation("io.ktor:ktor-client-core:$ktorVersion")
@@ -60,6 +61,7 @@ dependencies {
     testImplementation("io.kotest:kotest-runner-junit5:6.2.0")
     testImplementation("io.kotest:kotest-assertions-core:6.2.0")
     testImplementation("io.kotest:kotest-property:6.2.0")
+    testImplementation("io.ktor:ktor-client-mock:$ktorVersion")
 }
 
 tasks.test {

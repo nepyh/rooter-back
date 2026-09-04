@@ -4,6 +4,7 @@ import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.module.planboard.CatalogService
 import com.github.nepyh.rooter.module.planboard.dto.ChapterResponse
 import com.github.nepyh.rooter.module.planboard.dto.SubjectResponse
+import com.github.nepyh.rooter.module.planboard.dto.TextbookDetailResponse
 import com.github.nepyh.rooter.module.planboard.dto.TextbookResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -91,6 +92,44 @@ fun CatalogApi(catalogService: CatalogService) = ApiRoute("catalog") {
                 ContentType.Application.Json {
                     schema = jsonSchema<List<ChapterResponse>>()
                 }
+            }
+            HttpStatusCode.BadRequest {
+                description = "잘못된 textbookId"
+            }
+            HttpStatusCode.InternalServerError {
+                description = "서버 오류"
+            }
+        }
+    }
+
+    get("/textbooks/{textbookId}/detail") {
+        try {
+            val textbookId = call.parameters["textbookId"]?.toIntOrNull()
+            if (textbookId == null) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("message" to "잘못된 textbookId 입니다."))
+                return@get
+            }
+            val detail = catalogService.getTextbookDetail(textbookId)
+            if (detail == null) {
+                call.respond(HttpStatusCode.NotFound, mapOf("message" to "교과서를 찾을 수 없습니다."))
+                return@get
+            }
+            call.respond(HttpStatusCode.OK, detail)
+        } catch (_: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+        }
+    }.describe {
+        tag("Catalog")
+        summary = "교과서 상세 조회 (목차 트리 포함)"
+        responses {
+            HttpStatusCode.OK {
+                description = "조회 성공"
+                ContentType.Application.Json {
+                    schema = jsonSchema<TextbookDetailResponse>()
+                }
+            }
+            HttpStatusCode.NotFound {
+                description = "교과서 없음"
             }
             HttpStatusCode.BadRequest {
                 description = "잘못된 textbookId"

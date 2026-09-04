@@ -5,12 +5,9 @@ import com.github.nepyh.rooter.module.user.AuthService
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginResponse
 import com.github.nepyh.rooter.module.user.dto.UserLogoutResponse
-import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
-import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
-import io.ktor.server.application.log
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.principal
@@ -21,26 +18,12 @@ import io.ktor.server.routing.post
 import io.ktor.utils.io.ExperimentalKtorApi
 
 
-private val loginBadCredentialsResponse = mapOf(
-    "code" to "BAD_CREDENTIALS",
-    "message" to "이메일 또는 비밀번호가 일치하지 않습니다."
-)
-
 @OptIn(ExperimentalKtorApi::class)
 fun AuthApi(authService: AuthService) = ApiRoute("auth") {
     post("login") {
-        try {
-            val request = call.receive<UserLoginRequest>()
-            val response = authService.login(request)
-            call.respond(HttpStatusCode.OK, response)
-        } catch (e: UserNotFoundException) {
-            call.respond(HttpStatusCode.Unauthorized, loginBadCredentialsResponse)
-        } catch (e: UserValidationException.WrongPasswordException) {
-            call.respond(HttpStatusCode.Unauthorized, loginBadCredentialsResponse)
-        } catch (e: Exception) {
-            call.application.log.error("로그인 처리 중 예외 발생", e)
-            call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-        }
+        val request = call.receive<UserLoginRequest>()
+        val response = authService.login(request)
+        call.respond(HttpStatusCode.OK, response)
     }.describe {
         tag("Auth")
         summary = "로그인"
@@ -67,16 +50,9 @@ fun AuthApi(authService: AuthService) = ApiRoute("auth") {
     }
     authenticate("auth-jwt") {
         post("logout") {
-            try {
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val response = authService.logout(userId)
-                call.respond(HttpStatusCode.OK, response)
-            } catch (e: UserNotFoundException) {
-                call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-            } catch (e: Exception) {
-                call.application.log.error("로그아웃 처리 중 예외 발생", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-            }
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val response = authService.logout(userId)
+            call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("Auth")
             summary = "로그아웃"

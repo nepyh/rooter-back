@@ -1,0 +1,212 @@
+{
+    "taskDefinitionArn": "arn:aws:ecs:ap-northeast-2:208367987268:task-definition/default-rooter-7ca8:34",
+    "containerDefinitions": [
+        {
+            "name": "Main",
+            "image": "208367987268.dkr.ecr.ap-northeast-2.amazonaws.com/rooter:09312d9ad738a7b33e311cd8cb51161ce4c721a9",
+            "cpu": 768,
+            "memory": 3072,
+            "memoryReservation": 3072,
+            "portMappings": [
+                {
+                    "containerPort": 8080,
+                    "hostPort": 8080,
+                    "protocol": "tcp",
+                    "name": "main-80-tcp"
+                }
+            ],
+            "essential": true,
+            "command": [],
+            "environment": [
+                {
+                    "name": "JDBC_URL",
+                    "value": "jdbc:postgresql://rooter-db.cp8m4cggqxir.ap-northeast-2.rds.amazonaws.com:5432/postgres"
+                },
+                {
+                    "name": "SERVICE_HOST",
+                    "value": "0.0.0.0"
+                },
+                {
+                    "name": "JWT_SECRET",
+                    "value": "qowbnfqlwkfksnalsbalsf123qsda"
+                },
+                {
+                    "name": "DB_MAX_POOL_SIZE",
+                    "value": "10"
+                },
+                {
+                    "name": "DB_USER",
+                    "value": "postgres"
+                },
+                {
+                    "name": "ALLOWED_HOSTS",
+                    "value": "*"
+                },
+                {
+                    "name": "JWT_ISSUER",
+                    "value": "rooter"
+                },
+                {
+                    "name": "DB_NAME",
+                    "value": "postgres"
+                },
+                {
+                    "name": "SERVICE_PORT",
+                    "value": "8080"
+                },
+                {
+                    "name": "DB_PASSWORD",
+                    "value": "q1w2e3r4"
+                }
+            ],
+            "mountPoints": [],
+            "volumesFrom": [],
+            "secrets": [],
+            "dependsOn": [
+                {
+                    "containerName": "Db",
+                    "condition": "HEALTHY"
+                }
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/rooter",
+                    "awslogs-region": "ap-northeast-2",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            },
+            "systemControls": []
+        },
+        {
+            "name": "Db",
+            "image": "postgres:15-alpine",
+            "cpu": 256,
+            "memory": 1024,
+            "portMappings": [
+                {
+                    "containerPort": 5432,
+                    "hostPort": 5432,
+                    "protocol": "tcp"
+                }
+            ],
+            "essential": true,
+            "environment": [
+                {
+                    "name": "POSTGRES_USER",
+                    "value": "postgres"
+                },
+                {
+                    "name": "POSTGRES_PASSWORD",
+                    "value": "q1w2e3r4"
+                },
+                {
+                    "name": "POSTGRES_DB",
+                    "value": "postgres"
+                }
+            ],
+            "mountPoints": [
+                {
+                    "sourceVolume": "efs-db-data",
+                    "containerPath": "/var/lib/postgresql/data",
+                    "readOnly": false
+                }
+            ],
+            "volumesFrom": [],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/rooter",
+                    "awslogs-region": "ap-northeast-2",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            },
+            "healthCheck": {
+                "command": [
+                    "CMD-SHELL",
+                    "pg_isready -U postgres -d postgres || exit 1"
+                ],
+                "interval": 10,
+                "timeout": 5,
+                "retries": 5,
+                "startPeriod": 15
+            },
+            "systemControls": []
+        }
+    ],
+    "family": "default-rooter-7ca8",
+    "executionRoleArn": "arn:aws:iam::208367987268:role/service-role/ecsTaskExecutionRole",
+    "networkMode": "awsvpc",
+    "revision": 34,
+    "volumes": [
+        {
+            "name": "efs-db-data",
+            "efsVolumeConfiguration": {
+                "fileSystemId": "fs-06dd4b9cf7b26215e",
+                "rootDirectory": "/postgres",
+                "transitEncryption": "ENABLED"
+            }
+        }
+    ],
+    "status": "ACTIVE",
+    "requiresAttributes": [
+        {
+            "name": "ecs.capability.execution-role-awslogs"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.ecr-auth"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.21"
+        },
+        {
+            "name": "ecs.capability.container-health-check"
+        },
+        {
+            "name": "ecs.capability.execution-role-ecr-pull"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.18"
+        },
+        {
+            "name": "ecs.capability.task-eni"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.29"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.logging-driver.awslogs"
+        },
+        {
+            "name": "ecs.capability.efsAuth"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.19"
+        },
+        {
+            "name": "ecs.capability.efs"
+        },
+        {
+            "name": "ecs.capability.container-ordering"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.25"
+        }
+    ],
+    "placementConstraints": [],
+    "compatibilities": [
+        "EC2",
+        "MANAGED_INSTANCES",
+        "FARGATE"
+    ],
+    "runtimePlatform": {
+        "cpuArchitecture": "X86_64",
+        "operatingSystemFamily": "LINUX"
+    },
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "cpu": "1024",
+    "memory": "4096",
+    "registeredAt": "2026-08-04T21:24:35.067000+09:00"
+}

@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class PlanBoardCreateRequest(
     val title: String,
-    val startDate: String,  // 👈 content 지우고 이 두 줄로 교체!
+    val startDate: String,
     val endDate: String
 )
 
@@ -13,6 +13,13 @@ data class PlanBoardCreateRequest(
 data class PlanBoardResponse(
     val id: Int,
     val title: String,
-    val content: String,
+    val startDate: String,
+    val endDate: String,
     val createdAt: String
+)
+
+@Serializable
+data class PlanBoardCreateResponse(
+    val id: Int,
+    val message: String
 )

@@ -25,3 +25,22 @@ data class ChapterResponse(
     val chapterName: String,
     val chapterOrder: Int
 )
+
+@Serializable
+data class ChapterTreeResponse(
+    val id: Int,
+    val chapterName: String,
+    val chapterOrder: Int,
+    val children: List<ChapterTreeResponse>
+)
+
+@Serializable
+data class TextbookDetailResponse(
+    val id: Int,
+    val subjectId: Int,
+    val subjectName: String,
+    val publisherId: Int?,
+    val title: String,
+    val aiStatus: String,
+    val chapters: List<ChapterTreeResponse>
+)

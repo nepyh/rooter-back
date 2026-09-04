@@ -6,13 +6,22 @@ import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeResponse
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
+import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
+import com.github.nepyh.rooter.module.user.dto.StreakDayResponse
+import com.github.nepyh.rooter.module.user.dto.StreakResponse
+import com.github.nepyh.rooter.module.user.dto.UpdateProfileRequest
 import com.github.nepyh.rooter.module.user.dto.UserInfoResponse
+import com.github.nepyh.rooter.module.user.dto.UserProfileUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
+import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import io.ktor.http.content.PartData
 import org.mindrot.jbcrypt.BCrypt
+import java.time.LocalDate
 import java.time.LocalTime
 
 class UserService(
@@ -76,8 +85,75 @@ class UserService(
             grade = profile.grade,
             classNumber = profile.classNumber,
             createdAt = user.createdAt.toString(),
-            avatarImageKey = user.avatarImageKey
+            avatarImageKey = user.avatarImageKey,
+            bio = user.bio
         )
+    }
+
+    fun updateProfile(userId: Int, request: UpdateProfileRequest): UserProfileUpdateResponse {
+        request.username?.let {
+            if (it.isBlank() || it.length > 12) {
+                throw UserValidationException.WrongUsernameException()
+            }
+        }
+        request.bio?.let {
+            if (it.length > 500) {
+                throw UserValidationException.WrongBioLengthException()
+            }
+        }
+
+        val row = userRepo.updateProfile(
+            userId = userId,
+            username = request.username,
+            bio = request.bio
+        )
+
+        return UserProfileUpdateResponse(
+            id = row.id.value,
+            username = row.username,
+            bio = row.bio
+        )
+    }
+
+    fun changePassword(userId: Int, request: ChangePasswordRequest): PasswordUpdateResponse {
+        val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        if (!BCrypt.checkpw(request.currentPassword, user.password)) {
+            throw UserValidationException.WrongCurrentPasswordException()
+        }
+
+        val passwordRegex = Regex("^(?=.*[A-Za-z])(?=.*\\d).{8,}$")
+        if (!passwordRegex.matches(request.newPassword)) {
+            throw UserValidationException.WrongPasswordFormatException()
+        }
+
+        val hashedPassword = BCrypt.hashpw(request.newPassword, BCrypt.gensalt())
+        userRepo.updatePassword(userId, hashedPassword)
+
+        return PasswordUpdateResponse(message = "비밀번호가 변경되었습니다.")
+    }
+
+    fun getStreak(userId: Int, start: LocalDate, end: LocalDate): StreakResponse {
+        if (end.isBefore(start)) {
+            throw UserValidationException.WrongDateRangeException()
+        }
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        val tasksByDate = userRepo.findTaskRowsByDateRange(userId, start, end)
+
+        val days = generateSequence(start) { it.plusDays(1) }
+            .takeWhile { !it.isAfter(end) }
+            .map { date ->
+                val rows = tasksByDate[date].orEmpty()
+                val totalTasks = rows.size
+                val completedTasks = rows.count { it[PlanTaskTable.isCompleted] }
+                val completionRate = if (totalTasks == 0) 0.0 else (completedTasks.toDouble() / totalTasks) * 100
+
+                StreakDayResponse(date = date.toString(), completionRate = completionRate)
+            }
+            .toList()
+
+        return StreakResponse(days = days)
     }
 
     fun getUnavailableTimes(id: Int): List<UnavailableTimeResponse> {
@@ -105,8 +181,7 @@ class UserService(
             userId = userId,
             schoolId = request.schoolId,
             grade = request.grade,
-            classNumber = request.classNumber,
-            studyStyle = request.studyStyle
+            classNumber = request.classNumber
         )
 
         return StudentProfileResponse(
@@ -114,8 +189,7 @@ class UserService(
             userId = userId,
             schoolId = row.schoolId,
             grade = row.grade,
-            classNumber = row.classNumber,
-            studyStyle = row.studyStyle
+            classNumber = row.classNumber
         )
     }
 
@@ -134,9 +208,15 @@ class UserService(
     fun addUnavailableTime(userId: Int, request: UnavailableTimeRequest): UnavailableTimeResponse {
         userRepo.findUserById(userId) ?: throw UserNotFoundException()
 
+        val dayOfWeek = try {
+            DayOfWeek.fromCode(request.dayOfWeek)
+        } catch (_: IllegalArgumentException) {
+            throw UserValidationException.WrongDayOfWeekException()
+        }
+
         val row = userRepo.insertUnavailableTime(
             userId = userId,
-            dayOfWeek = request.dayOfWeek,
+            dayOfWeek = dayOfWeek,
             startTime = LocalTime.parse(request.startTime),
             endTime = LocalTime.parse(request.endTime)
         )

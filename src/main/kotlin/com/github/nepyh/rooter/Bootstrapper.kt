@@ -2,6 +2,7 @@ package com.github.nepyh.rooter
 
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.auth.JwtValidator
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
@@ -66,7 +67,7 @@ fun Application.appEntryModule() {
             )
             validate { credential -> jwtValidator.validate(credential) }
             challenge { _, _ ->
-                call.respond(HttpStatusCode.Unauthorized, mapOf("message" to "인증이 필요합니다."))
+                call.respond(HttpStatusCode.Unauthorized, ErrorResponse("UNAUTHORIZED", "인증이 필요합니다."))
             }
         }
     }

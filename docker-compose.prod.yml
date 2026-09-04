@@ -1,8 +1,9 @@
 services:
   app:
     container_name: rooter-back-app
-    image: 208367987268.dkr.ecr.ap-northeast-2.amazonaws.com/rooter:latest
+    image: ${APP_IMAGE}
     restart: always
+    command: ["-config=prod.conf"]
     ports:
       - "${SERVICE_HOST}:${SERVICE_PORT}:8080"
     environment:
@@ -13,6 +14,7 @@ services:
       - DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ISSUER=${JWT_ISSUER}
+      - NICE_API_KEY=${NICE_API_KEY}
     depends_on:
       db:
         condition: service_healthy

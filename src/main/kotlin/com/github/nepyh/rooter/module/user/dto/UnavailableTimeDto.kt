@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class UnavailableTimeRequest(
-    val dayOfWeek: DayOfWeek,
+    val dayOfWeek: Short,
     val startTime: String,
     val endTime: String
 )
