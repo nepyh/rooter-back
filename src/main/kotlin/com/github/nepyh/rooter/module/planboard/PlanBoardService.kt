@@ -3,29 +3,33 @@ package com.github.nepyh.rooter.module.planboard
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
-import com.github.nepyh.rooter.module.planboard.model.PlanBoards
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.insert
-import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
 class PlanBoardService {
-    suspend fun getAllBoards(userId: Int): List<PlanBoardResponse> = newSuspendedTransaction {
-        PlanBoards.selectAll()
-            .where { PlanBoards.userId eq userId }
+    fun getAllBoards(userId: Int): List<PlanBoardResponse> = transaction {
+        val user = UserRow.findById(userId)
+            ?: return@transaction emptyList()
+
+        PlanBoardRow.find { PlanBoardTable.userId eq user.id }
             .map {
-            PlanBoardResponse(
-                id = it[PlanBoards.id],
-                title = it[PlanBoards.title],
-                content = "시작: ${it[PlanBoards.startDate]}, 종료: ${it[PlanBoards.endDate]}", // DTO 호환용 임시 처리
-                createdAt = it[PlanBoards.createdAt].format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-            )
-        }
+                PlanBoardResponse(
+                    id = it.id.value,
+                    title = it.title,
+                    startDate = it.startDate.toString(),
+                    endDate = it.endDate.toString(),
+                    createdAt = it.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                )
+            }
     }
 
-    suspend fun createBoard(userId: Int, request: PlanBoardCreateRequest): Int {
+    fun createBoard(userId: Int, request: PlanBoardCreateRequest): Int {
         if (request.title.isBlank() || request.title.length > 100) {
             throw PlanBoardValidationException.InvalidTitleException()
         }
@@ -39,13 +43,14 @@ class PlanBoardService {
             throw PlanBoardValidationException.InvalidDateRangeException()
         }
 
-        return newSuspendedTransaction {
-            PlanBoards.insert {
-                it[this.userId] = userId
-                it[title] = request.title
-                it[this.startDate] = startDate
-                it[this.endDate] = endDate
-            } get PlanBoards.id
+        return transaction {
+            PlanBoardRow.new {
+                user = UserRow[userId]
+                title = request.title
+                this.startDate = startDate
+                this.endDate = endDate
+                createdAt = OffsetDateTime.now()
+            }.id.value
         }
     }
 }

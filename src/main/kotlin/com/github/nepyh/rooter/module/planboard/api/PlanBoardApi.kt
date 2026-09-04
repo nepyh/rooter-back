@@ -5,10 +5,10 @@ import com.github.nepyh.rooter.module.planboard.PlanBoardService
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardResponse
-import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.principal
@@ -23,17 +23,12 @@ import io.ktor.utils.io.ExperimentalKtorApi
 fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
     authenticate("auth-jwt") {
         get("") {
-            try {
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val boards = planBoardService.getAllBoards(userId)
-                call.respond(HttpStatusCode.OK, boards)
-            } catch (_: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-            }
+            val boards = planBoardService.getAllBoards(call.userId())
+            call.respond(HttpStatusCode.OK, boards)
         }.describe {
             tag("PlanBoard")
             summary = "플랜보드 목록 조회"
-            description = "본인 소유의 플랜보드만 조회"
+            description = "본인 플랜보드 목록만 조회 가능"
             responses {
                 HttpStatusCode.OK {
                     description = "조회 성공"
@@ -51,20 +46,9 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
         }
 
         post("") {
-            try {
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val request = call.receive<PlanBoardCreateRequest>()
-                val boardId = planBoardService.createBoard(userId, request)
-                call.respond(HttpStatusCode.Created, PlanBoardCreateResponse(id = boardId, message = "성공적으로 등록되었습니다."))
-            } catch (e: PlanBoardValidationException.InvalidTitleException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("code" to "BOARD_001", "message" to e.message))
-            } catch (e: PlanBoardValidationException.InvalidDateFormatException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("code" to "BOARD_002", "message" to e.message))
-            } catch (e: PlanBoardValidationException.InvalidDateRangeException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("code" to "BOARD_003", "message" to e.message))
-            } catch (_: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-            }
+            val request = call.receive<PlanBoardCreateRequest>()
+            val boardId = planBoardService.createBoard(call.userId(), request)
+            call.respond(HttpStatusCode.Created, PlanBoardCreateResponse(boardId, "성공적으로 등록되었습니다."))
         }.describe {
             tag("PlanBoard")
             summary = "플랜보드 생성"
@@ -80,11 +64,11 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                         schema = jsonSchema<PlanBoardCreateResponse>()
                     }
                 }
-                HttpStatusCode.BadRequest {
-                    description = "제목이 1~100자를 벗어남 (code=BOARD_001), 날짜 형식이 잘못됨 (code=BOARD_002), 또는 종료일이 시작일보다 빠름 (code=BOARD_003)"
-                }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
+                }
+                HttpStatusCode.BadRequest {
+                    description = "제목이 1~100자를 벗어남 (code=INVALID_TITLE), 날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠름 (code=INVALID_DATE_RANGE)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -93,3 +77,6 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
         }
     }
 }
+
+private fun ApplicationCall.userId(): Int =
+    principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()

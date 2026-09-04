@@ -3,7 +3,6 @@ package com.github.nepyh.rooter.module.scheduler.model
 import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
 import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
 
-
 /**
  * scheduler 실행 로그 겸 outbox 테이블.
  * (job_type, run_key) 유니크 키로 중복 실행을 방지한다.

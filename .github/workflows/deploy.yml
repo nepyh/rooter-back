@@ -3,7 +3,7 @@ name: AWS ECR+ECS CI/CD
 on:
   push:
     branches:
-      - main
+      - developer
 
 env:
   ECR_REGISTRY: ${{ secrets.ECR_REGISTRY_URI }}
@@ -12,7 +12,7 @@ env:
   ECS_CLUSTER: default
   ECS_SERVICE: rooter-7ca8
   ECS_TASK_DEFINITION_FAMILY: default-rooter-7ca8
-  CONTAINER_NAME: Main
+  CONTAINER_NAME: Developer
 
 jobs:
   build:
@@ -68,7 +68,7 @@ jobs:
             --task-definition ${{ env.ECS_TASK_DEFINITION_FAMILY }} \
             --query taskDefinition > task-definition.json
 
-      - name: Update Main container image in task definition
+      - name: Update Developer container image in task definition
         id: render-task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:

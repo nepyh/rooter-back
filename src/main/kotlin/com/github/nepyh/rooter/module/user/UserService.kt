@@ -6,8 +6,11 @@ import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeResponse
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
 import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
+import com.github.nepyh.rooter.module.user.dto.StreakDayResponse
+import com.github.nepyh.rooter.module.user.dto.StreakResponse
 import com.github.nepyh.rooter.module.user.dto.UpdateProfileRequest
 import com.github.nepyh.rooter.module.user.dto.UserInfoResponse
 import com.github.nepyh.rooter.module.user.dto.UserProfileUpdateResponse
@@ -18,6 +21,7 @@ import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import io.ktor.http.content.PartData
 import org.mindrot.jbcrypt.BCrypt
+import java.time.LocalDate
 import java.time.LocalTime
 
 class UserService(
@@ -127,6 +131,29 @@ class UserService(
         userRepo.updatePassword(userId, hashedPassword)
 
         return PasswordUpdateResponse(message = "비밀번호가 변경되었습니다.")
+    }
+
+    fun getStreak(userId: Int, start: LocalDate, end: LocalDate): StreakResponse {
+        if (end.isBefore(start)) {
+            throw UserValidationException.WrongDateRangeException()
+        }
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        val tasksByDate = userRepo.findTaskRowsByDateRange(userId, start, end)
+
+        val days = generateSequence(start) { it.plusDays(1) }
+            .takeWhile { !it.isAfter(end) }
+            .map { date ->
+                val rows = tasksByDate[date].orEmpty()
+                val totalTasks = rows.size
+                val completedTasks = rows.count { it[PlanTaskTable.isCompleted] }
+                val completionRate = if (totalTasks == 0) 0.0 else (completedTasks.toDouble() / totalTasks) * 100
+
+                StreakDayResponse(date = date.toString(), completionRate = completionRate)
+            }
+            .toList()
+
+        return StreakResponse(days = days)
     }
 
     fun getUnavailableTimes(id: Int): List<UnavailableTimeResponse> {
