@@ -3,8 +3,10 @@ package com.github.nepyh.rooter.module.planboard.api
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCompleteRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateResponse
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -17,6 +19,7 @@ import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.get
 import io.ktor.server.routing.openapi.describe
+import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.utils.io.ExperimentalKtorApi
 import java.time.LocalDate
@@ -93,6 +96,51 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                 HttpStatusCode.BadRequest {
                     description = "태스크 이름 오류 (code=INVALID_TASK_NAME), 계획 날짜 형식 오류 (code=INVALID_PLAN_DATE), 시간 형식 오류 (code=INVALID_TIME_FORMAT), " +
                         "예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES), 또는 계획 날짜가 플랜보드 기간을 벗어남 (code=PLAN_DATE_OUT_OF_RANGE)"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        patch("{taskId}/complete") {
+            val taskId = call.parameters["taskId"]?.toIntOrNull()
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val request = call.receive<PlanTaskCompleteRequest>()
+
+            val response = planTaskService.completeTask(call.userId(), taskId, request.isCompleted)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("PlanTask")
+            summary = "태스크 완료 처리/취소"
+            description = "isCompleted를 true/false로 보내 완료 상태를 토글. 본인 플랜보드 소유 태스크만 가능"
+            parameters {
+                path("taskId") {
+                    description = "태스크 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<PlanTaskCompleteRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "처리 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<PlanTaskResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않거나 본인 소유가 아닌 태스크"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"

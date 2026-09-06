@@ -13,6 +13,7 @@ import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
+import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
 import com.github.nepyh.rooter.module.scheduler.SchedulerModule
@@ -95,6 +96,9 @@ fun Application.configureAppModule() {
         }
         exception<PlanTaskValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<PlanTaskNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "PLAN_TASK_NOT_FOUND", cause.message)
         }
         exception<BadRequestException> { call, _ ->
             call.respondError(HttpStatusCode.BadRequest, "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다.")
