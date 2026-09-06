@@ -62,4 +62,14 @@ sealed class UserValidationException(
         "INVALID_DATE_RANGE",
         "start 는 end 보다 늦을 수 없습니다."
     )
+    class InvalidSocialTokenException : UserValidationException(
+        HttpStatusCode.Unauthorized,
+        "INVALID_SOCIAL_TOKEN",
+        "유효하지 않은 소셜 로그인 토큰입니다."
+    )
+    class SocialLoginNotConfiguredException : UserValidationException(
+        HttpStatusCode.ServiceUnavailable,
+        "SOCIAL_LOGIN_NOT_CONFIGURED",
+        "아직 지원하지 않는 소셜 로그인입니다."
+    )
 }

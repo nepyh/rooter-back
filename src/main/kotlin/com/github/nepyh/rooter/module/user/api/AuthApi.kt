@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module.user.api
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.module.user.AuthService
+import com.github.nepyh.rooter.module.user.dto.SocialLoginRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginResponse
 import com.github.nepyh.rooter.module.user.dto.UserLogoutResponse
@@ -48,6 +49,70 @@ fun AuthApi(authService: AuthService) = ApiRoute("auth") {
             }
         }
     }
+    post("google") {
+        val request = call.receive<SocialLoginRequest>()
+        val response = authService.loginWithGoogle(request.idToken)
+        call.respond(HttpStatusCode.OK, response)
+    }.describe {
+        tag("Auth")
+        summary = "Google 소셜 로그인"
+        description = "Google 네이티브 SDK로 발급받은 id_token을 검증해 로그인/회원가입. 계정이 없으면 이메일 기준으로 자동 생성"
+        requestBody {
+            ContentType.Application.Json {
+                schema = jsonSchema<SocialLoginRequest>()
+            }
+        }
+        responses {
+            HttpStatusCode.OK {
+                description = "로그인 성공"
+                ContentType.Application.Json {
+                    schema = jsonSchema<UserLoginResponse>()
+                }
+            }
+            HttpStatusCode.Unauthorized {
+                description = "유효하지 않은 id_token (code=INVALID_SOCIAL_TOKEN)"
+            }
+            HttpStatusCode.ServiceUnavailable {
+                description = "Google 클라이언트 ID가 아직 설정되지 않음 (code=SOCIAL_LOGIN_NOT_CONFIGURED)"
+            }
+            HttpStatusCode.InternalServerError {
+                description = "서버 오류"
+            }
+        }
+    }
+
+    post("apple") {
+        val request = call.receive<SocialLoginRequest>()
+        val response = authService.loginWithApple(request.idToken)
+        call.respond(HttpStatusCode.OK, response)
+    }.describe {
+        tag("Auth")
+        summary = "Apple 소셜 로그인"
+        description = "Apple 네이티브 SDK로 발급받은 identityToken을 검증해 로그인/회원가입. 계정이 없으면 이메일 기준으로 자동 생성 (Apple이 email claim을 안 줄 수 있는 경우는 아직 미지원)"
+        requestBody {
+            ContentType.Application.Json {
+                schema = jsonSchema<SocialLoginRequest>()
+            }
+        }
+        responses {
+            HttpStatusCode.OK {
+                description = "로그인 성공"
+                ContentType.Application.Json {
+                    schema = jsonSchema<UserLoginResponse>()
+                }
+            }
+            HttpStatusCode.Unauthorized {
+                description = "유효하지 않은 identityToken (code=INVALID_SOCIAL_TOKEN)"
+            }
+            HttpStatusCode.ServiceUnavailable {
+                description = "Apple 클라이언트 ID가 아직 설정되지 않음 (code=SOCIAL_LOGIN_NOT_CONFIGURED)"
+            }
+            HttpStatusCode.InternalServerError {
+                description = "서버 오류"
+            }
+        }
+    }
+
     authenticate("auth-jwt") {
         post("logout") {
             val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
