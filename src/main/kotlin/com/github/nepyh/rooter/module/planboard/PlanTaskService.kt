@@ -5,6 +5,7 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
+import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
@@ -111,6 +112,19 @@ class PlanTaskService {
             this.endTime = endTime
             estimatedMinutes = request.estimatedMinutes
         }
+    }
+
+    /** 태스크 완료 처리/취소 (본인 플랜보드 소유권 확인) */
+    fun completeTask(userId: Int, taskId: Int, isCompleted: Boolean): PlanTaskResponse = transaction {
+        val task = PlanTaskRow.findById(taskId)
+            ?: throw PlanTaskNotFoundException()
+
+        if (task.dailyPlan.planBoard.user.id.value != userId) {
+            throw PlanTaskNotFoundException()
+        }
+
+        task.isCompleted = isCompleted
+        task.toResponse()
     }
 
     private fun PlanTaskRow.toResponse() = PlanTaskResponse(
