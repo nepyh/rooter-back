@@ -5,6 +5,7 @@ import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateResponse
+import com.github.nepyh.rooter.module.planboard.dto.WeeklyPlanResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -58,6 +59,47 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "date 파라미터 형식이 올바르지 않음 (code=TASK_006)"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        get("week") {
+            val dateParam = call.request.queryParameters["date"]
+            val date = if (dateParam != null) {
+                runCatching { LocalDate.parse(dateParam) }
+                    .getOrElse { throw PlanTaskValidationException.InvalidDateParamException() }
+            } else {
+                LocalDate.now()
+            }
+
+            val weeklyPlan = planTaskService.getWeeklyPlan(call.userId(), date)
+            call.respond(HttpStatusCode.OK, weeklyPlan)
+        }.describe {
+            tag("PlanTask")
+            summary = "할 일 탭 - 주간 과제 리스트 조회"
+            description = "date가 속한 주(월~일)의 요일별 태스크 목록을 조회, date 생략 시 오늘이 속한 주. 본인 플랜보드 기준(모든 보드 대상)"
+            parameters {
+                query("date") {
+                    description = "기준 날짜 (yyyy-MM-dd), 이 날짜가 속한 주(월~일)를 반환"
+                    required = false
+                    schema = jsonSchema<String>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "조회 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<WeeklyPlanResponse>()
+                    }
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.BadRequest {
+                    description = "date 파라미터 형식이 올바르지 않음"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
