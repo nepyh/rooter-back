@@ -9,6 +9,8 @@ import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundEx
 import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.health.HealthModule
+import com.github.nepyh.rooter.module.notification.NotificationModule
+import com.github.nepyh.rooter.module.notification.NotificationScheduler
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
@@ -52,7 +54,8 @@ fun AppModule(appConfig: AppConfig): Module = module {
     includes(
         UserModule(appConfig),
         PlanBoardModule(),
-        CalendarModule()
+        CalendarModule(),
+        NotificationModule()
     )
 
     single<List<ApiRoute>> { getAll() }
@@ -107,6 +110,9 @@ fun Application.configureAppModule() {
     
     val schedulerEngine: SchedulerEngine by inject()
     schedulerEngine.start(this)
+
+    val notificationScheduler: NotificationScheduler by inject()
+    notificationScheduler.start()
 }
 
 private suspend fun ApplicationCall.respondError(
