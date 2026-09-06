@@ -52,6 +52,8 @@ dependencies {
     implementation("org.postgresql:postgresql:42.7.2")
     //jwt
     implementation("com.auth0:java-jwt:4.4.0")
+    // Google/Apple 소셜 로그인 id_token 검증용 (JWKS fetch + RSA 서명 검증)
+    implementation("com.auth0:jwks-rsa:0.24.1")
 
     // test dependencies
     testImplementation("io.kotest:kotest-runner-junit5:6.2.0")
