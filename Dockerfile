@@ -15,6 +15,7 @@ WORKDIR /app
 COPY --from=build /app/build/libs/*-all.jar app.jar
 COPY src/main/resources/prod.conf ./
 COPY src/main/resources/dev.conf ./
+COPY src/main/resources/dev-s3.conf ./
 
 RUN addgroup -S appuser && adduser -S appuser -G appuser \
     && mkdir -p /app/run \
