@@ -13,11 +13,15 @@ services:
       - JDBC_URL=jdbc:postgresql://db:5432/${DB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-      - ALLOWED_HOSTS=와언더테일아시는구나 # dev 세팅에서 ALLOWED_HOSTS 는 짜피 anyHost 로 설정 되기에 씹힘
       - DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
+
+      - ALLOWED_HOSTS=와언더테일아시는구나 # dev 세팅에서 ALLOWED_HOSTS 는 짜피 anyHost 로 설정 되기에 씹힘
+
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ISSUER=${JWT_ISSUER}
+
       - NICE_API_KEY=${NICE_API_KEY}
+
       # IAM Roles Anywhere helper 가 뜨는 경우에만 S3 인증에 사용됨 (없으면 무해)
       - AWS_EC2_METADATA_SERVICE_ENDPOINT=http://roles-anywhere-helper:9911
       # S3 스토리지용 값은 '설정된 경우에만' 전달함 (빈 문자열이 들어가면 HOCON 치환이 성공해버려
@@ -30,6 +34,8 @@ services:
     networks:
       - app-network
 
+  # 개발 환경에서 컨테이너로 돌릴떄 필요한거. 로컬 jvm로 돌리는건 awssdk 가 알아서 유저 경로에서 인증 정보를 긁어와서 상관 없는데
+  # 컨테이너에선 그게 안됨. 그래서 aws 인증 서버? 같은걸 대리로 띄우고 거기다 인증정보 넣어주는거
   roles-anywhere-helper:
     image: public.ecr.aws/rolesanywhere/credential-helper:latest
     profiles: ["roles-anywhere"]   # 이 프로필을 켤 때만 실행됨
