@@ -21,6 +21,7 @@
 - S3 를 쓸 때는 `AWS_REGION` / `AWS_BUCKET` 이 필요하며, 두 값의 리전이 버킷 리전과 같아야 합니다 (다르면 S3 가 301 로 거부)
 - 버킷은 비공개이며, 파일 접근은 presigned URL 로 합니다
 - 정적 액세스 키(`AWS_ACCESS_KEY_ID` 등)는 어느 환경에서도 `.env`/태스크 정의에 넣지 않습니다 — 기본 체인에서 env 가 최우선이라 다른 인증 경로가 조용히 무시됩니다
+- s3 는 설정이 대체로 복잡함. [여기](https://app.notion.com/p/aws-s3-3957e62f83ed80608cd8e2abab084758?source=copy_link)참고
 
 ## running a production container
 
