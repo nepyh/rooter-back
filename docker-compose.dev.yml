@@ -3,6 +3,10 @@ services:
     container_name: rooter-back-dev-app
     build: .
     restart: always
+    # APP_CONFIG 로 사용할 conf 를 전환함 (미설정 시 dev.conf = local 파일 스토리지)
+    # S3 로 띄우려면 .env 에 APP_CONFIG=dev-s3.conf + AWS_REGION/AWS_BUCKET + ROLESANYWHERE_* 를 넣고
+    #   docker compose --profile roles-anywhere up
+    command: ["-config=${APP_CONFIG:-dev.conf}"]
     ports:
       - "8080:8080"
     environment:
@@ -16,6 +20,10 @@ services:
       - NICE_API_KEY=${NICE_API_KEY}
       # IAM Roles Anywhere helper 가 뜨는 경우에만 S3 인증에 사용됨 (없으면 무해)
       - AWS_EC2_METADATA_SERVICE_ENDPOINT=http://roles-anywhere-helper:9911
+      # S3 스토리지용 값은 '설정된 경우에만' 전달함 (빈 문자열이 들어가면 HOCON 치환이 성공해버려
+      # 잘못된 리전으로 조용히 요청하게 되므로 값 없는 형태로 통과시킴)
+      - AWS_REGION
+      - AWS_BUCKET
     depends_on:
       db:
         condition: service_healthy
