@@ -34,8 +34,10 @@ services:
     networks:
       - app-network
 
-  # 개발 환경에서 컨테이너로 돌릴떄 필요한거. 로컬 jvm로 돌리는건 awssdk 가 알아서 유저 경로에서 인증 정보를 긁어와서 상관 없는데
-  # 컨테이너에선 그게 안됨. 그래서 aws 인증 서버? 같은걸 대리로 띄우고 거기다 인증정보 넣어주는거
+  # S3 스토리지로 컨테이너를 돌릴 때 필요한 서비스.
+  # 로컬 jvm 은 ~/.aws/config 의 credential_process(= 이 helper 호출) 설정이 있어야 자격증명을 얻고,
+  # 컨테이너는 그 홈 설정을 쓸 수 없어서 이 helper 가 가짜 EC2 IMDS 엔드포인트(:9911)를 띄워
+  # SDK 의 IMDS 프로바이더가 자격증명을 얻도록 한다 (내부적으로는 인증서로 Roles Anywhere CreateSession 호출).
   roles-anywhere-helper:
     image: public.ecr.aws/rolesanywhere/credential-helper:latest
     profiles: ["roles-anywhere"]   # 이 프로필을 켤 때만 실행됨
