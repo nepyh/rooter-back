@@ -26,6 +26,11 @@ data class AppConfig(
     val jwtSecret: String,
     val jwtIssuer: String,
 
+    // llm related (퀴즈 자동 생성용)
+    val llmBaseUrl: String,
+    val llmApiKey: String,
+    val llmModel: String,
+
     // nice (나이스 교육정보 개방포털) related
     val niceApiKey: String,
     val niceBaseUrl: String
@@ -66,6 +71,10 @@ data class AppConfig(
 
                 jwtSecret = config.property("jwt.secret").getString(),
                 jwtIssuer = config.property("jwt.issuer").getString(),
+
+                llmBaseUrl = config.property("llm.baseUrl").getString(),
+                llmApiKey = config.property("llm.apiKey").getString(),
+                llmModel = config.property("llm.model").getString(),
 
                 niceApiKey = config.property("nice.apiKey").getString(),
                 niceBaseUrl = config.propertyOrNull("nice.baseUrl")?.getString()
