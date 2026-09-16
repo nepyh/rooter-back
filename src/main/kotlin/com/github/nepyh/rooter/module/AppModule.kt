@@ -10,6 +10,7 @@ import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationExcep
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.feedback.FeedbackModule
 import com.github.nepyh.rooter.module.health.HealthModule
+import com.github.nepyh.rooter.module.leveltest.LevelTestModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
@@ -56,7 +57,8 @@ fun AppModule(appConfig: AppConfig): Module = module {
         PlanBoardModule(),
         QuizModule(appConfig),
         CalendarModule(),
-        FeedbackModule(appConfig)
+        FeedbackModule(appConfig),
+        LevelTestModule(appConfig)
     )
 
     single<List<ApiRoute>> { getAll() }
