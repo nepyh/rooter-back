@@ -137,6 +137,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "태스크 이름 오류 (code=INVALID_TASK_NAME), 계획 날짜 형식 오류 (code=INVALID_PLAN_DATE), 시간 형식 오류 (code=INVALID_TIME_FORMAT), " +
+                        "종료 시간이 시작 시간보다 빠르거나 같음 (code=INVALID_TIME_RANGE), " +
                         "예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES), 또는 계획 날짜가 플랜보드 기간을 벗어남 (code=PLAN_DATE_OUT_OF_RANGE)"
                 }
                 HttpStatusCode.InternalServerError {

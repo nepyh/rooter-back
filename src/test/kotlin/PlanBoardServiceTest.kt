@@ -196,6 +196,24 @@ class PlanBoardServiceTest : StringSpec({
         }
     }
 
+    "createTask: 종료 시간이 시작 시간보다 빠르거나 같으면 InvalidTimeRangeException" {
+        val userId = seedUser("task-range@test.com")
+        val boardId = seedBoard(userId)
+
+        shouldThrow<PlanTaskValidationException.InvalidTimeRangeException> {
+            planTaskService.createTask(
+                userId,
+                taskRequest(planBoardId = boardId, startTime = "19:30", endTime = "19:30")
+            )
+        }
+        shouldThrow<PlanTaskValidationException.InvalidTimeRangeException> {
+            planTaskService.createTask(
+                userId,
+                taskRequest(planBoardId = boardId, startTime = "19:30", endTime = "17:00")
+            )
+        }
+    }
+
     "createTask: 예상 소요 시간이 1분 미만이면 InvalidEstimatedMinutesException" {
         val userId = seedUser("task-min@test.com")
         val boardId = seedBoard(userId)
