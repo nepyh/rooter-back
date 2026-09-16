@@ -7,7 +7,7 @@ import org.koin.dsl.module
 
 fun ChatModule(appConfig: AppConfig) = module {
     single { ChatLlmClient(appConfig) }
-    single { ChatService(get()) }
+    single { ChatService(get(), get()) }
 
     single(named("chatApi")) { ChatApi(get()) }
 }

@@ -12,8 +12,10 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswers
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
+import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -33,7 +35,8 @@ import java.util.Locale
 private const val HISTORY_LIMIT = 10
 
 class ChatService(
-    private val chatLlmClient: ChatLlmClient
+    private val chatLlmClient: ChatLlmClient,
+    private val schoolDataFetcher: SchoolDataFetcher
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -58,11 +61,18 @@ class ChatService(
                 .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
                 .map { it[PlanTaskTable.taskName] to it[PlanTaskTable.estimatedMinutes] }
 
-            val grade = StudentProfileTable.selectAll()
+            val profileRow = StudentProfileTable.selectAll()
                 .where { StudentProfileTable.user eq userId }
                 .firstOrNull()
-                ?.get(StudentProfileTable.grade)
-                ?: 2
+            val grade = profileRow?.get(StudentProfileTable.grade) ?: 2
+            val schoolId = profileRow?.get(StudentProfileTable.schoolId)
+            val classNumber = profileRow?.get(StudentProfileTable.classNumber)
+            val customUnavailableRows = UnavailableTimeTable.selectAll()
+                .where { UnavailableTimeTable.user eq userId }
+                .map {
+                    it[UnavailableTimeTable.dayOfWeek].code.toInt() to
+                        (PlanTaskScheduler.toMinutes(it[UnavailableTimeTable.startTime]) to PlanTaskScheduler.toMinutes(it[UnavailableTimeTable.endTime]))
+                }
 
             val studyStyleSummary = StudyStyleAnswers.selectAll()
                 .where { StudyStyleAnswers.userId eq userId }
@@ -77,7 +87,17 @@ class ChatService(
                 .map { AiChatTurn(role = it[ChatTurns.role], content = it[ChatTurns.content]) }
                 .takeLast(HISTORY_LIMIT)
 
-            ChatContext(planDate.toString(), planDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.KOREAN), tasks, grade, studyStyleSummary, history)
+            ChatContext(
+                planDate = planDate.toString(),
+                dayOfWeekLabel = planDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.KOREAN),
+                tasks = tasks,
+                grade = grade,
+                schoolId = schoolId,
+                classNumber = classNumber,
+                customUnavailableRows = customUnavailableRows,
+                studyStyleSummary = studyStyleSummary,
+                history = history
+            )
         }
 
         val result = chatLlmClient.adjustPlan(
@@ -88,6 +108,34 @@ class ChatService(
             chatHistoryJson = json.encodeToString(context.history),
             userMessage = trimmed
         )
+
+        val update = result?.plan_update
+        val shouldReplan = result != null && result.plan_changed && update != null && update.tasks.isNotEmpty()
+
+        // NICE 시간표 조회(네트워크 호출)가 있어 트랜잭션 밖에서 미리 계산해둔다.
+        val freeIntervals = if (shouldReplan) {
+            val planDate = LocalDate.parse(context.planDate)
+            val busyRanges = PlanTaskScheduler.buildUnavailableRanges(
+                schoolDataFetcher = schoolDataFetcher,
+                startDate = planDate,
+                endDate = planDate,
+                schoolId = context.schoolId,
+                classNumber = context.classNumber,
+                grade = context.grade,
+                customRows = context.customUnavailableRows
+            )[planDate].orEmpty()
+            val extraBusy = if (update!!.busy_window_start != null && update.busy_window_end != null) {
+                listOf(
+                    PlanTaskScheduler.toMinutes(LocalTime.parse(update.busy_window_start)) to
+                        PlanTaskScheduler.toMinutes(LocalTime.parse(update.busy_window_end))
+                )
+            } else {
+                emptyList()
+            }
+            PlanTaskScheduler.freeIntervalsFromBusyRanges(busyRanges + extraBusy)
+        } else {
+            emptyList()
+        }
 
         return newSuspendedTransaction {
             ChatTurns.insert {
@@ -109,24 +157,9 @@ class ChatService(
             }
 
             var updatedTasks: List<PlanTaskResponse>? = null
-            val update = result.plan_update
-            if (result.plan_changed && update != null && update.tasks.isNotEmpty()) {
-                val unavailableRanges = PlanTaskScheduler.loadUnavailableRanges(userId)
-                val extraBusy = if (update.busy_window_start != null && update.busy_window_end != null) {
-                    listOf(
-                        PlanTaskScheduler.toMinutes(LocalTime.parse(update.busy_window_start)) to
-                            PlanTaskScheduler.toMinutes(LocalTime.parse(update.busy_window_end))
-                    )
-                } else {
-                    emptyList()
-                }
-                val freeIntervals = PlanTaskScheduler.freeIntervalsForDate(
-                    LocalDate.parse(context.planDate),
-                    unavailableRanges,
-                    extraBusy
-                )
+            if (shouldReplan) {
                 val placed = PlanTaskScheduler.placeTasks(
-                    update.tasks.map { it.task_name to it.estimated_minutes },
+                    update!!.tasks.map { it.task_name to it.estimated_minutes },
                     freeIntervals
                 )
 
@@ -186,6 +219,9 @@ private data class ChatContext(
     val dayOfWeekLabel: String,
     val tasks: List<Pair<String, Int>>,
     val grade: Int,
+    val schoolId: String?,
+    val classNumber: Int?,
+    val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>,
     val studyStyleSummary: String,
     val history: List<AiChatTurn>
 )
