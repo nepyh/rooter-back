@@ -33,7 +33,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
         }.describe {
             tag("PlanBoard")
             summary = "플랜보드 목록 조회"
-            description = "본인 플랜보드 목록만 조회 가능"
+            description = "본인 플랜보드 목록만 조회 가능. examDate 가 있으면 dDay(오늘 기준 남은 일수, 지났으면 음수)도 같이 내려감"
             responses {
                 HttpStatusCode.OK {
                     description = "조회 성공"
@@ -57,6 +57,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
         }.describe {
             tag("PlanBoard")
             summary = "플랜보드 생성"
+            description = "examDate(시험 날짜)는 선택 — 입력하면 플랜보드 조회 응답에 dDay 가 같이 내려감"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<PlanBoardCreateRequest>()
@@ -90,7 +91,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
         }.describe {
             tag("PlanBoard")
             summary = "플랜보드 수정"
-            description = "title/startDate/endDate 중 전달된 필드만 수정. 본인 보드만 가능"
+            description = "title/startDate/endDate/examDate 중 전달된 필드만 수정. 본인 보드만 가능"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<PlanBoardUpdateRequest>()

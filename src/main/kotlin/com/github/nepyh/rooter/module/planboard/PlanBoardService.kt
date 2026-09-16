@@ -26,6 +26,7 @@ import org.jetbrains.exposed.v1.jdbc.update
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 private data class ResolvedTextbookSubject(val subjectId: Int, val subjectName: String, val textbookTitle: String)
 
@@ -35,15 +36,7 @@ class PlanBoardService {
             ?: return@transaction emptyList()
 
         PlanBoardRow.find { PlanBoardTable.userId eq user.id }
-            .map {
-                PlanBoardResponse(
-                    id = it.id.value,
-                    title = it.title,
-                    startDate = it.startDate.toString(),
-                    endDate = it.endDate.toString(),
-                    createdAt = it.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                )
-            }
+            .map { it.toResponse() }
     }
 
     fun createBoard(userId: Int, request: PlanBoardCreateRequest): Int {
@@ -55,6 +48,9 @@ class PlanBoardService {
             .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
         val endDate = runCatching { LocalDate.parse(request.endDate) }
             .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
+        val examDate = request.examDate?.let {
+            runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
+        }
 
         if (endDate.isBefore(startDate)) {
             throw PlanBoardValidationException.InvalidDateRangeException()
@@ -66,12 +62,13 @@ class PlanBoardService {
                 title = request.title
                 this.startDate = startDate
                 this.endDate = endDate
+                this.examDate = examDate
                 createdAt = OffsetDateTime.now()
             }.id.value
         }
     }
 
-    /** title/startDate/endDate 중 전달된 필드만 수정. 본인 보드만 가능 */
+    /** title/startDate/endDate/examDate 중 전달된 필드만 수정. 본인 보드만 가능 */
     fun updateBoard(userId: Int, boardId: Int, request: PlanBoardUpdateRequest): PlanBoardResponse = transaction {
         val board = PlanBoardRow.findById(boardId) ?: throw PlanBoardNotFoundException()
         if (board.user.id.value != userId) throw PlanBoardForbiddenException()
@@ -91,12 +88,23 @@ class PlanBoardService {
         board.startDate = newStartDate
         board.endDate = newEndDate
 
-        PlanBoardResponse(
-            id = board.id.value,
-            title = board.title,
-            startDate = board.startDate.toString(),
-            endDate = board.endDate.toString(),
-            createdAt = board.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+        request.examDate?.let {
+            board.examDate = runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
+        }
+
+        board.toResponse()
+    }
+
+    private fun PlanBoardRow.toResponse(): PlanBoardResponse {
+        val exam = examDate
+        return PlanBoardResponse(
+            id = id.value,
+            title = title,
+            startDate = startDate.toString(),
+            endDate = endDate.toString(),
+            examDate = exam?.toString(),
+            dDay = exam?.let { ChronoUnit.DAYS.between(LocalDate.now(), it).toInt() },
+            createdAt = createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
         )
     }
 

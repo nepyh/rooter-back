@@ -179,6 +179,51 @@ class PlanBoardServiceTest : StringSpec({
         ownerId shouldBe userId
     }
 
+    "createBoard: examDate 를 주면 저장된다" {
+        val userId = seedUser("board-examdate@test.com")
+        val boardId = planBoardService.createBoard(
+            userId,
+            PlanBoardCreateRequest("기말고사 대비", "2026-07-01", "2026-08-31", examDate = "2026-09-01")
+        )
+
+        val savedExamDate = transaction(db) {
+            (PlanBoardRow.findById(boardId) ?: error("보드가 저장되지 않음")).examDate
+        }
+        savedExamDate shouldBe LocalDate.of(2026, 9, 1)
+    }
+
+    "createBoard: examDate 형식이 잘못되면 InvalidDateFormatException" {
+        shouldThrow<PlanBoardValidationException.InvalidDateFormatException> {
+            planBoardService.createBoard(1, PlanBoardCreateRequest("제목", "2026-07-01", "2026-07-31", examDate = "2026/09/01"))
+        }
+    }
+
+    // ---- getAllBoards ----
+
+    "getAllBoards: examDate 가 없으면 dDay 는 null" {
+        val userId = seedUser("board-list-no-exam@test.com")
+        seedBoard(userId, start = LocalDate.of(2026, 7, 1), end = LocalDate.of(2026, 7, 31))
+
+        val boards = planBoardService.getAllBoards(userId)
+
+        boards.single().examDate shouldBe null
+        boards.single().dDay shouldBe null
+    }
+
+    "getAllBoards: examDate 가 있으면 오늘 기준 dDay 를 계산해서 내려준다" {
+        val userId = seedUser("board-list-exam@test.com")
+        val examDate = LocalDate.now().plusDays(20)
+        planBoardService.createBoard(
+            userId,
+            PlanBoardCreateRequest("시험 대비", "2026-07-01", "2026-08-31", examDate = examDate.toString())
+        )
+
+        val board = planBoardService.getAllBoards(userId).single()
+
+        board.examDate shouldBe examDate.toString()
+        board.dDay shouldBe 20
+    }
+
     // ---- updateBoard / deleteBoard ----
 
     "updateBoard: 본인 보드가 아니면 PlanBoardForbiddenException" {
@@ -216,6 +261,17 @@ class PlanBoardServiceTest : StringSpec({
         shouldThrow<PlanBoardValidationException.InvalidDateRangeException> {
             planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(endDate = "2026-06-01"))
         }
+    }
+
+    "updateBoard: examDate 를 주면 저장되고 dDay 가 응답에 반영된다" {
+        val userId = seedUser("update-examdate@test.com")
+        val boardId = seedBoard(userId, start = LocalDate.of(2026, 7, 1), end = LocalDate.of(2026, 7, 31))
+        val examDate = LocalDate.now().plusDays(5)
+
+        val response = planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(examDate = examDate.toString()))
+
+        response.examDate shouldBe examDate.toString()
+        response.dDay shouldBe 5
     }
 
     "deleteBoard: 본인 보드가 아니면 PlanBoardForbiddenException" {
