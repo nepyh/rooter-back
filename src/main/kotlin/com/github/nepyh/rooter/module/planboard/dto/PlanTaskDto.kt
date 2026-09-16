@@ -19,6 +19,13 @@ data class DailyPlanResponse(
 )
 
 @Serializable
+data class WeeklyPlanResponse(
+    val weekStart: String,        // 월요일, "2026-06-29"
+    val weekEnd: String,          // 일요일, "2026-07-05"
+    val days: List<DailyPlanResponse>
+)
+
+@Serializable
 data class PlanTaskCreateRequest(
     val planBoardId: Int,
     val planDate: String,
