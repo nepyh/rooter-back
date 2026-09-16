@@ -30,6 +30,7 @@ import java.time.temporal.ChronoUnit
 
 private const val DAY_MINUTES = 24 * 60
 private val DEFAULT_UNAVAILABLE_RANGES = listOf(0 to (6 * 60 + 30), (23 * 60) to DAY_MINUTES) // 00:00~06:30, 23:00~24:00
+private val SCHOOL_PREP_RANGE = (7 * 60) to (8 * 60) // 07:00~08:00, 등교 준비(세면/식사/이동), 평일만
 private const val SCHOOL_START_MINUTES = 8 * 60 + 30 // 08:30 등교, 고정
 private val DEFAULT_SCHOOL_HOURS = SCHOOL_START_MINUTES to (16 * 60 + 30) // NICE 시간표를 못 가져올 때 쓰는 폴백값 (08:30~16:30)
 private const val DEFAULT_BREAK_MINUTES = 10
@@ -273,7 +274,8 @@ class PlanGenerationService(
 
         return dates.associateWith { date ->
             val ranges = DEFAULT_UNAVAILABLE_RANGES.toMutableList()
-            if (date.dayOfWeek.value <= 5) { // 평일(월~금)만 학교시간 추가
+            if (date.dayOfWeek.value <= 5) { // 평일(월~금)만 등교 준비 + 학교시간 추가
+                ranges.add(SCHOOL_PREP_RANGE)
                 val schoolHours = dismissalMinutesByDate[date]?.let { SCHOOL_START_MINUTES to it } ?: DEFAULT_SCHOOL_HOURS
                 ranges.add(schoolHours)
             }
