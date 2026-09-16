@@ -7,6 +7,7 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCompleteRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.WeeklyPlanResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import io.ktor.http.ContentType
@@ -18,6 +19,7 @@ import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.principal
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.openapi.describe
 import io.ktor.server.routing.patch
@@ -175,6 +177,88 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     ContentType.Application.Json {
                         schema = jsonSchema<PlanTaskResponse>()
                     }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않거나 본인 소유가 아닌 태스크"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        patch("{taskId}") {
+            val taskId = call.parameters["taskId"]?.toIntOrNull()
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val request = call.receive<PlanTaskUpdateRequest>()
+
+            val response = planTaskService.updateTask(call.userId(), taskId, request)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("PlanTask")
+            summary = "태스크 수정"
+            description = "taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정. 본인 플랜보드 소유 태스크만 가능"
+            parameters {
+                path("taskId") {
+                    description = "태스크 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<PlanTaskUpdateRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "수정 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<PlanTaskResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID, 태스크 이름 오류 (code=INVALID_TASK_NAME), 시간 형식 오류 (code=INVALID_TIME_FORMAT), " +
+                        "종료 시간이 시작 시간보다 빠르거나 같음 (code=INVALID_TIME_RANGE), 또는 예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않거나 본인 소유가 아닌 태스크"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        delete("{taskId}") {
+            val taskId = call.parameters["taskId"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+
+            planTaskService.deleteTask(call.userId(), taskId)
+            call.respond(HttpStatusCode.NoContent)
+        }.describe {
+            tag("PlanTask")
+            summary = "태스크 삭제"
+            description = "본인 플랜보드 소유 태스크만 가능"
+            parameters {
+                path("taskId") {
+                    description = "태스크 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            responses {
+                HttpStatusCode.NoContent {
+                    description = "삭제 성공"
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID"

@@ -1,27 +1,38 @@
 import com.github.nepyh.rooter.module.planboard.PlanBoardService
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
+import com.github.nepyh.rooter.module.planboard.dto.PlanBoardUpdateRequest
+import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
+import com.github.nepyh.rooter.module.planboard.exception.PlanSubjectNotFoundException
+import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
+import com.github.nepyh.rooter.module.planboard.model.Chapters
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjects
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.Subjects
+import com.github.nepyh.rooter.module.planboard.model.Textbooks
 import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
+import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
@@ -57,11 +68,15 @@ class PlanBoardServiceTest : StringSpec({
         transaction(db) {
             // CASCADE 로 드랍: users 를 다른 스펙(예: CatalogServiceTest)의 테이블이 FK 로 참조하고
             // 있어도 실행 순서와 무관하게 안전하게 재생성하기 위함
+            exec("DROP TABLE IF EXISTS plan_subjects CASCADE")
             exec("DROP TABLE IF EXISTS plan_tasks CASCADE")
             exec("DROP TABLE IF EXISTS daily_plans CASCADE")
             exec("DROP TABLE IF EXISTS plan_boards CASCADE")
+            exec("DROP TABLE IF EXISTS chapters CASCADE")
+            exec("DROP TABLE IF EXISTS textbooks CASCADE")
+            exec("DROP TABLE IF EXISTS subjects CASCADE")
             exec("DROP TABLE IF EXISTS users CASCADE")
-            SchemaUtils.create(UserTable, PlanBoardTable, DailyPlanTable, PlanTaskTable)
+            SchemaUtils.create(UserTable, Subjects, Textbooks, Chapters, PlanBoardTable, PlanSubjects, DailyPlanTable, PlanTaskTable)
             // DDL(rooter-ddl) 의 uq_daily_plans_board_date 와 동일한 제약 — insertIgnore 레이스 방지 검증용
             exec("ALTER TABLE daily_plans ADD CONSTRAINT uq_daily_plans_board_date UNIQUE (plan_board_id, plan_date)")
         }
@@ -71,8 +86,12 @@ class PlanBoardServiceTest : StringSpec({
     beforeEach {
         transaction(db) {
             PlanTaskTable.deleteAll()
+            PlanSubjects.deleteAll()
             DailyPlanTable.deleteAll()
             PlanBoardTable.deleteAll()
+            Chapters.deleteAll()
+            Textbooks.deleteAll()
+            Subjects.deleteAll()
             UserTable.deleteAll()
         }
     }
@@ -101,6 +120,25 @@ class PlanBoardServiceTest : StringSpec({
             this.endDate = end
             createdAt = OffsetDateTime.now()
         }.id.value
+    }
+
+    fun seedSubject(name: String): Int = transaction(db) {
+        Subjects.insert { it[this.name] = name } get Subjects.id
+    }
+
+    fun seedTextbook(subjectId: Int, title: String = "테스트 교과서"): Int = transaction(db) {
+        Textbooks.insert {
+            it[this.subjectId] = subjectId
+            it[this.title] = title
+        } get Textbooks.id
+    }
+
+    fun seedChapter(textbookId: Int, order: Int, name: String = "${order}단원"): Int = transaction(db) {
+        Chapters.insert {
+            it[this.textbookId] = textbookId
+            it[chapterName] = name
+            it[chapterOrder] = order
+        } get Chapters.id
     }
 
     // ---- createBoard ----
@@ -139,6 +177,229 @@ class PlanBoardServiceTest : StringSpec({
         }
         title shouldBe "여름방학"
         ownerId shouldBe userId
+    }
+
+    // ---- updateBoard / deleteBoard ----
+
+    "updateBoard: 본인 보드가 아니면 PlanBoardForbiddenException" {
+        val ownerId = seedUser("update-owner@test.com")
+        val otherId = seedUser("update-other@test.com")
+        val boardId = seedBoard(ownerId)
+
+        shouldThrow<PlanBoardForbiddenException> {
+            planBoardService.updateBoard(otherId, boardId, PlanBoardUpdateRequest(title = "해킹시도"))
+        }
+    }
+
+    "updateBoard: 존재하지 않는 보드면 PlanBoardNotFoundException" {
+        val userId = seedUser("update-noboard@test.com")
+        shouldThrow<PlanBoardNotFoundException> {
+            planBoardService.updateBoard(userId, 999, PlanBoardUpdateRequest(title = "제목"))
+        }
+    }
+
+    "updateBoard: title 만 전달하면 title 만 바뀐다" {
+        val userId = seedUser("update-title@test.com")
+        val boardId = seedBoard(userId, start = LocalDate.of(2026, 7, 1), end = LocalDate.of(2026, 7, 31))
+
+        val response = planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(title = "새 제목"))
+
+        response.title shouldBe "새 제목"
+        response.startDate shouldBe "2026-07-01"
+        response.endDate shouldBe "2026-07-31"
+    }
+
+    "updateBoard: 수정 후 종료일이 시작일보다 빠르면 InvalidDateRangeException" {
+        val userId = seedUser("update-range@test.com")
+        val boardId = seedBoard(userId, start = LocalDate.of(2026, 7, 1), end = LocalDate.of(2026, 7, 31))
+
+        shouldThrow<PlanBoardValidationException.InvalidDateRangeException> {
+            planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(endDate = "2026-06-01"))
+        }
+    }
+
+    "deleteBoard: 본인 보드가 아니면 PlanBoardForbiddenException" {
+        val ownerId = seedUser("delete-owner@test.com")
+        val otherId = seedUser("delete-other@test.com")
+        val boardId = seedBoard(ownerId)
+
+        shouldThrow<PlanBoardForbiddenException> {
+            planBoardService.deleteBoard(otherId, boardId)
+        }
+    }
+
+    "deleteBoard: 삭제하면 하위 daily_plan/plan_task 도 함께 삭제된다" {
+        val userId = seedUser("delete-cascade@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+
+        planBoardService.deleteBoard(userId, boardId)
+
+        transaction(db) {
+            PlanBoardRow.findById(boardId) shouldBe null
+            DailyPlanRow.find { DailyPlanTable.planBoardId eq boardId }.toList().shouldBeEmpty()
+        }
+    }
+
+    // ---- addSubject / getSubjects / updateSubject / deleteSubject ----
+
+    "addSubject: 존재하지 않는 교과서면 InvalidSubjectRangeException" {
+        val userId = seedUser("subject-notextbook@test.com")
+        val boardId = seedBoard(userId)
+
+        shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
+            planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(999, 1, 1))
+        }
+    }
+
+    "addSubject: 시작 단원이 끝 단원보다 뒤면 InvalidSubjectRangeException" {
+        val userId = seedUser("subject-wrongorder@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("수학")
+        val textbookId = seedTextbook(subjectId)
+        val chapter1 = seedChapter(textbookId, 1)
+        val chapter2 = seedChapter(textbookId, 2)
+
+        shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
+            planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(textbookId, chapter2, chapter1))
+        }
+    }
+
+    "addSubject: 정상 등록되면 subjectName/textbookTitle 이 채워진다" {
+        val userId = seedUser("subject-ok@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("영어")
+        val textbookId = seedTextbook(subjectId, title = "능률영어")
+        val chapter1 = seedChapter(textbookId, 1)
+        val chapter2 = seedChapter(textbookId, 2)
+
+        val response = planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(textbookId, chapter1, chapter2))
+
+        response.subjectName shouldBe "영어"
+        response.textbookTitle shouldBe "능률영어"
+        response.planBoardId shouldBe boardId
+    }
+
+    "getSubjects: 등록한 과목 범위 목록을 반환한다" {
+        val userId = seedUser("subject-list@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("국어")
+        val textbookId = seedTextbook(subjectId)
+        val chapter1 = seedChapter(textbookId, 1)
+        val chapter2 = seedChapter(textbookId, 2)
+        planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(textbookId, chapter1, chapter2))
+
+        val result = planBoardService.getSubjects(userId, boardId)
+
+        result.map { it.subjectName } shouldBe listOf("국어")
+    }
+
+    "updateSubject: 존재하지 않는 subjectId 면 PlanSubjectNotFoundException" {
+        val userId = seedUser("subject-updatenone@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("사회")
+        val textbookId = seedTextbook(subjectId)
+        val chapter1 = seedChapter(textbookId, 1)
+        val chapter2 = seedChapter(textbookId, 2)
+
+        shouldThrow<PlanSubjectNotFoundException> {
+            planBoardService.updateSubject(userId, boardId, 999, PlanSubjectCreateRequest(textbookId, chapter1, chapter2))
+        }
+    }
+
+    "updateSubject: 정상 수정된다" {
+        val userId = seedUser("subject-update@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("과학")
+        val textbookId = seedTextbook(subjectId)
+        val chapter1 = seedChapter(textbookId, 1)
+        val chapter2 = seedChapter(textbookId, 2)
+        val created = planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(textbookId, chapter1, chapter1))
+
+        val updated = planBoardService.updateSubject(
+            userId, boardId, created.id,
+            PlanSubjectCreateRequest(textbookId, chapter1, chapter2, customRangeText = "심화")
+        )
+
+        updated.endChapterId shouldBe chapter2
+        updated.customRangeText shouldBe "심화"
+    }
+
+    "deleteSubject: 삭제 후 조회하면 빈 목록" {
+        val userId = seedUser("subject-delete@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("역사")
+        val textbookId = seedTextbook(subjectId)
+        val chapter1 = seedChapter(textbookId, 1)
+        val created = planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(textbookId, chapter1, chapter1))
+
+        planBoardService.deleteSubject(userId, boardId, created.id)
+
+        planBoardService.getSubjects(userId, boardId).shouldBeEmpty()
+    }
+
+    "deleteSubject: 존재하지 않으면 PlanSubjectNotFoundException" {
+        val userId = seedUser("subject-deletenone@test.com")
+        val boardId = seedBoard(userId)
+
+        shouldThrow<PlanSubjectNotFoundException> {
+            planBoardService.deleteSubject(userId, boardId, 999)
+        }
+    }
+
+    // ---- updateTask / deleteTask ----
+
+    "updateTask: 존재하지 않거나 본인 소유가 아니면 PlanTaskNotFoundException" {
+        val userId = seedUser("task-updatenone@test.com")
+        shouldThrow<PlanTaskNotFoundException> {
+            planTaskService.updateTask(userId, 999, PlanTaskUpdateRequest(taskName = "수정"))
+        }
+    }
+
+    "updateTask: 이름만 전달하면 이름만 바뀐다" {
+        val userId = seedUser("task-updatename@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+        val taskId = transaction(db) { PlanTaskRow.find { PlanTaskTable.taskName eq "수학 2단원" }.first().id.value }
+
+        val response = planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수학 3단원"))
+
+        response.taskName shouldBe "수학 3단원"
+        response.startTime shouldBe "17:30"
+    }
+
+    "updateTask: 수정 후 endTime 이 startTime 보다 빠르거나 같으면 InvalidTimeRangeException" {
+        val userId = seedUser("task-updaterange@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId, startTime = "17:00", endTime = "19:00"))
+        val taskId = transaction(db) { PlanTaskRow.find { PlanTaskTable.taskName eq "수학 2단원" }.first().id.value }
+
+        shouldThrow<PlanTaskValidationException.InvalidTimeRangeException> {
+            planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(startTime = "20:00"))
+        }
+    }
+
+    "deleteTask: 삭제 후 조회되지 않는다" {
+        val userId = seedUser("task-delete@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+        val taskId = transaction(db) { PlanTaskRow.find { PlanTaskTable.taskName eq "수학 2단원" }.first().id.value }
+
+        planTaskService.deleteTask(userId, taskId)
+
+        transaction(db) { PlanTaskRow.findById(taskId) shouldBe null }
+    }
+
+    "deleteTask: 본인 소유가 아니면 PlanTaskNotFoundException" {
+        val ownerId = seedUser("task-delete-owner@test.com")
+        val otherId = seedUser("task-delete-other@test.com")
+        val boardId = seedBoard(ownerId)
+        planTaskService.createTask(ownerId, taskRequest(planBoardId = boardId))
+        val taskId = transaction(db) { PlanTaskRow.find { PlanTaskTable.taskName eq "수학 2단원" }.first().id.value }
+
+        shouldThrow<PlanTaskNotFoundException> {
+            planTaskService.deleteTask(otherId, taskId)
+        }
     }
 
     // ---- createTask ----

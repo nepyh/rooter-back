@@ -44,3 +44,11 @@ data class PlanTaskCreateResponse(
 data class PlanTaskCompleteRequest(
     val isCompleted: Boolean
 )
+
+@Serializable
+data class PlanTaskUpdateRequest(
+    val taskName: String? = null,
+    val startTime: String? = null,
+    val endTime: String? = null,
+    val estimatedMinutes: Int? = null
+)
