@@ -24,16 +24,13 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
 
-private const val DAY_MINUTES = 24 * 60
-private val DEFAULT_UNAVAILABLE_RANGES = listOf(0 to (6 * 60 + 30), (23 * 60) to DAY_MINUTES) // 00:00~06:30, 23:00~24:00
+private val DEFAULT_UNAVAILABLE_RANGES = listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60)) // 00:00~06:30, 23:00~24:00
 private val SCHOOL_PREP_RANGE = (7 * 60) to (8 * 60) // 07:00~08:00, 등교 준비(세면/식사/이동), 평일만
 private const val SCHOOL_START_MINUTES = 8 * 60 + 30 // 08:30 등교, 고정
 private val DEFAULT_SCHOOL_HOURS = SCHOOL_START_MINUTES to (16 * 60 + 30) // NICE 시간표를 못 가져올 때 쓰는 폴백값 (08:30~16:30)
-private const val DEFAULT_BREAK_MINUTES = 10
 
 /**
  * 하교 시각 = 09:10 + (그날 마지막 교시 수 × 60분).
@@ -95,7 +92,10 @@ class PlanGenerationService(
                 .firstOrNull()
             val customRows = UnavailableTimeTable.selectAll()
                 .where { UnavailableTimeTable.user eq userId }
-                .map { it[UnavailableTimeTable.dayOfWeek].code.toInt() to (toMinutes(it[UnavailableTimeTable.startTime]) to toMinutes(it[UnavailableTimeTable.endTime])) }
+                .map {
+                    it[UnavailableTimeTable.dayOfWeek].code.toInt() to
+                        (PlanTaskScheduler.toMinutes(it[UnavailableTimeTable.startTime]) to PlanTaskScheduler.toMinutes(it[UnavailableTimeTable.endTime]))
+                }
 
             PlanContext(
                 resolvedSubjects = resolved.map { it.second },
@@ -164,15 +164,15 @@ class PlanGenerationService(
                         it[planDate] = date
                     } get DailyPlanTable.id
 
-                    val freeIntervals = freeIntervalsForDate(date, unavailableRanges)
-                    val tasks = placeTasks(day.tasks.map { it.task_name to it.estimated_minutes }, freeIntervals)
+                    val freeIntervals = PlanTaskScheduler.freeIntervalsFromBusyRanges(unavailableRanges[date].orEmpty())
+                    val placedTasks = PlanTaskScheduler.placeTasks(day.tasks.map { it.task_name to it.estimated_minutes }, freeIntervals)
 
-                    tasks.forEach { task ->
+                    placedTasks.forEach { task ->
                         PlanTaskTable.insert {
                             it[this.dailyPlanId] = dailyPlanId.value
                             it[taskName] = task.taskName
-                            it[startTime] = LocalTime.parse(task.startTime)
-                            it[endTime] = LocalTime.parse(task.endTime)
+                            it[startTime] = task.startTime
+                            it[endTime] = task.endTime
                             it[estimatedMinutes] = task.estimatedMinutes
                         }
                     }
@@ -182,7 +182,14 @@ class PlanGenerationService(
                         date = date.toString(),
                         topics = day.topics,
                         goal = day.goal,
-                        tasks = tasks
+                        tasks = placedTasks.map {
+                            PlanGenerationTaskResponse(
+                                taskName = it.taskName,
+                                estimatedMinutes = it.estimatedMinutes,
+                                startTime = it.startTime.toString(),
+                                endTime = it.endTime.toString()
+                            )
+                        }
                     )
                 }
 
@@ -314,64 +321,5 @@ class PlanGenerationService(
         val academicYear = if (date.monthValue >= 3) date.year else date.year - 1
         val semester = if (date.monthValue in 3..8) 1 else 2
         return academicYear to semester
-    }
-
-    private fun toMinutes(time: LocalTime): Int = time.hour * 60 + time.minute
-
-    private fun freeIntervalsForDate(date: LocalDate, unavailableByDate: Map<LocalDate, List<Pair<Int, Int>>>): List<Pair<Int, Int>> {
-        val busy = unavailableByDate[date].orEmpty().sortedBy { it.first }
-
-        val merged = mutableListOf<Pair<Int, Int>>()
-        for ((start, end) in busy) {
-            val last = merged.lastOrNull()
-            if (last != null && start <= last.second) {
-                merged[merged.size - 1] = last.first to maxOf(last.second, end)
-            } else {
-                merged.add(start to end)
-            }
-        }
-
-        val free = mutableListOf<Pair<Int, Int>>()
-        var cursor = 0
-        for ((start, end) in merged) {
-            if (start > cursor) free.add(cursor to start)
-            cursor = maxOf(cursor, end)
-        }
-        if (cursor < DAY_MINUTES) free.add(cursor to DAY_MINUTES)
-        return free
-    }
-
-    private fun placeTasks(items: List<Pair<String, Int>>, freeIntervals: List<Pair<Int, Int>>): List<PlanGenerationTaskResponse> {
-        if (items.isEmpty() || freeIntervals.isEmpty()) return emptyList()
-
-        var intervalIndex = 0
-        var cursor = freeIntervals.getOrNull(0)?.first ?: 0
-
-        val result = mutableListOf<PlanGenerationTaskResponse>()
-        for ((taskName, minutes) in items) {
-            while (intervalIndex < freeIntervals.size && cursor + minutes > freeIntervals[intervalIndex].second) {
-                intervalIndex++
-                cursor = freeIntervals.getOrNull(intervalIndex)?.first ?: cursor
-            }
-            if (intervalIndex >= freeIntervals.size) break // 남은 빈 시간이 없으면 이후 task는 배치하지 않음
-
-            val start = cursor
-            val end = start + minutes
-            cursor = end + DEFAULT_BREAK_MINUTES
-            result.add(
-                PlanGenerationTaskResponse(
-                    taskName = taskName.take(150),
-                    estimatedMinutes = minutes,
-                    startTime = formatMinutes(start),
-                    endTime = formatMinutes(end)
-                )
-            )
-        }
-        return result
-    }
-
-    private fun formatMinutes(totalMinutes: Int): String {
-        val clamped = totalMinutes.coerceIn(0, DAY_MINUTES - 1)
-        return LocalTime.of(clamped / 60, clamped % 60).toString()
     }
 }
