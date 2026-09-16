@@ -23,6 +23,7 @@ import com.github.nepyh.rooter.module.scheduler.SchedulerModule
 import com.github.nepyh.rooter.module.school.SchoolModule
 import com.github.nepyh.rooter.module.school.exception.NiceApiException
 import com.github.nepyh.rooter.module.storage.FileStorageModule
+import com.github.nepyh.rooter.module.studystyle.StudyStyleModule
 import com.github.nepyh.rooter.module.swagger.SwaggerDocsModule
 import com.github.nepyh.rooter.module.user.UserModule
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
@@ -59,7 +60,8 @@ fun AppModule(appConfig: AppConfig): Module = module {
         QuizModule(appConfig),
         CalendarModule(),
         FeedbackModule(appConfig),
-        LevelTestModule(appConfig)
+        LevelTestModule(appConfig),
+        StudyStyleModule()
     )
 
     single<List<ApiRoute>> { getAll() }
