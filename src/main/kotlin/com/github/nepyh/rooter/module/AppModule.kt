@@ -4,13 +4,19 @@ import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
+import com.github.nepyh.rooter.module.calendar.CalendarModule
+import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundException
+import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
 import com.github.nepyh.rooter.module.example.ExampleModule
+import com.github.nepyh.rooter.module.feedback.FeedbackModule
 import com.github.nepyh.rooter.module.health.HealthModule
+import com.github.nepyh.rooter.module.leveltest.LevelTestModule
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
+import com.github.nepyh.rooter.module.quiz.QuizModule
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
 import com.github.nepyh.rooter.module.scheduler.SchedulerModule
 import com.github.nepyh.rooter.module.school.SchoolModule
@@ -48,7 +54,11 @@ fun AppModule(appConfig: AppConfig): Module = module {
     // service-related modules
     includes(
         UserModule(appConfig),
-        PlanBoardModule()
+        PlanBoardModule(appConfig),
+        QuizModule(appConfig),
+        CalendarModule(),
+        FeedbackModule(appConfig),
+        LevelTestModule(appConfig)
     )
 
     single<List<ApiRoute>> { getAll() }
@@ -63,7 +73,7 @@ fun Application.configureAppModule() {
             }
         }
     }
-    
+
     install(StatusPages) {
         exception<UserNotFoundException> { call, cause ->
             call.respondError(HttpStatusCode.NotFound, "USER_NOT_FOUND", cause.message)
@@ -72,6 +82,12 @@ fun Application.configureAppModule() {
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<NiceApiException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<CalendarEventNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "CALENDAR_EVENT_NOT_FOUND", cause.message)
+        }
+        exception<CalendarValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<PlanBoardNotFoundException> { call, cause ->

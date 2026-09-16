@@ -14,6 +14,8 @@ object PlanBoardTable : IntIdTable("plan_boards") {
     val title = varchar("title", 100)
     val startDate = date("start_date")
     val endDate = date("end_date")
+    val examDate = date("exam_date").nullable() // 실제 시험 날짜 (end_date 와 별개일 수 있음)
+    val isCramMode = bool("is_cram_mode").default(false)
     val createdAt = timestampWithTimeZone("created_at")
 }
 
@@ -24,5 +26,7 @@ class PlanBoardRow(id: EntityID<Int>) : IntEntity(id) {
     var title by PlanBoardTable.title
     var startDate by PlanBoardTable.startDate
     var endDate by PlanBoardTable.endDate
+    var examDate by PlanBoardTable.examDate
+    var isCramMode by PlanBoardTable.isCramMode
     var createdAt by PlanBoardTable.createdAt
 }

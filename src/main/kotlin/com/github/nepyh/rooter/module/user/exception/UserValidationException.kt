@@ -52,4 +52,14 @@ sealed class UserValidationException(
         "WRONG_CURRENT_PASSWORD",
         "현재 비밀번호가 일치하지 않습니다."
     )
+    class WrongDateFormatException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_DATE_FORMAT",
+        "날짜 형식이 올바르지 않습니다. (yyyy-MM-dd)"
+    )
+    class WrongDateRangeException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_DATE_RANGE",
+        "start 는 end 보다 늦을 수 없습니다."
+    )
 }
