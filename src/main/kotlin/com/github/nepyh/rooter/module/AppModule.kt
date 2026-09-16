@@ -54,7 +54,7 @@ fun AppModule(appConfig: AppConfig): Module = module {
     // service-related modules
     includes(
         UserModule(appConfig),
-        PlanBoardModule(),
+        PlanBoardModule(appConfig),
         QuizModule(appConfig),
         CalendarModule(),
         FeedbackModule(appConfig),
