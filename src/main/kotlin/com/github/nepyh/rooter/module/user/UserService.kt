@@ -16,6 +16,7 @@ import com.github.nepyh.rooter.module.user.dto.UserInfoResponse
 import com.github.nepyh.rooter.module.user.dto.UserProfileUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
+import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
@@ -227,5 +228,12 @@ class UserService(
             startTime = row.startTime.toString(),
             endTime = row.endTime.toString()
         )
+    }
+
+    fun deleteUnavailableTime(userId: Int, timeId: Int) {
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        val deleted = userRepo.deleteUnavailableTime(userId, timeId)
+        if (deleted == 0) throw UnavailableTimeNotFoundException()
     }
 }

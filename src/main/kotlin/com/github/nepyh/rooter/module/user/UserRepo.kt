@@ -16,6 +16,7 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
@@ -151,6 +152,15 @@ class UserRepo {
                 this.dayOfWeek = dayOfWeek
                 this.startTime = startTime
                 this.endTime = endTime
+            }
+        }
+    }
+
+    /** 삭제된 row 수를 반환한다. 0이면 존재하지 않거나 본인 소유가 아님. */
+    fun deleteUnavailableTime(userId: Int, timeId: Int): Int {
+        return transaction {
+            UnavailableTimeTable.deleteWhere {
+                (UnavailableTimeTable.id eq timeId) and (UnavailableTimeTable.user eq userId)
             }
         }
     }
