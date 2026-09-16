@@ -14,7 +14,7 @@ fun PlanBoardModule(appConfig: AppConfig) = module {
     single { PlanTaskService() }
     single { CatalogService() }
     single { PlanGenerationLlmClient(appConfig) }
-    single { PlanGenerationService(get()) }
+    single { PlanGenerationService(get(), get()) }
 
     single(named("planBoardApi")) { PlanBoardApi(get()) }
     single(named("planTaskApi")) { PlanTaskApi(get()) }

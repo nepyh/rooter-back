@@ -14,7 +14,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanSubjects
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.Subjects
 import com.github.nepyh.rooter.module.planboard.model.Textbooks
-import com.github.nepyh.rooter.module.user.model.DayOfWeek
+import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -30,13 +30,31 @@ import java.time.temporal.ChronoUnit
 
 private const val DAY_MINUTES = 24 * 60
 private val DEFAULT_UNAVAILABLE_RANGES = listOf(0 to (6 * 60 + 30), (23 * 60) to DAY_MINUTES) // 00:00~06:30, 23:00~24:00
-private val DEFAULT_SCHOOL_HOURS = (8 * 60 + 30) to (16 * 60 + 30) // 08:30~16:30, 평일만
+private const val SCHOOL_START_MINUTES = 8 * 60 + 30 // 08:30 등교, 고정
+private val DEFAULT_SCHOOL_HOURS = SCHOOL_START_MINUTES to (16 * 60 + 30) // NICE 시간표를 못 가져올 때 쓰는 폴백값 (08:30~16:30)
 private const val DEFAULT_BREAK_MINUTES = 10
+
+/**
+ * 하교 시각 = 09:10 + (그날 마지막 교시 수 × 60분).
+ * "6교시면 15:10, 7교시면 16:10" 두 지점으로부터 도출한 선형식 — NICE 는 교시 번호만 주고
+ * 실제 시각(등/하교 종 치는 시각)은 학교마다 달라서 공공데이터로 안 열려있기 때문에 근사치로 씀.
+ */
+private fun dismissalMinutesForLastPeriod(lastPeriod: Int): Int = (9 * 60 + 10) + lastPeriod * 60
 
 private data class ResolvedSubject(val subjectName: String, val topics: List<String>)
 
+private data class PlanContext(
+    val resolvedSubjects: List<ResolvedSubject>,
+    val levelTiers: Map<String, String>,
+    val grade: Int,
+    val schoolId: String?,
+    val classNumber: Int?,
+    val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>
+)
+
 class PlanGenerationService(
-    private val llmClient: PlanGenerationLlmClient
+    private val llmClient: PlanGenerationLlmClient,
+    private val schoolDataFetcher: SchoolDataFetcher
 ) {
 
     suspend fun generate(userId: Int, request: PlanGenerationRequest): PlanGenerationResponse {
@@ -68,17 +86,37 @@ class PlanGenerationService(
             else -> throw PlanBoardValidationException.MissingDateInfoException()
         }
 
-        val (resolvedSubjects, levelTiers, grade, unavailableRanges) = newSuspendedTransaction {
+        val planContext = newSuspendedTransaction {
             val resolved = request.subjects.map { it to resolveSubject(it) }
             val tiers = resolved.map { (_, subject) -> subject.subjectName to levelTierFor(userId, subject.subjectName) }.toMap()
-            val grade = StudentProfileTable.selectAll()
+            val profileRow = StudentProfileTable.selectAll()
                 .where { StudentProfileTable.user eq userId }
                 .firstOrNull()
-                ?.get(StudentProfileTable.grade)
-                ?: 2
-            val unavailable = loadUnavailableRanges(userId)
-            Quadruple(resolved.map { it.second }, tiers, grade, unavailable)
+            val customRows = UnavailableTimeTable.selectAll()
+                .where { UnavailableTimeTable.user eq userId }
+                .map { it[UnavailableTimeTable.dayOfWeek].code.toInt() to (toMinutes(it[UnavailableTimeTable.startTime]) to toMinutes(it[UnavailableTimeTable.endTime])) }
+
+            PlanContext(
+                resolvedSubjects = resolved.map { it.second },
+                levelTiers = tiers,
+                grade = profileRow?.get(StudentProfileTable.grade) ?: 2,
+                schoolId = profileRow?.get(StudentProfileTable.schoolId),
+                classNumber = profileRow?.get(StudentProfileTable.classNumber),
+                customUnavailableRows = customRows
+            )
         }
+        val resolvedSubjects = planContext.resolvedSubjects
+        val levelTiers = planContext.levelTiers
+        val grade = planContext.grade
+
+        val unavailableRanges = buildUnavailableRanges(
+            startDate = startDate,
+            endDate = endDate,
+            schoolId = planContext.schoolId,
+            classNumber = planContext.classNumber,
+            grade = planContext.grade,
+            customRows = planContext.customUnavailableRows
+        )
 
         val context = buildString {
             appendLine("총 학습 기간: ${totalDays}일 (${startDate} ~ ${endDate})")
@@ -206,27 +244,80 @@ class PlanGenerationService(
         }
     }
 
-    private fun loadUnavailableRanges(userId: Int): Map<Int, List<Pair<Int, Int>>> {
-        val rows = UnavailableTimeTable.selectAll()
-            .where { UnavailableTimeTable.user eq userId }
-            .map { it[UnavailableTimeTable.dayOfWeek] to (toMinutes(it[UnavailableTimeTable.startTime]) to toMinutes(it[UnavailableTimeTable.endTime])) }
+    /**
+     * 날짜별 학습 불가 시간대를 만든다.
+     * 사용자가 직접 등록한 시간대(customRows)가 있으면 그것만 쓰고(기존 동작 유지),
+     * 없으면 취침시간 기본값 + 평일 학교시간을 채우는데, 학교시간은 NICE 실시간 시간표로
+     * 그날의 마지막 교시를 조회해 하교시각을 계산한다 (실패/데이터없음 시 기존 기본값으로 폴백).
+     */
+    private suspend fun buildUnavailableRanges(
+        startDate: LocalDate,
+        endDate: LocalDate,
+        schoolId: String?,
+        classNumber: Int?,
+        grade: Int,
+        customRows: List<Pair<Int, Pair<Int, Int>>>
+    ): Map<LocalDate, List<Pair<Int, Int>>> {
+        val dates = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
 
-        if (rows.isEmpty()) {
-            return DayOfWeek.entries.associate { day ->
-                val ranges = DEFAULT_UNAVAILABLE_RANGES.toMutableList()
-                if (day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY) ranges.add(DEFAULT_SCHOOL_HOURS)
-                day.code.toInt() to ranges
+        if (customRows.isNotEmpty()) {
+            val byWeekday = customRows.groupBy({ it.first }, { it.second })
+            return dates.associateWith { date -> byWeekday[date.dayOfWeek.value].orEmpty() }
+        }
+
+        val dismissalMinutesByDate = if (schoolId != null) {
+            runCatching { fetchDismissalMinutesByDate(schoolId, classNumber, grade, startDate, endDate) }.getOrElse { emptyMap() }
+        } else {
+            emptyMap()
+        }
+
+        return dates.associateWith { date ->
+            val ranges = DEFAULT_UNAVAILABLE_RANGES.toMutableList()
+            if (date.dayOfWeek.value <= 5) { // 평일(월~금)만 학교시간 추가
+                val schoolHours = dismissalMinutesByDate[date]?.let { SCHOOL_START_MINUTES to it } ?: DEFAULT_SCHOOL_HOURS
+                ranges.add(schoolHours)
+            }
+            ranges
+        }
+    }
+
+    /** NICE 시간표에서 날짜별 마지막 교시를 찾아 하교시각(분)으로 변환한다. 학기가 바뀌는 기간이면 학기별로 나눠 조회한다. */
+    private suspend fun fetchDismissalMinutesByDate(
+        schoolId: String,
+        classNumber: Int?,
+        grade: Int,
+        startDate: LocalDate,
+        endDate: LocalDate
+    ): Map<LocalDate, Int> {
+        val className = classNumber?.toString()
+        val semesters = generateSequence(startDate) { it.plusDays(1) }
+            .takeWhile { !it.isAfter(endDate) }
+            .map { academicYearAndSemester(it) }
+            .distinct()
+
+        val lastPeriodByDate = mutableMapOf<LocalDate, Int>()
+        for ((year, semester) in semesters) {
+            schoolDataFetcher.getTimetable(schoolId, year, semester, grade, className).forEach { entry ->
+                if (entry.period > (lastPeriodByDate[entry.date] ?: 0)) {
+                    lastPeriodByDate[entry.date] = entry.period
+                }
             }
         }
 
-        return rows.groupBy({ it.first.code.toInt() }, { it.second })
+        return lastPeriodByDate.mapValues { (_, lastPeriod) -> dismissalMinutesForLastPeriod(lastPeriod) }
+    }
+
+    /** 3~8월은 1학기, 9~2월은 2학기. 학년도(AY)는 학년도가 시작하는 연도(3월 기준) 기준. */
+    private fun academicYearAndSemester(date: LocalDate): Pair<Int, Int> {
+        val academicYear = if (date.monthValue >= 3) date.year else date.year - 1
+        val semester = if (date.monthValue in 3..8) 1 else 2
+        return academicYear to semester
     }
 
     private fun toMinutes(time: LocalTime): Int = time.hour * 60 + time.minute
 
-    private fun freeIntervalsForDate(date: LocalDate, unavailableByDay: Map<Int, List<Pair<Int, Int>>>): List<Pair<Int, Int>> {
-        val dayOfWeek = date.dayOfWeek.value // 1=월 ... 7=일
-        val busy = unavailableByDay[dayOfWeek].orEmpty().sortedBy { it.first }
+    private fun freeIntervalsForDate(date: LocalDate, unavailableByDate: Map<LocalDate, List<Pair<Int, Int>>>): List<Pair<Int, Int>> {
+        val busy = unavailableByDate[date].orEmpty().sortedBy { it.first }
 
         val merged = mutableListOf<Pair<Int, Int>>()
         for ((start, end) in busy) {
@@ -282,5 +373,3 @@ class PlanGenerationService(
         return LocalTime.of(clamped / 60, clamped % 60).toString()
     }
 }
-
-private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
