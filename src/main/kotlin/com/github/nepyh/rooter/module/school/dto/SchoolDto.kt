@@ -10,3 +10,9 @@ data class SchoolSearchResponse(
     val region: String,
     val foundation: String?
 )
+
+@Serializable
+data class SchoolExamScheduleResponse(
+    val date: String, // "2026-07-01"
+    val name: String   // NICE 학사일정 원본 이벤트명 (예: "1학기 기말고사") — 정확한 분류 아닌 추천 후보
+)
