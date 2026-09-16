@@ -29,7 +29,6 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.routing.openapi.describe
 import io.ktor.utils.io.ExperimentalKtorApi
-import kotlinx.coroutines.flow.fold
 import java.time.LocalDate
 
 
@@ -288,24 +287,23 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 return@put call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 수정할 수 있습니다."))
             }
 
-            val fileItem: PartData.FileItem = call
-                .receiveMultipart()
-                .asFlow()
-                .fold(null as PartData.FileItem?) { acc, part ->
-                    when {
-                        acc != null -> { part.dispose(); acc }
-                        part is PartData.FileItem -> part
-                        else -> { part.dispose(); null }
-                    }
-            } ?: return@put call.respond(HttpStatusCode.BadRequest, ErrorResponse("IMAGE_REQUIRED", "이미지 파일이 필요합니다."))
+            // PartData.FileItem 은 스트리밍 채널이라 파트를 받은 자리에서 즉시 읽어야 함.
+            // forEachPart 가 각 파트를 넘겨준 block 이 끝나야 다음 파트로 넘어가면서 dispose 하므로,
+            // block 안에서 곧바로 업로드를 끝내야 채널이 소진되기 전에 데이터를 읽을 수 있다.
+            var response: AvatarUpdateResponse? = null
+            call.receiveMultipart().forEachPart { part ->
+                if (response == null && part is PartData.FileItem) {
+                    response = userService.updateAvatar(id, part)
+                }
+            }
 
-            val response = userService.updateAvatar(id, fileItem)
-            fileItem.dispose()
-            call.respond(HttpStatusCode.OK, response)
+            response?.let { call.respond(HttpStatusCode.OK, it) }
+                ?: call.respond(HttpStatusCode.BadRequest, ErrorResponse("IMAGE_REQUIRED", "이미지 파일이 필요합니다."))
         }.describe {
             tag("User")
             summary = "아바타 이미지 업로드"
-            description = "이미지 파일을 업로드하고 유저의 avatarImageKey 를 갱신. 본인 정보만 수정 가능"
+            description = "이미지 파일을 업로드하고 유저의 avatarImageKey 를 갱신. 본인 정보만 수정 가능. " +
+                "허용 확장자: jpg, jpeg, png, webp / 최대 용량: 5MB"
             parameters {
                 path("id") {
                     description = "유저 ID"
@@ -324,7 +322,9 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID, 또는 이미지 파일 누락"
+                    description = "유효하지 않은 ID, 이미지 파일 누락(code=IMAGE_REQUIRED), " +
+                        "허용되지 않는 확장자(code=UNSUPPORTED_AVATAR_FILE_TYPE, jpg/jpeg/png/webp만 허용), " +
+                        "또는 5MB 초과(code=AVATAR_FILE_TOO_LARGE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

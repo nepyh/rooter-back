@@ -72,4 +72,14 @@ sealed class UserValidationException(
         "SOCIAL_LOGIN_NOT_CONFIGURED",
         "아직 지원하지 않는 소셜 로그인입니다."
     )
+    class UnsupportedAvatarFileTypeException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "UNSUPPORTED_AVATAR_FILE_TYPE",
+        "이미지 파일만 업로드할 수 있습니다. (jpg, jpeg, png, webp)"
+    )
+    class AvatarFileTooLargeException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "AVATAR_FILE_TOO_LARGE",
+        "이미지 파일은 5MB를 초과할 수 없습니다."
+    )
 }
