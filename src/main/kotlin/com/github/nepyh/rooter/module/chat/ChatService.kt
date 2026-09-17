@@ -6,14 +6,14 @@ import com.github.nepyh.rooter.module.chat.dto.ChatMessageResponse
 import com.github.nepyh.rooter.module.chat.dto.ChatTurnResponse
 import com.github.nepyh.rooter.module.chat.exception.ChatValidationException
 import com.github.nepyh.rooter.module.chat.exception.DailyPlanNotFoundException
-import com.github.nepyh.rooter.module.chat.model.ChatTurns
+import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
-import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswers
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import kotlinx.serialization.encodeToString
@@ -74,17 +74,17 @@ class ChatService(
                         (PlanTaskScheduler.toMinutes(it[UnavailableTimeTable.startTime]) to PlanTaskScheduler.toMinutes(it[UnavailableTimeTable.endTime]))
                 }
 
-            val studyStyleSummary = StudyStyleAnswers.selectAll()
-                .where { StudyStyleAnswers.userId eq userId }
-                .orderBy(StudyStyleAnswers.questionNumber to SortOrder.ASC)
-                .map { "문항${it[StudyStyleAnswers.questionNumber]}=${it[StudyStyleAnswers.answerOption]}" }
+            val studyStyleSummary = StudyStyleAnswerTable.selectAll()
+                .where { StudyStyleAnswerTable.userId eq userId }
+                .orderBy(StudyStyleAnswerTable.questionNumber to SortOrder.ASC)
+                .map { "문항${it[StudyStyleAnswerTable.questionNumber]}=${it[StudyStyleAnswerTable.answerOption]}" }
                 .joinToString(", ")
                 .ifBlank { "응답 없음" }
 
-            val history = ChatTurns.selectAll()
-                .where { ChatTurns.dailyPlanId eq dailyPlanId }
-                .orderBy(ChatTurns.createdAt to SortOrder.ASC)
-                .map { AiChatTurn(role = it[ChatTurns.role], content = it[ChatTurns.content]) }
+            val history = ChatTurnTable.selectAll()
+                .where { ChatTurnTable.dailyPlanId eq dailyPlanId }
+                .orderBy(ChatTurnTable.createdAt to SortOrder.ASC)
+                .map { AiChatTurn(role = it[ChatTurnTable.role], content = it[ChatTurnTable.content]) }
                 .takeLast(HISTORY_LIMIT)
 
             ChatContext(
@@ -138,7 +138,7 @@ class ChatService(
         }
 
         return newSuspendedTransaction {
-            ChatTurns.insert {
+            ChatTurnTable.insert {
                 it[this.dailyPlanId] = dailyPlanId
                 it[role] = "user"
                 it[content] = trimmed
@@ -147,7 +147,7 @@ class ChatService(
 
             if (result == null) {
                 val fallback = "죄송해요, 지금은 답변을 드릴 수 없어요. 잠시 후 다시 시도해주세요."
-                ChatTurns.insert {
+                ChatTurnTable.insert {
                     it[this.dailyPlanId] = dailyPlanId
                     it[role] = "assistant"
                     it[content] = fallback
@@ -183,7 +183,7 @@ class ChatService(
                 }
             }
 
-            ChatTurns.insert {
+            ChatTurnTable.insert {
                 it[this.dailyPlanId] = dailyPlanId
                 it[role] = "assistant"
                 it[content] = result.reply_message
@@ -201,14 +201,14 @@ class ChatService(
     suspend fun getHistory(userId: Int, dailyPlanId: Int): List<ChatTurnResponse> = newSuspendedTransaction {
         requireOwnedDailyPlan(userId, dailyPlanId)
 
-        ChatTurns.selectAll()
-            .where { ChatTurns.dailyPlanId eq dailyPlanId }
-            .orderBy(ChatTurns.createdAt to SortOrder.ASC)
+        ChatTurnTable.selectAll()
+            .where { ChatTurnTable.dailyPlanId eq dailyPlanId }
+            .orderBy(ChatTurnTable.createdAt to SortOrder.ASC)
             .map {
                 ChatTurnResponse(
-                    role = it[ChatTurns.role],
-                    content = it[ChatTurns.content],
-                    createdAt = it[ChatTurns.createdAt].toString()
+                    role = it[ChatTurnTable.role],
+                    content = it[ChatTurnTable.content],
+                    createdAt = it[ChatTurnTable.createdAt].toString()
                 )
             }
     }

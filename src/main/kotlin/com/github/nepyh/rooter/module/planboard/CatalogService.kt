@@ -7,10 +7,10 @@ import com.github.nepyh.rooter.module.planboard.dto.RecommendedTextbookResponse
 import com.github.nepyh.rooter.module.planboard.dto.SubjectResponse
 import com.github.nepyh.rooter.module.planboard.dto.TextbookDetailResponse
 import com.github.nepyh.rooter.module.planboard.dto.TextbookResponse
-import com.github.nepyh.rooter.module.planboard.model.Chapters
-import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptions
-import com.github.nepyh.rooter.module.planboard.model.Subjects
-import com.github.nepyh.rooter.module.planboard.model.Textbooks
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
+import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
@@ -18,39 +18,39 @@ import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTrans
 class CatalogService {
 
     suspend fun getAllSubjects(): List<SubjectResponse> = newSuspendedTransaction {
-        Subjects.selectAll().map {
+        SubjectTable.selectAll().map {
             SubjectResponse(
-                id = it[Subjects.id],
-                name = it[Subjects.name]
+                id = it[SubjectTable.id].value,
+                name = it[SubjectTable.name]
             )
         }
     }
 
     suspend fun getTextbooksBySubject(subjectId: Int): List<TextbookResponse> = newSuspendedTransaction {
-        Textbooks.selectAll()
-            .where { Textbooks.subjectId eq subjectId }
+        TextbookTable.selectAll()
+            .where { TextbookTable.subjectId eq subjectId }
             .map {
                 TextbookResponse(
-                    id = it[Textbooks.id],
-                    subjectId = it[Textbooks.subjectId],
-                    publisherId = it[Textbooks.publisherId],
-                    title = it[Textbooks.title],
-                    aiStatus = it[Textbooks.aiStatus]
+                    id = it[TextbookTable.id].value,
+                    subjectId = it[TextbookTable.subjectId].value,
+                    publisherId = it[TextbookTable.publisherId],
+                    title = it[TextbookTable.title],
+                    aiStatus = it[TextbookTable.aiStatus]
                 )
             }
     }
 
     suspend fun getChaptersByTextbook(textbookId: Int): List<ChapterResponse> = newSuspendedTransaction {
-        Chapters.selectAll()
-            .where { Chapters.textbookId eq textbookId }
-            .orderBy(Chapters.chapterOrder to SortOrder.ASC)
+        ChapterTable.selectAll()
+            .where { ChapterTable.textbookId eq textbookId }
+            .orderBy(ChapterTable.chapterOrder to SortOrder.ASC)
             .map {
                 ChapterResponse(
-                    id = it[Chapters.id],
-                    textbookId = it[Chapters.textbookId],
-                    parentId = it[Chapters.parentId],
-                    chapterName = it[Chapters.chapterName],
-                    chapterOrder = it[Chapters.chapterOrder]
+                    id = it[ChapterTable.id].value,
+                    textbookId = it[ChapterTable.textbookId].value,
+                    parentId = it[ChapterTable.parentId],
+                    chapterName = it[ChapterTable.chapterName],
+                    chapterOrder = it[ChapterTable.chapterOrder]
                 )
             }
     }
@@ -68,49 +68,49 @@ class CatalogService {
         val schoolId = profile[StudentProfileTable.schoolId]
         val grade = profile[StudentProfileTable.grade]
 
-        val adoptions = SchoolTextbookAdoptions.selectAll()
-            .where { (SchoolTextbookAdoptions.schoolId eq schoolId) and (SchoolTextbookAdoptions.grade eq grade) }
-            .map { it[SchoolTextbookAdoptions.subjectId] to it[SchoolTextbookAdoptions.textbookId] }
+        val adoptions = SchoolTextbookAdoptionTable.selectAll()
+            .where { (SchoolTextbookAdoptionTable.schoolId eq schoolId) and (SchoolTextbookAdoptionTable.grade eq grade) }
+            .map { it[SchoolTextbookAdoptionTable.subjectId] to it[SchoolTextbookAdoptionTable.textbookId] }
 
         if (adoptions.isEmpty()) return@newSuspendedTransaction emptyList()
 
-        val subjectNames = Subjects.selectAll()
-            .where { Subjects.id inList adoptions.map { it.first } }
-            .associate { it[Subjects.id] to it[Subjects.name] }
-        val textbookTitles = Textbooks.selectAll()
-            .where { Textbooks.id inList adoptions.map { it.second } }
-            .associate { it[Textbooks.id] to it[Textbooks.title] }
+        val subjectNames = SubjectTable.selectAll()
+            .where { SubjectTable.id inList adoptions.map { it.first } }
+            .associate { it[SubjectTable.id] to it[SubjectTable.name] }
+        val textbookTitles = TextbookTable.selectAll()
+            .where { TextbookTable.id inList adoptions.map { it.second } }
+            .associate { it[TextbookTable.id] to it[TextbookTable.title] }
 
         adoptions.mapNotNull { (subjectId, textbookId) ->
             val subjectName = subjectNames[subjectId] ?: return@mapNotNull null
             val textbookTitle = textbookTitles[textbookId] ?: return@mapNotNull null
             RecommendedTextbookResponse(
-                subjectId = subjectId,
+                subjectId = subjectId.value,
                 subjectName = subjectName,
-                textbookId = textbookId,
+                textbookId = textbookId.value,
                 textbookTitle = textbookTitle
             )
         }
     }
 
     suspend fun getTextbookDetail(textbookId: Int): TextbookDetailResponse? = newSuspendedTransaction {
-        // 1. 교과서 + 과목명 조회 (Textbooks join Subjects)
-        val row = (Textbooks innerJoin Subjects)
+        // 1. 교과서 + 과목명 조회 (TextbookTable join SubjectTable)
+        val row = (TextbookTable innerJoin SubjectTable)
             .selectAll()
-            .where { Textbooks.id eq textbookId }
+            .where { TextbookTable.id eq textbookId }
             .firstOrNull()
             ?: return@newSuspendedTransaction null
 
         // 2. 이 교과서의 모든 단원을 flat 하게 조회 (order 순)
-        val allChapters = Chapters.selectAll()
-            .where { Chapters.textbookId eq textbookId }
-            .orderBy(Chapters.chapterOrder to SortOrder.ASC)
+        val allChapters = ChapterTable.selectAll()
+            .where { ChapterTable.textbookId eq textbookId }
+            .orderBy(ChapterTable.chapterOrder to SortOrder.ASC)
             .map {
                 ChapterRow(
-                    id = it[Chapters.id],
-                    parentId = it[Chapters.parentId],
-                    name = it[Chapters.chapterName],
-                    order = it[Chapters.chapterOrder]
+                    id = it[ChapterTable.id].value,
+                    parentId = it[ChapterTable.parentId],
+                    name = it[ChapterTable.chapterName],
+                    order = it[ChapterTable.chapterOrder]
                 )
             }
 
@@ -118,12 +118,12 @@ class CatalogService {
         val tree = buildChapterTree(allChapters)
 
         TextbookDetailResponse(
-            id = row[Textbooks.id],
-            subjectId = row[Textbooks.subjectId],
-            subjectName = row[Subjects.name],
-            publisherId = row[Textbooks.publisherId],
-            title = row[Textbooks.title],
-            aiStatus = row[Textbooks.aiStatus],
+            id = row[TextbookTable.id].value,
+            subjectId = row[TextbookTable.subjectId].value,
+            subjectName = row[SubjectTable.name],
+            publisherId = row[TextbookTable.publisherId],
+            title = row[TextbookTable.title],
+            aiStatus = row[TextbookTable.aiStatus],
             chapters = tree
         )
     }

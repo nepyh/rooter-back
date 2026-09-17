@@ -10,9 +10,9 @@ import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizSubmitResponse
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizNotFoundException
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizValidationException
-import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttempts
-import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoices
-import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestions
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceTable
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestionTable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -39,21 +39,21 @@ class TaskQuizService(
         if (generated.isEmpty()) return // AI 생성 실패 시 이번 attempt는 건너뜀 (다음 스케줄 대상이 되진 않음)
 
         newSuspendedTransaction {
-            val attemptId = TaskQuizAttempts.insert {
+            val attemptId = TaskQuizAttemptTable.insert {
                 it[this.planTaskId] = planTaskId
                 it[this.attemptNumber] = attemptNumber
                 it[totalCount] = generated.size
                 it[createdAt] = OffsetDateTime.now()
-            } get TaskQuizAttempts.id
+            } get TaskQuizAttemptTable.id
 
             generated.forEach { question ->
-                val questionId = TaskQuizQuestions.insert {
+                val questionId = TaskQuizQuestionTable.insert {
                     it[this.attemptId] = attemptId.value
                     it[questionText] = question.question_text
-                } get TaskQuizQuestions.id
+                } get TaskQuizQuestionTable.id
 
                 question.choices.forEachIndexed { index, choiceText ->
-                    TaskQuizChoices.insert {
+                    TaskQuizChoiceTable.insert {
                         it[this.questionId] = questionId
                         it[this.choiceText] = choiceText
                         it[isCorrect] = index == question.correct_index
@@ -67,30 +67,30 @@ class TaskQuizService(
     fun getCurrentQuiz(userId: Int, planTaskId: Int): TaskQuizResponse = transaction {
         requireOwnedTask(userId, planTaskId)
 
-        val latestAttempt = TaskQuizAttempts.selectAll()
-            .where { TaskQuizAttempts.planTaskId eq planTaskId }
-            .orderBy(TaskQuizAttempts.attemptNumber to SortOrder.DESC)
+        val latestAttempt = TaskQuizAttemptTable.selectAll()
+            .where { TaskQuizAttemptTable.planTaskId eq planTaskId }
+            .orderBy(TaskQuizAttemptTable.attemptNumber to SortOrder.DESC)
             .firstOrNull() ?: throw TaskQuizNotFoundException()
 
-        val attemptId = latestAttempt[TaskQuizAttempts.id].value
-        val questions = TaskQuizQuestions.selectAll()
-            .where { TaskQuizQuestions.attemptId eq attemptId }
+        val attemptId = latestAttempt[TaskQuizAttemptTable.id].value
+        val questions = TaskQuizQuestionTable.selectAll()
+            .where { TaskQuizQuestionTable.attemptId eq attemptId }
             .map { questionRow ->
-                val questionId = questionRow[TaskQuizQuestions.id]
-                val choices = TaskQuizChoices.selectAll()
-                    .where { TaskQuizChoices.questionId eq questionId }
-                    .map { TaskQuizChoiceResponse(id = it[TaskQuizChoices.id], choiceText = it[TaskQuizChoices.choiceText]) }
+                val questionId = questionRow[TaskQuizQuestionTable.id].value
+                val choices = TaskQuizChoiceTable.selectAll()
+                    .where { TaskQuizChoiceTable.questionId eq questionId }
+                    .map { TaskQuizChoiceResponse(id = it[TaskQuizChoiceTable.id].value, choiceText = it[TaskQuizChoiceTable.choiceText]) }
 
                 TaskQuizQuestionResponse(
                     id = questionId,
-                    questionText = questionRow[TaskQuizQuestions.questionText],
+                    questionText = questionRow[TaskQuizQuestionTable.questionText],
                     choices = choices
                 )
             }
 
         TaskQuizResponse(
             planTaskId = planTaskId,
-            attemptNumber = latestAttempt[TaskQuizAttempts.attemptNumber],
+            attemptNumber = latestAttempt[TaskQuizAttemptTable.attemptNumber],
             questions = questions
         )
     }
@@ -98,36 +98,36 @@ class TaskQuizService(
     fun submitQuiz(userId: Int, planTaskId: Int, answers: List<TaskQuizAnswer>): TaskQuizSubmitResponse = transaction {
         requireOwnedTask(userId, planTaskId)
 
-        val attemptRow = TaskQuizAttempts.selectAll()
-            .where { TaskQuizAttempts.planTaskId eq planTaskId }
-            .orderBy(TaskQuizAttempts.attemptNumber to SortOrder.DESC)
+        val attemptRow = TaskQuizAttemptTable.selectAll()
+            .where { TaskQuizAttemptTable.planTaskId eq planTaskId }
+            .orderBy(TaskQuizAttemptTable.attemptNumber to SortOrder.DESC)
             .firstOrNull() ?: throw TaskQuizNotFoundException()
 
-        if (attemptRow[TaskQuizAttempts.passed] != null) {
+        if (attemptRow[TaskQuizAttemptTable.passed] != null) {
             throw TaskQuizValidationException.AlreadySubmittedException()
         }
 
-        val attemptId = attemptRow[TaskQuizAttempts.id].value
-        val attemptNumber = attemptRow[TaskQuizAttempts.attemptNumber]
-        val totalCount = attemptRow[TaskQuizAttempts.totalCount]
+        val attemptId = attemptRow[TaskQuizAttemptTable.id].value
+        val attemptNumber = attemptRow[TaskQuizAttemptTable.attemptNumber]
+        val totalCount = attemptRow[TaskQuizAttemptTable.totalCount]
 
-        val questionIds = TaskQuizQuestions.selectAll()
-            .where { TaskQuizQuestions.attemptId eq attemptId }
-            .map { it[TaskQuizQuestions.id] }
+        val questionIds = TaskQuizQuestionTable.selectAll()
+            .where { TaskQuizQuestionTable.attemptId eq attemptId }
+            .map { it[TaskQuizQuestionTable.id].value }
             .toSet()
         if (answers.any { it.questionId !in questionIds }) {
             throw TaskQuizValidationException.InvalidAnswerException()
         }
 
-        val correctChoiceIds = TaskQuizChoices.selectAll()
-            .where { (TaskQuizChoices.questionId inList questionIds) and (TaskQuizChoices.isCorrect eq true) }
-            .map { it[TaskQuizChoices.id] }
+        val correctChoiceIds = TaskQuizChoiceTable.selectAll()
+            .where { (TaskQuizChoiceTable.questionId inList questionIds) and (TaskQuizChoiceTable.isCorrect eq true) }
+            .map { it[TaskQuizChoiceTable.id].value }
             .toSet()
 
         val correctCount = answers.count { it.selectedChoiceId in correctChoiceIds }
         val passed = correctCount >= PASS_THRESHOLD
 
-        TaskQuizAttempts.update({ TaskQuizAttempts.id eq attemptId }) {
+        TaskQuizAttemptTable.update({ TaskQuizAttemptTable.id eq attemptId }) {
             it[this.correctCount] = correctCount
             it[this.passed] = passed
         }

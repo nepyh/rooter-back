@@ -8,7 +8,7 @@ import com.github.nepyh.rooter.module.calendar.dto.CalendarRangeResponse
 import com.github.nepyh.rooter.module.calendar.dto.DailyCompletionResponse
 import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundException
 import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
-import com.github.nepyh.rooter.module.calendar.model.CalendarEvents
+import com.github.nepyh.rooter.module.calendar.model.CalendarEventTable
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
@@ -71,11 +71,11 @@ class CalendarService {
                     )
                 }
 
-            val events = CalendarEvents.selectAll()
+            val events = CalendarEventTable.selectAll()
                 .where {
-                    (CalendarEvents.userId eq userId) and
-                        (CalendarEvents.eventDate greaterEq start) and
-                        (CalendarEvents.eventDate lessEq end)
+                    (CalendarEventTable.userId eq userId) and
+                        (CalendarEventTable.eventDate greaterEq start) and
+                        (CalendarEventTable.eventDate lessEq end)
                 }
                 .map { it.toCalendarEventResponse() }
 
@@ -104,8 +104,8 @@ class CalendarService {
             val completedTasks = tasks.count { it.isCompleted }
             val completionRate = if (totalTasks == 0) 0.0 else (completedTasks.toDouble() / totalTasks) * 100
 
-            val events = CalendarEvents.selectAll()
-                .where { (CalendarEvents.userId eq userId) and (CalendarEvents.eventDate eq date) }
+            val events = CalendarEventTable.selectAll()
+                .where { (CalendarEventTable.userId eq userId) and (CalendarEventTable.eventDate eq date) }
                 .map { it.toCalendarEventResponse() }
 
             DailyCompletionResponse(
@@ -128,21 +128,21 @@ class CalendarService {
             .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
 
         return transaction {
-            val id = CalendarEvents.insert {
+            val id = CalendarEventTable.insert {
                 it[this.userId] = userId
                 it[title] = request.title
                 it[this.eventDate] = eventDate
                 it[memo] = request.memo
-            } get CalendarEvents.id
+            } get CalendarEventTable.id
 
-            CalendarEventResponse(id = id, title = request.title, eventDate = eventDate.toString(), memo = request.memo)
+            CalendarEventResponse(id = id.value, title = request.title, eventDate = eventDate.toString(), memo = request.memo)
         }
     }
 
     fun deleteEvent(userId: Int, eventId: Int) {
         transaction {
-            val deletedRows = CalendarEvents.deleteWhere {
-                (CalendarEvents.id eq eventId) and (CalendarEvents.userId eq userId)
+            val deletedRows = CalendarEventTable.deleteWhere {
+                (CalendarEventTable.id eq eventId) and (CalendarEventTable.userId eq userId)
             }
             if (deletedRows == 0) {
                 throw CalendarEventNotFoundException()
@@ -151,9 +151,9 @@ class CalendarService {
     }
 
     private fun ResultRow.toCalendarEventResponse() = CalendarEventResponse(
-        id = this[CalendarEvents.id],
-        title = this[CalendarEvents.title],
-        eventDate = this[CalendarEvents.eventDate].toString(),
-        memo = this[CalendarEvents.memo]
+        id = this[CalendarEventTable.id].value,
+        title = this[CalendarEventTable.title],
+        eventDate = this[CalendarEventTable.eventDate].toString(),
+        memo = this[CalendarEventTable.memo]
     )
 }

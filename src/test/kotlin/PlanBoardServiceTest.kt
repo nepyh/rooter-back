@@ -11,16 +11,16 @@ import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationExc
 import com.github.nepyh.rooter.module.planboard.exception.PlanSubjectNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
-import com.github.nepyh.rooter.module.planboard.model.Chapters
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
-import com.github.nepyh.rooter.module.planboard.model.PlanSubjects
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
-import com.github.nepyh.rooter.module.planboard.model.Subjects
-import com.github.nepyh.rooter.module.planboard.model.Textbooks
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.assertions.throwables.shouldThrow
@@ -76,7 +76,7 @@ class PlanBoardServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS textbooks CASCADE")
             exec("DROP TABLE IF EXISTS subjects CASCADE")
             exec("DROP TABLE IF EXISTS users CASCADE")
-            SchemaUtils.create(UserTable, Subjects, Textbooks, Chapters, PlanBoardTable, PlanSubjects, DailyPlanTable, PlanTaskTable)
+            SchemaUtils.create(UserTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable)
             // DDL(rooter-ddl) 의 uq_daily_plans_board_date 와 동일한 제약 — insertIgnore 레이스 방지 검증용
             exec("ALTER TABLE daily_plans ADD CONSTRAINT uq_daily_plans_board_date UNIQUE (plan_board_id, plan_date)")
         }
@@ -86,12 +86,12 @@ class PlanBoardServiceTest : StringSpec({
     beforeEach {
         transaction(db) {
             PlanTaskTable.deleteAll()
-            PlanSubjects.deleteAll()
+            PlanSubjectTable.deleteAll()
             DailyPlanTable.deleteAll()
             PlanBoardTable.deleteAll()
-            Chapters.deleteAll()
-            Textbooks.deleteAll()
-            Subjects.deleteAll()
+            ChapterTable.deleteAll()
+            TextbookTable.deleteAll()
+            SubjectTable.deleteAll()
             UserTable.deleteAll()
         }
     }
@@ -123,22 +123,22 @@ class PlanBoardServiceTest : StringSpec({
     }
 
     fun seedSubject(name: String): Int = transaction(db) {
-        Subjects.insert { it[this.name] = name } get Subjects.id
+        (SubjectTable.insert { it[this.name] = name } get SubjectTable.id).value
     }
 
     fun seedTextbook(subjectId: Int, title: String = "테스트 교과서"): Int = transaction(db) {
-        Textbooks.insert {
+        (TextbookTable.insert {
             it[this.subjectId] = subjectId
             it[this.title] = title
-        } get Textbooks.id
+        } get TextbookTable.id).value
     }
 
     fun seedChapter(textbookId: Int, order: Int, name: String = "${order}단원"): Int = transaction(db) {
-        Chapters.insert {
+        (ChapterTable.insert {
             it[this.textbookId] = textbookId
             it[chapterName] = name
             it[chapterOrder] = order
-        } get Chapters.id
+        } get ChapterTable.id).value
     }
 
     // ---- createBoard ----

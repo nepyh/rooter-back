@@ -4,7 +4,7 @@ import com.github.nepyh.rooter.module.studystyle.dto.StudyStyleAnswerResponse
 import com.github.nepyh.rooter.module.studystyle.dto.StudyStyleResponse
 import com.github.nepyh.rooter.module.studystyle.dto.StudyStyleSubmitRequest
 import com.github.nepyh.rooter.module.studystyle.exception.StudyStyleValidationException
-import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswers
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerTable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -39,10 +39,10 @@ class StudyStyleService {
 
         return transaction {
             request.answers.forEach { answer ->
-                StudyStyleAnswers.deleteWhere {
-                    (StudyStyleAnswers.userId eq userId) and (StudyStyleAnswers.questionNumber eq answer.questionNumber.toShort())
+                StudyStyleAnswerTable.deleteWhere {
+                    (StudyStyleAnswerTable.userId eq userId) and (StudyStyleAnswerTable.questionNumber eq answer.questionNumber.toShort())
                 }
-                StudyStyleAnswers.insert {
+                StudyStyleAnswerTable.insert {
                     it[this.userId] = userId
                     it[questionNumber] = answer.questionNumber.toShort()
                     it[answerOption] = answer.answerOption.toShort()
@@ -56,13 +56,13 @@ class StudyStyleService {
     fun getAnswers(userId: Int): StudyStyleResponse = transaction { fetchAnswers(userId) }
 
     private fun fetchAnswers(userId: Int): StudyStyleResponse {
-        val answers = StudyStyleAnswers.selectAll()
-            .where { StudyStyleAnswers.userId eq userId }
-            .orderBy(StudyStyleAnswers.questionNumber to SortOrder.ASC)
+        val answers = StudyStyleAnswerTable.selectAll()
+            .where { StudyStyleAnswerTable.userId eq userId }
+            .orderBy(StudyStyleAnswerTable.questionNumber to SortOrder.ASC)
             .map {
                 StudyStyleAnswerResponse(
-                    questionNumber = it[StudyStyleAnswers.questionNumber].toInt(),
-                    answerOption = it[StudyStyleAnswers.answerOption].toInt()
+                    questionNumber = it[StudyStyleAnswerTable.questionNumber].toInt(),
+                    answerOption = it[StudyStyleAnswerTable.answerOption].toInt()
                 )
             }
         return StudyStyleResponse(answers)

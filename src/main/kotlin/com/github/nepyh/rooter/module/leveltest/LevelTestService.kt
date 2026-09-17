@@ -8,11 +8,11 @@ import com.github.nepyh.rooter.module.leveltest.dto.LevelTestSubjectScoreRespons
 import com.github.nepyh.rooter.module.leveltest.dto.LevelTestSubmitResponse
 import com.github.nepyh.rooter.module.leveltest.exception.LevelTestNotFoundException
 import com.github.nepyh.rooter.module.leveltest.exception.LevelTestValidationException
-import com.github.nepyh.rooter.module.leveltest.model.LevelTestAttempts
-import com.github.nepyh.rooter.module.leveltest.model.LevelTestChoices
-import com.github.nepyh.rooter.module.leveltest.model.LevelTestQuestions
-import com.github.nepyh.rooter.module.leveltest.model.LevelTestResults
-import com.github.nepyh.rooter.module.planboard.model.Subjects
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestAttemptTable
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestChoiceTable
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestQuestionTable
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
@@ -34,24 +34,24 @@ class LevelTestService(
         val generated = llmClient.generateQuestions(referenceGradeLabel)
 
         return newSuspendedTransaction {
-            val attemptId = LevelTestAttempts.insert {
+            val attemptId = LevelTestAttemptTable.insert {
                 it[this.userId] = userId
                 it[this.grade] = grade
                 it[this.referenceGradeLabel] = referenceGradeLabel
                 it[createdAt] = OffsetDateTime.now()
-            } get LevelTestAttempts.id
+            } get LevelTestAttemptTable.id
 
             val questions = generated.map { question ->
                 val subjectId = findOrCreateSubject(question.subject)
 
-                val questionId = LevelTestQuestions.insert {
+                val questionId = LevelTestQuestionTable.insert {
                     it[this.attemptId] = attemptId.value
                     it[this.subjectId] = subjectId
                     it[questionText] = question.question_text
-                } get LevelTestQuestions.id
+                } get LevelTestQuestionTable.id
 
                 question.choices.forEachIndexed { index, choiceText ->
-                    LevelTestChoices.insert {
+                    LevelTestChoiceTable.insert {
                         it[this.questionId] = questionId
                         it[this.choiceText] = choiceText
                         it[isCorrect] = index == question.correct_index
@@ -60,7 +60,7 @@ class LevelTestService(
                 }
 
                 LevelTestQuestionPublicResponse(
-                    id = questionId,
+                    id = questionId.value,
                     subject = question.subject,
                     questionText = question.question_text,
                     choices = question.choices
@@ -77,18 +77,18 @@ class LevelTestService(
 
     suspend fun submitTest(userId: Int, attemptId: Int, answers: List<LevelTestAnswer>): LevelTestSubmitResponse =
         newSuspendedTransaction {
-            val attemptRow = LevelTestAttempts.selectAll()
-                .where { (LevelTestAttempts.id eq attemptId) and (LevelTestAttempts.userId eq userId) }
+            val attemptRow = LevelTestAttemptTable.selectAll()
+                .where { (LevelTestAttemptTable.id eq attemptId) and (LevelTestAttemptTable.userId eq userId) }
                 .firstOrNull()
                 ?: throw LevelTestNotFoundException()
 
-            if (attemptRow[LevelTestAttempts.isSubmitted]) {
+            if (attemptRow[LevelTestAttemptTable.isSubmitted]) {
                 throw LevelTestValidationException.AlreadySubmittedException()
             }
 
-            val questionRows = LevelTestQuestions.selectAll()
-                .where { LevelTestQuestions.attemptId eq attemptId }
-                .associateBy { it[LevelTestQuestions.id] }
+            val questionRows = LevelTestQuestionTable.selectAll()
+                .where { LevelTestQuestionTable.attemptId eq attemptId }
+                .associateBy { it[LevelTestQuestionTable.id].value }
             if (questionRows.isEmpty()) throw LevelTestNotFoundException()
 
             val questionIds = questionRows.keys
@@ -96,10 +96,10 @@ class LevelTestService(
                 throw LevelTestValidationException.InvalidAnswerException()
             }
 
-            val choicesByQuestion = LevelTestChoices.selectAll()
-                .where { LevelTestChoices.questionId inList questionIds }
-                .groupBy { it[LevelTestChoices.questionId] }
-                .mapValues { (_, rows) -> rows.sortedBy { it[LevelTestChoices.id] } }
+            val choicesByQuestion = LevelTestChoiceTable.selectAll()
+                .where { LevelTestChoiceTable.questionId inList questionIds }
+                .groupBy { it[LevelTestChoiceTable.questionId].value }
+                .mapValues { (_, rows) -> rows.sortedBy { it[LevelTestChoiceTable.id].value } }
 
             val results = answers.map { answer ->
                 val questionRow = questionRows.getValue(answer.questionId)
@@ -107,10 +107,10 @@ class LevelTestService(
                 if (answer.selectedIndex !in choices.indices) {
                     throw LevelTestValidationException.InvalidAnswerException()
                 }
-                val correctIndex = choices.indexOfFirst { it[LevelTestChoices.isCorrect] }
-                val subjectName = Subjects.selectAll()
-                    .where { Subjects.id eq questionRow[LevelTestQuestions.subjectId] }
-                    .first()[Subjects.name]
+                val correctIndex = choices.indexOfFirst { it[LevelTestChoiceTable.isCorrect] }
+                val subjectName = SubjectTable.selectAll()
+                    .where { SubjectTable.id eq questionRow[LevelTestQuestionTable.subjectId] }
+                    .first()[SubjectTable.name]
 
                 LevelTestQuestionResultResponse(
                     questionId = answer.questionId,
@@ -118,18 +118,18 @@ class LevelTestService(
                     isCorrect = answer.selectedIndex == correctIndex,
                     selectedIndex = answer.selectedIndex,
                     correctIndex = correctIndex,
-                    explanation = choices[correctIndex][LevelTestChoices.explanation]
+                    explanation = choices[correctIndex][LevelTestChoiceTable.explanation]
                 )
             }
 
             val subjectScores = results.groupBy { it.subject }.map { (subject, subjectResults) ->
                 val correctCount = subjectResults.count { it.isCorrect }
                 val totalCount = subjectResults.size
-                val subjectId = Subjects.selectAll()
-                    .where { Subjects.name eq subject }
-                    .first()[Subjects.id]
+                val subjectId = SubjectTable.selectAll()
+                    .where { SubjectTable.name eq subject }
+                    .first()[SubjectTable.id]
 
-                LevelTestResults.insert {
+                LevelTestResultTable.insert {
                     it[this.userId] = userId
                     it[this.subjectId] = subjectId
                     // score는 0~100 정답률(%)로 저장한다. 문항 수가 시도마다 다를 수 있어 원시 정답
@@ -146,7 +146,7 @@ class LevelTestService(
                 )
             }
 
-            LevelTestAttempts.update({ LevelTestAttempts.id eq attemptId }) {
+            LevelTestAttemptTable.update({ LevelTestAttemptTable.id eq attemptId }) {
                 it[isSubmitted] = true
             }
 
@@ -163,10 +163,10 @@ class LevelTestService(
         }
 
     private fun findOrCreateSubject(name: String): Int {
-        Subjects.selectAll().where { Subjects.name eq name }.firstOrNull()?.let {
-            return it[Subjects.id]
+        SubjectTable.selectAll().where { SubjectTable.name eq name }.firstOrNull()?.let {
+            return it[SubjectTable.id].value
         }
-        return Subjects.insert { it[this.name] = name } get Subjects.id
+        return (SubjectTable.insert { it[this.name] = name } get SubjectTable.id).value
     }
 
     /** 실력 테스트는 현재 학년보다 한 단계 아래 수준으로 출제한다 (중1은 초6 수준까지 내려간다). */

@@ -7,13 +7,13 @@ import com.github.nepyh.rooter.module.feedback.exception.DailyPlanNotFoundExcept
 import com.github.nepyh.rooter.module.feedback.exception.FeedbackAlreadySubmittedException
 import com.github.nepyh.rooter.module.feedback.exception.FeedbackNotFoundException
 import com.github.nepyh.rooter.module.feedback.exception.FeedbackValidationException
-import com.github.nepyh.rooter.module.feedback.model.DailyFeedbacks
+import com.github.nepyh.rooter.module.feedback.model.DailyFeedbackTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
-import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttempts
-import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoices
-import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestions
+import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttemptTable
+import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceTable
+import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionTable
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
@@ -51,14 +51,14 @@ class FeedbackService(
                 throw FeedbackValidationException.InvalidFocusLevelException()
             }
 
-            val alreadySubmitted = DailyFeedbacks.selectAll()
-                .where { DailyFeedbacks.dailyPlanId eq dailyPlanId }
+            val alreadySubmitted = DailyFeedbackTable.selectAll()
+                .where { DailyFeedbackTable.dailyPlanId eq dailyPlanId }
                 .firstOrNull() != null
             if (alreadySubmitted) {
                 throw FeedbackAlreadySubmittedException()
             }
 
-            val row = DailyFeedbacks.insert {
+            val row = DailyFeedbackTable.insert {
                 it[this.dailyPlanId] = dailyPlanId
                 it[difficulty] = request.difficulty
                 it[timeSpentMinutes] = request.timeSpentMinutes
@@ -82,8 +82,8 @@ class FeedbackService(
     suspend fun getFeedback(userId: Int, dailyPlanId: Int): FeedbackResponse = newSuspendedTransaction {
         requireOwnedDailyPlan(userId, dailyPlanId)
 
-        DailyFeedbacks.selectAll()
-            .where { DailyFeedbacks.dailyPlanId eq dailyPlanId }
+        DailyFeedbackTable.selectAll()
+            .where { DailyFeedbackTable.dailyPlanId eq dailyPlanId }
             .firstOrNull()
             ?.toFeedbackResponse(emptyList())
             ?: throw FeedbackNotFoundException()
@@ -102,14 +102,14 @@ class FeedbackService(
         boardEndDate: LocalDate,
         feedback: FeedbackSubmitRequest
     ): List<ReplanAdjustmentResponse> = newSuspendedTransaction {
-        val wrongQuestionTexts = (DailyQuizQuestions innerJoin DailyQuizChoices innerJoin DailyQuizAttempts)
+        val wrongQuestionTexts = (DailyQuizQuestionTable innerJoin DailyQuizChoiceTable innerJoin DailyQuizAttemptTable)
             .selectAll()
             .where {
-                (DailyQuizQuestions.dailyPlanId eq dailyPlanId) and
-                    (DailyQuizAttempts.userId eq userId) and
-                    (DailyQuizChoices.isCorrect eq false)
+                (DailyQuizQuestionTable.dailyPlanId eq dailyPlanId) and
+                    (DailyQuizAttemptTable.userId eq userId) and
+                    (DailyQuizChoiceTable.isCorrect eq false)
             }
-            .map { it[DailyQuizQuestions.questionText] }
+            .map { it[DailyQuizQuestionTable.questionText] }
             .distinct()
 
         if (wrongQuestionTexts.isEmpty() && feedback.difficulty == "적당" && (feedback.focusLevel == null || feedback.focusLevel >= 3)) {
@@ -173,12 +173,12 @@ class FeedbackService(
             ?.get(PlanTaskTable.endTime)
 
     private fun ResultRow.toFeedbackResponse(adjustments: List<ReplanAdjustmentResponse>) = FeedbackResponse(
-        id = this[DailyFeedbacks.id],
-        dailyPlanId = this[DailyFeedbacks.dailyPlanId],
-        difficulty = this[DailyFeedbacks.difficulty],
-        timeSpentMinutes = this[DailyFeedbacks.timeSpentMinutes],
-        focusLevel = this[DailyFeedbacks.focusLevel],
-        createdAt = this[DailyFeedbacks.createdAt].toString(),
+        id = this[DailyFeedbackTable.id].value,
+        dailyPlanId = this[DailyFeedbackTable.dailyPlanId].value,
+        difficulty = this[DailyFeedbackTable.difficulty],
+        timeSpentMinutes = this[DailyFeedbackTable.timeSpentMinutes],
+        focusLevel = this[DailyFeedbackTable.focusLevel],
+        createdAt = this[DailyFeedbackTable.createdAt].toString(),
         insertedAdjustmentTasks = adjustments
     )
 }

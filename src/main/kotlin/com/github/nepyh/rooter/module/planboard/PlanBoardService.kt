@@ -9,12 +9,12 @@ import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenExce
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanSubjectNotFoundException
-import com.github.nepyh.rooter.module.planboard.model.Chapters
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
-import com.github.nepyh.rooter.module.planboard.model.PlanSubjects
-import com.github.nepyh.rooter.module.planboard.model.Subjects
-import com.github.nepyh.rooter.module.planboard.model.Textbooks
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -108,21 +108,21 @@ class PlanBoardService {
     }
 
     private fun resolveTextbookSubject(request: PlanSubjectCreateRequest): ResolvedTextbookSubject {
-        val textbookRow = Textbooks.selectAll().where { Textbooks.id eq request.textbookId }.firstOrNull()
+        val textbookRow = TextbookTable.selectAll().where { TextbookTable.id eq request.textbookId }.firstOrNull()
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val subjectId = textbookRow[Textbooks.subjectId]
-        val subjectName = Subjects.selectAll().where { Subjects.id eq subjectId }.firstOrNull()?.get(Subjects.name)
+        val subjectId = textbookRow[TextbookTable.subjectId]
+        val subjectName = SubjectTable.selectAll().where { SubjectTable.id eq subjectId }.firstOrNull()?.get(SubjectTable.name)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
 
-        val startOrder = Chapters.selectAll().where { Chapters.id eq request.startChapterId }.firstOrNull()
-            ?.get(Chapters.chapterOrder)
+        val startOrder = ChapterTable.selectAll().where { ChapterTable.id eq request.startChapterId }.firstOrNull()
+            ?.get(ChapterTable.chapterOrder)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val endOrder = Chapters.selectAll().where { Chapters.id eq request.endChapterId }.firstOrNull()
-            ?.get(Chapters.chapterOrder)
+        val endOrder = ChapterTable.selectAll().where { ChapterTable.id eq request.endChapterId }.firstOrNull()
+            ?.get(ChapterTable.chapterOrder)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
         if (startOrder > endOrder) throw PlanBoardValidationException.InvalidSubjectRangeException()
 
-        return ResolvedTextbookSubject(subjectId, subjectName, textbookRow[Textbooks.title])
+        return ResolvedTextbookSubject(subjectId.value, subjectName, textbookRow[TextbookTable.title])
     }
 
     private fun requireOwnedBoard(userId: Int, boardId: Int): PlanBoardRow {
@@ -140,16 +140,16 @@ class PlanBoardService {
         requireOwnedBoard(userId, boardId)
         val resolved = resolveTextbookSubject(request)
 
-        val id = PlanSubjects.insert {
+        val id = PlanSubjectTable.insert {
             it[planBoardId] = boardId
             it[textbookId] = request.textbookId
             it[this.startChapterId] = request.startChapterId
             it[this.endChapterId] = request.endChapterId
             it[customRangeText] = request.customRangeText
-        } get PlanSubjects.id
+        } get PlanSubjectTable.id
 
         PlanSubjectResponse(
-            id = id,
+            id = id.value,
             planBoardId = boardId,
             subjectId = resolved.subjectId,
             subjectName = resolved.subjectName,
@@ -164,20 +164,20 @@ class PlanBoardService {
     fun getSubjects(userId: Int, boardId: Int): List<PlanSubjectResponse> = transaction {
         requireOwnedBoard(userId, boardId)
 
-        (PlanSubjects innerJoin Textbooks innerJoin Subjects)
+        (PlanSubjectTable innerJoin TextbookTable innerJoin SubjectTable)
             .selectAll()
-            .where { PlanSubjects.planBoardId eq boardId }
+            .where { PlanSubjectTable.planBoardId eq boardId }
             .map {
                 PlanSubjectResponse(
-                    id = it[PlanSubjects.id],
+                    id = it[PlanSubjectTable.id].value,
                     planBoardId = boardId,
-                    subjectId = it[Subjects.id],
-                    subjectName = it[Subjects.name],
-                    textbookId = it[Textbooks.id],
-                    textbookTitle = it[Textbooks.title],
-                    startChapterId = it[PlanSubjects.startChapterId],
-                    endChapterId = it[PlanSubjects.endChapterId],
-                    customRangeText = it[PlanSubjects.customRangeText]
+                    subjectId = it[SubjectTable.id].value,
+                    subjectName = it[SubjectTable.name],
+                    textbookId = it[TextbookTable.id].value,
+                    textbookTitle = it[TextbookTable.title],
+                    startChapterId = it[PlanSubjectTable.startChapterId].value,
+                    endChapterId = it[PlanSubjectTable.endChapterId].value,
+                    customRangeText = it[PlanSubjectTable.customRangeText]
                 )
             }
     }
@@ -185,13 +185,13 @@ class PlanBoardService {
     /** textbookId/startChapterId/endChapterId/customRangeText 전체를 다시 받아 통째로 교체 (부분 업데이트 아님 — 서로 연결된 값들이라 일부만 바꾸면 불일치 위험) */
     fun updateSubject(userId: Int, boardId: Int, subjectId: Int, request: PlanSubjectCreateRequest): PlanSubjectResponse = transaction {
         requireOwnedBoard(userId, boardId)
-        PlanSubjects.selectAll()
-            .where { (PlanSubjects.id eq subjectId) and (PlanSubjects.planBoardId eq boardId) }
+        PlanSubjectTable.selectAll()
+            .where { (PlanSubjectTable.id eq subjectId) and (PlanSubjectTable.planBoardId eq boardId) }
             .firstOrNull() ?: throw PlanSubjectNotFoundException()
 
         val resolved = resolveTextbookSubject(request)
 
-        PlanSubjects.update({ (PlanSubjects.id eq subjectId) and (PlanSubjects.planBoardId eq boardId) }) {
+        PlanSubjectTable.update({ (PlanSubjectTable.id eq subjectId) and (PlanSubjectTable.planBoardId eq boardId) }) {
             it[textbookId] = request.textbookId
             it[startChapterId] = request.startChapterId
             it[endChapterId] = request.endChapterId
@@ -213,7 +213,7 @@ class PlanBoardService {
 
     fun deleteSubject(userId: Int, boardId: Int, subjectId: Int) = transaction {
         requireOwnedBoard(userId, boardId)
-        val deleted = PlanSubjects.deleteWhere { (PlanSubjects.id eq subjectId) and (PlanSubjects.planBoardId eq boardId) }
+        val deleted = PlanSubjectTable.deleteWhere { (PlanSubjectTable.id eq subjectId) and (PlanSubjectTable.planBoardId eq boardId) }
         if (deleted == 0) throw PlanSubjectNotFoundException()
     }
 }

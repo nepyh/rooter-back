@@ -1,19 +1,19 @@
 package com.github.nepyh.rooter.module.planboard
 
-import com.github.nepyh.rooter.module.leveltest.model.LevelTestResults
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultTable
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationDailyResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationSubjectInput
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationTaskResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
-import com.github.nepyh.rooter.module.planboard.model.Chapters
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
-import com.github.nepyh.rooter.module.planboard.model.PlanSubjects
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
-import com.github.nepyh.rooter.module.planboard.model.Subjects
-import com.github.nepyh.rooter.module.planboard.model.Textbooks
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
@@ -134,7 +134,7 @@ class PlanGenerationService(
             } get PlanBoardTable.id
 
             request.subjects.forEach { subject ->
-                PlanSubjects.insert {
+                PlanSubjectTable.insert {
                     it[this.planBoardId] = createdPlanBoardId.value
                     it[textbookId] = subject.textbookId
                     it[startChapterId] = subject.startChapterId
@@ -196,26 +196,26 @@ class PlanGenerationService(
     }
 
     private fun resolveSubject(input: PlanGenerationSubjectInput): ResolvedSubject {
-        val textbookRow = Textbooks.selectAll().where { Textbooks.id eq input.textbookId }.firstOrNull()
+        val textbookRow = TextbookTable.selectAll().where { TextbookTable.id eq input.textbookId }.firstOrNull()
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val subjectName = Subjects.selectAll()
-            .where { Subjects.id eq textbookRow[Textbooks.subjectId] }
+        val subjectName = SubjectTable.selectAll()
+            .where { SubjectTable.id eq textbookRow[TextbookTable.subjectId] }
             .firstOrNull()
-            ?.get(Subjects.name)
+            ?.get(SubjectTable.name)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
 
-        val startOrder = Chapters.selectAll().where { Chapters.id eq input.startChapterId }.firstOrNull()
-            ?.get(Chapters.chapterOrder)
+        val startOrder = ChapterTable.selectAll().where { ChapterTable.id eq input.startChapterId }.firstOrNull()
+            ?.get(ChapterTable.chapterOrder)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val endOrder = Chapters.selectAll().where { Chapters.id eq input.endChapterId }.firstOrNull()
-            ?.get(Chapters.chapterOrder)
+        val endOrder = ChapterTable.selectAll().where { ChapterTable.id eq input.endChapterId }.firstOrNull()
+            ?.get(ChapterTable.chapterOrder)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
         if (startOrder > endOrder) throw PlanBoardValidationException.InvalidSubjectRangeException()
 
-        val topics = Chapters.selectAll()
-            .where { Chapters.textbookId eq input.textbookId }
-            .orderBy(Chapters.chapterOrder to SortOrder.ASC)
-            .map { it[Chapters.chapterName] to it[Chapters.chapterOrder] }
+        val topics = ChapterTable.selectAll()
+            .where { ChapterTable.textbookId eq input.textbookId }
+            .orderBy(ChapterTable.chapterOrder to SortOrder.ASC)
+            .map { it[ChapterTable.chapterName] to it[ChapterTable.chapterOrder] }
             .filter { (_, order) -> order in startOrder..endOrder }
             .map { (name, _) -> name }
 
@@ -225,13 +225,13 @@ class PlanGenerationService(
     }
 
     private fun levelTierFor(userId: Int, subjectName: String): String {
-        val subjectId = Subjects.selectAll().where { Subjects.name eq subjectName }.firstOrNull()?.get(Subjects.id)
+        val subjectId = SubjectTable.selectAll().where { SubjectTable.name eq subjectName }.firstOrNull()?.get(SubjectTable.id)
             ?: return "중"
-        val score = LevelTestResults.selectAll()
-            .where { (LevelTestResults.userId eq userId) and (LevelTestResults.subjectId eq subjectId) }
-            .orderBy(LevelTestResults.createdAt to SortOrder.DESC)
+        val score = LevelTestResultTable.selectAll()
+            .where { (LevelTestResultTable.userId eq userId) and (LevelTestResultTable.subjectId eq subjectId) }
+            .orderBy(LevelTestResultTable.createdAt to SortOrder.DESC)
             .firstOrNull()
-            ?.get(LevelTestResults.score)
+            ?.get(LevelTestResultTable.score)
             ?: return "중"
 
         return when {
