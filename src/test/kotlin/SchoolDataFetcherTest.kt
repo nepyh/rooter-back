@@ -176,6 +176,38 @@ class SchoolDataFetcherTest : StringSpec({
         classes shouldBe listOf("1", "2", "3")
     }
 
+    "시험기간 후보는 학사일정 중 이름에 '고사'/'시험'이 포함된 것만 추린다" {
+        val fetcher = fetcherWith {
+            jsonResponse(
+                """
+                {"SchoolSchedule":[{"head":[{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[
+                    {"AA_YMD":"20260701","EVENT_NM":"1학기 기말고사"},
+                    {"AA_YMD":"20260715","EVENT_NM":"여름방학식"},
+                    {"AA_YMD":"20260420","EVENT_NM":"중간고사"},
+                    {"AA_YMD":"20260501","EVENT_NM":"모의시험"}
+                ]}]}
+                """.trimIndent()
+            )
+        }
+
+        val candidates = fetcher.getExamScheduleCandidates("C107181084", 2026)
+
+        candidates.size shouldBe 3
+        candidates.map { it.name } shouldBe listOf("1학기 기말고사", "중간고사", "모의시험")
+    }
+
+    "시험기간 후보로 분류될 이벤트가 없으면 빈 목록을 반환한다" {
+        val fetcher = fetcherWith {
+            jsonResponse(
+                """
+                {"SchoolSchedule":[{"head":[{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[{"AA_YMD":"20260715","EVENT_NM":"여름방학식"}]}]}
+                """.trimIndent()
+            )
+        }
+
+        fetcher.getExamScheduleCandidates("C107181084", 2026).shouldBeEmpty()
+    }
+
     "잘못된 schoolId 형식은 HTTP 호출 전에 BadRequestException 을 던진다" {
         var called = false
         val fetcher = fetcherWith {

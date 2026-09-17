@@ -1,5 +1,8 @@
 package com.github.nepyh.rooter.module.user
 
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
@@ -8,8 +11,15 @@ import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
+import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.jdbc.deleteWhere
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.time.LocalDate
 import java.time.OffsetDateTime
 
 class UserRepo {
@@ -116,6 +126,19 @@ class UserRepo {
         }
     }
 
+    fun findTaskRowsByDateRange(userId: Int, start: LocalDate, end: LocalDate): Map<LocalDate, List<ResultRow>> {
+        return transaction {
+            (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+                .selectAll()
+                .where {
+                    (PlanBoardTable.userId eq userId) and
+                        (DailyPlanTable.planDate greaterEq start) and
+                        (DailyPlanTable.planDate lessEq end)
+                }
+                .groupBy { it[DailyPlanTable.planDate] }
+        }
+    }
+
     fun insertUnavailableTime(
         userId: Int,
         dayOfWeek: DayOfWeek,
@@ -129,6 +152,15 @@ class UserRepo {
                 this.dayOfWeek = dayOfWeek
                 this.startTime = startTime
                 this.endTime = endTime
+            }
+        }
+    }
+
+    /** 삭제된 row 수를 반환한다. 0이면 존재하지 않거나 본인 소유가 아님. */
+    fun deleteUnavailableTime(userId: Int, timeId: Int): Int {
+        return transaction {
+            UnavailableTimeTable.deleteWhere {
+                (UnavailableTimeTable.id eq timeId) and (UnavailableTimeTable.user eq userId)
             }
         }
     }

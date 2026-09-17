@@ -52,4 +52,34 @@ sealed class UserValidationException(
         "WRONG_CURRENT_PASSWORD",
         "현재 비밀번호가 일치하지 않습니다."
     )
+    class WrongDateFormatException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_DATE_FORMAT",
+        "날짜 형식이 올바르지 않습니다. (yyyy-MM-dd)"
+    )
+    class WrongDateRangeException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_DATE_RANGE",
+        "start 는 end 보다 늦을 수 없습니다."
+    )
+    class InvalidSocialTokenException : UserValidationException(
+        HttpStatusCode.Unauthorized,
+        "INVALID_SOCIAL_TOKEN",
+        "유효하지 않은 소셜 로그인 토큰입니다."
+    )
+    class SocialLoginNotConfiguredException : UserValidationException(
+        HttpStatusCode.ServiceUnavailable,
+        "SOCIAL_LOGIN_NOT_CONFIGURED",
+        "아직 지원하지 않는 소셜 로그인입니다."
+    )
+    class UnsupportedAvatarFileTypeException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "UNSUPPORTED_AVATAR_FILE_TYPE",
+        "이미지 파일만 업로드할 수 있습니다. (jpg, jpeg, png, webp)"
+    )
+    class AvatarFileTooLargeException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "AVATAR_FILE_TOO_LARGE",
+        "이미지 파일은 5MB를 초과할 수 없습니다."
+    )
 }
