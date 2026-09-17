@@ -1,0 +1,12 @@
+# IAM Roles Anywhere credential_process 프로파일 (컨테이너 이미지에 포함)
+#
+# AWS_PROFILE / AWS_CONFIG_FILE 환경변수로 이 파일을 가리키면 SDK 기본 체인이
+# Profile -> credential_process 경로로 임시 자격증명을 받아옵니다 (사이드카/포트 불필요).
+#
+#   AWS_CONFIG_FILE=/app/aws/config
+#   AWS_PROFILE=rooter-prod
+#
+# ARN 값은 실행 시점의 환경변수에서 확장됩니다 (SDK 가 `sh -c` 로 실행하므로 $VAR 확장 가능).
+# 인증서는 이미지에 넣지 않고 호스트에서 마운트합니다 (./certs -> /certs).
+[profile rooter-prod]
+credential_process = /opt/aws/aws_signing_helper credential-process --certificate /certs/client-cert.pem --private-key /certs/client-key.pem --trust-anchor-arn ${ROLESANYWHERE_TRUST_ANCHOR_ARN:?ROLESANYWHERE_TRUST_ANCHOR_ARN is required} --profile-arn ${ROLESANYWHERE_PROFILE_ARN:?ROLESANYWHERE_PROFILE_ARN is required} --role-arn ${ROLESANYWHERE_ROLE_ARN:?ROLESANYWHERE_ROLE_ARN is required}

@@ -437,6 +437,55 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
             }
         }
 
+        delete("{id}/unavailable-times/{timeId}") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val timeId = call.parameters["timeId"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@delete call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 삭제할 수 있습니다."))
+            }
+            userService.deleteUnavailableTime(id, timeId)
+            call.respond(HttpStatusCode.NoContent)
+        }.describe {
+            tag("User")
+            summary = "불가능 시간 삭제"
+            description = "본인 정보만 삭제 가능"
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+                path("timeId") {
+                    description = "삭제할 불가능 시간 ID (등록/조회 응답의 id)"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            responses {
+                HttpStatusCode.NoContent {
+                    description = "삭제 성공"
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 정보가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않거나 본인 소유가 아닌 불가능 시간"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
         post("{id}/profile") {
             val id = call.parameters["id"]?.toIntOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))

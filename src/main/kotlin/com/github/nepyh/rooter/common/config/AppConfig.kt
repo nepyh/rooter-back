@@ -21,6 +21,8 @@ data class AppConfig(
     val storageBaseDir: String?,
     val storageBaseUrl: String?,
     val storageBaseRoute: String?,
+    val storageAwsRegion: String?,
+    val storageAwsBucket: String?,
 
     // jwt related
     val jwtSecret: String,
@@ -33,7 +35,11 @@ data class AppConfig(
 
     // nice (나이스 교육정보 개방포털) related
     val niceApiKey: String,
-    val niceBaseUrl: String
+    val niceBaseUrl: String,
+
+    // social login (Google/Apple) related. 클라이언트 ID 발급 전까지는 빈 문자열
+    val googleClientId: String,
+    val appleClientId: String
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
@@ -68,6 +74,8 @@ data class AppConfig(
                 storageBaseDir = config.propertyOrNull("storage.baseDir")?.getString(),
                 storageBaseUrl = config.propertyOrNull("storage.baseUrl")?.getString(),
                 storageBaseRoute = config.propertyOrNull("storage.baseRoute")?.getString(),
+                storageAwsRegion = config.propertyOrNull("storage.awsRegion")?.getString(),
+                storageAwsBucket = config.propertyOrNull("storage.awsBucket")?.getString(),
 
                 jwtSecret = config.property("jwt.secret").getString(),
                 jwtIssuer = config.property("jwt.issuer").getString(),
@@ -78,7 +86,10 @@ data class AppConfig(
 
                 niceApiKey = config.property("nice.apiKey").getString(),
                 niceBaseUrl = config.propertyOrNull("nice.baseUrl")?.getString()
-                    ?: "https://open.neis.go.kr/hub"
+                    ?: "https://open.neis.go.kr/hub",
+
+                googleClientId = config.propertyOrNull("oauth.googleClientId")?.getString().orEmpty(),
+                appleClientId = config.propertyOrNull("oauth.appleClientId")?.getString().orEmpty()
             )
         }
     }

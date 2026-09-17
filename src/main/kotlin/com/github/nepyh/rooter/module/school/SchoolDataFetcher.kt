@@ -16,11 +16,14 @@ import java.time.format.DateTimeParseException
  * - 중학교 전용 (misTimetable)
  * - 모든 메서드는 비동기(suspend) — NICE 호출은 Ktor HttpClient 기반
  * - 교시별 시각 매핑은 planboard 도메인 책임 (fetcher 는 "N교시 = 과목" 원본만 제공)
- * - 시험일정은 fetcher 범위 밖 (school_exam_periods 크라우드소싱으로 처리)
  */
 class SchoolDataFetcher(
     private val niceClient: NiceApiClient
 ) {
+
+    companion object {
+        private val EXAM_KEYWORDS = listOf("고사", "시험")
+    }
 
     /**
      * 학교명으로 중학교를 검색한다. (부분 일치)
@@ -110,6 +113,14 @@ class SchoolDataFetcher(
             SchoolEvent(date = parseNiceDate(row.date, "AA_YMD"), name = row.name)
         }
     }
+
+    /**
+     * 학사일정 중 이벤트명에 시험 관련 키워드("고사", "시험")가 포함된 것만 추린다.
+     * NICE 학사일정은 자유 텍스트 이름이라 정확한 분류가 아니라, examDate 입력을 돕는 추천 후보일 뿐 —
+     * 최종 확정은 사용자가 한다.
+     */
+    suspend fun getExamScheduleCandidates(schoolId: String, year: Int): List<SchoolEvent> =
+        getSchoolEvents(schoolId, year).filter { event -> EXAM_KEYWORDS.any { event.name.contains(it) } }
 
     /** NICE 날짜(YYYYMMDD) 를 LocalDate 로 파싱한다. 형식 오류는 조용히 넘기지 않고 예외로 드러낸다. */
     private fun parseNiceDate(raw: String, field: String): LocalDate {

@@ -44,3 +44,11 @@ data class TextbookDetailResponse(
     val aiStatus: String,
     val chapters: List<ChapterTreeResponse>
 )
+
+@Serializable
+data class RecommendedTextbookResponse(
+    val subjectId: Int,
+    val subjectName: String,
+    val textbookId: Int,
+    val textbookTitle: String
+)

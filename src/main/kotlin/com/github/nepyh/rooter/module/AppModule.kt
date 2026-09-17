@@ -7,6 +7,7 @@ import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.calendar.CalendarModule
 import com.github.nepyh.rooter.module.calendar.exception.CalendarEventNotFoundException
 import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
+import com.github.nepyh.rooter.module.chat.ChatModule
 import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.feedback.FeedbackModule
 import com.github.nepyh.rooter.module.health.HealthModule
@@ -15,6 +16,8 @@ import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
+import com.github.nepyh.rooter.module.planboard.exception.PlanSubjectNotFoundException
+import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.quiz.QuizModule
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
@@ -22,8 +25,11 @@ import com.github.nepyh.rooter.module.scheduler.SchedulerModule
 import com.github.nepyh.rooter.module.school.SchoolModule
 import com.github.nepyh.rooter.module.school.exception.NiceApiException
 import com.github.nepyh.rooter.module.storage.FileStorageModule
+import com.github.nepyh.rooter.module.studystyle.StudyStyleModule
 import com.github.nepyh.rooter.module.swagger.SwaggerDocsModule
+import com.github.nepyh.rooter.module.taskquiz.TaskQuizModule
 import com.github.nepyh.rooter.module.user.UserModule
+import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.HttpStatusCode
@@ -54,11 +60,14 @@ fun AppModule(appConfig: AppConfig): Module = module {
     // service-related modules
     includes(
         UserModule(appConfig),
-        PlanBoardModule(),
+        PlanBoardModule(appConfig),
         QuizModule(appConfig),
         CalendarModule(),
         FeedbackModule(appConfig),
-        LevelTestModule(appConfig)
+        LevelTestModule(appConfig),
+        StudyStyleModule(),
+        TaskQuizModule(appConfig),
+        ChatModule(appConfig)
     )
 
     single<List<ApiRoute>> { getAll() }
@@ -77,6 +86,9 @@ fun Application.configureAppModule() {
     install(StatusPages) {
         exception<UserNotFoundException> { call, cause ->
             call.respondError(HttpStatusCode.NotFound, "USER_NOT_FOUND", cause.message)
+        }
+        exception<UnavailableTimeNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "UNAVAILABLE_TIME_NOT_FOUND", cause.message)
         }
         exception<UserValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
@@ -101,6 +113,12 @@ fun Application.configureAppModule() {
         }
         exception<PlanTaskValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<PlanTaskNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "PLAN_TASK_NOT_FOUND", cause.message)
+        }
+        exception<PlanSubjectNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "PLAN_SUBJECT_NOT_FOUND", cause.message)
         }
         exception<BadRequestException> { call, _ ->
             call.respondError(HttpStatusCode.BadRequest, "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다.")

@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.user
 
 import com.github.nepyh.rooter.module.storage.FileStorage
+import com.github.nepyh.rooter.module.storage.UploadableFile
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
@@ -16,9 +17,11 @@ import com.github.nepyh.rooter.module.user.dto.UserInfoResponse
 import com.github.nepyh.rooter.module.user.dto.UserProfileUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
+import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
+import io.ktor.http.HttpHeaders
 import io.ktor.http.content.PartData
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
@@ -212,10 +215,11 @@ class UserService(
         val bytes = readWithSizeLimit(file.provider(), MAX_AVATAR_FILE_SIZE_BYTES)
             ?: throw UserValidationException.AvatarFileTooLargeException()
 
-        val boundedFile = PartData.FileItem(
-            provider = { ByteReadChannel(bytes) },
-            dispose = {},
-            partHeaders = file.headers
+        val boundedFile = UploadableFile(
+            content = ByteReadChannel(bytes),
+            originalFileName = file.originalFileName,
+            contentType = file.headers[HttpHeaders.ContentType],
+            contentLength = bytes.size.toLong()
         )
 
         val avatarImageKey = fileStorage.upload(boundedFile, "avatars")
@@ -249,6 +253,13 @@ class UserService(
             startTime = row.startTime.toString(),
             endTime = row.endTime.toString()
         )
+    }
+
+    fun deleteUnavailableTime(userId: Int, timeId: Int) {
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        val deleted = userRepo.deleteUnavailableTime(userId, timeId)
+        if (deleted == 0) throw UnavailableTimeNotFoundException()
     }
 
     /** maxBytes 를 넘으면 다 읽지 않고 null 을 반환한다 (업로드된 파일 전체를 메모리에 올리기 전에 상한을 강제). */

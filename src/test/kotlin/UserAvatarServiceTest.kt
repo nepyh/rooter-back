@@ -1,4 +1,5 @@
 import com.github.nepyh.rooter.module.storage.FileStorage
+import com.github.nepyh.rooter.module.storage.UploadableFile
 import com.github.nepyh.rooter.module.user.UserRepo
 import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
@@ -70,8 +71,8 @@ class UserAvatarServiceTest : StringSpec({
     // 실제로 업로드된 바이트를 그대로 기록해두는 테스트용 스토리지 — 디스크/네트워크 없이 검증
     class RecordingFileStorage : FileStorage {
         var uploadedBytes: ByteArray? = null
-        override suspend fun upload(file: PartData.FileItem, directory: String): String {
-            val channel = file.provider()
+        override suspend fun upload(file: UploadableFile, directory: String): String {
+            val channel = file.content
             val buffer = java.io.ByteArrayOutputStream()
             val chunk = ByteArray(8192)
             while (true) {
@@ -82,7 +83,10 @@ class UserAvatarServiceTest : StringSpec({
             uploadedBytes = buffer.toByteArray()
             return "avatars/fake-key.png"
         }
-        override suspend fun getFile(fileKey: String): PartData.FileItem? = error("사용되지 않아야 함")
+        override suspend fun <T> readFile(
+            fileKey: String,
+            block: suspend (java.io.InputStream, String?, Long?) -> T
+        ): T? = error("사용되지 않아야 함")
         override suspend fun getUrl(fileKey: String): String? = error("사용되지 않아야 함")
         override suspend fun delete(fileKey: String): Boolean = error("사용되지 않아야 함")
     }

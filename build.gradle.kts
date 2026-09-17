@@ -55,6 +55,8 @@ dependencies {
     implementation("org.postgresql:postgresql:42.7.2")
     //jwt
     implementation("com.auth0:java-jwt:4.4.0")
+    // Google/Apple 소셜 로그인 id_token 검증용 (JWKS fetch + RSA 서명 검증)
+    implementation("com.auth0:jwks-rsa:0.24.1")
 
     // test dependencies
     testImplementation(kotlin("test"))
@@ -62,10 +64,24 @@ dependencies {
     testImplementation("io.kotest:kotest-assertions-core:6.2.0")
     testImplementation("io.kotest:kotest-property:6.2.0")
     testImplementation("io.ktor:ktor-client-mock:$ktorVersion")
+
+    // aws sdk (for s3 connection)
+    implementation("aws.sdk.kotlin:s3:1.6.107")
 }
 
 tasks.test {
     useJUnitPlatform()
+
+    val envFile = File(projectDir, ".env")
+    if (envFile.exists()) {
+        envFile.bufferedReader().use { reader ->
+            val properties = Properties()
+            properties.load(reader)
+            properties.forEach { (key, value) ->
+                environment(key.toString(), value.toString())
+            }
+        }
+    }
 }
 
 kotlin {

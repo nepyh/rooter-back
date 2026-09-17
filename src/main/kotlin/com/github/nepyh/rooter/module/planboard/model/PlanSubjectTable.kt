@@ -1,10 +1,12 @@
 package com.github.nepyh.rooter.module.planboard.model
 
+import org.jetbrains.exposed.v1.core.ReferenceOption
 import org.jetbrains.exposed.v1.core.Table
 
 object PlanSubjects : Table("plan_subjects") {
     val id = integer("id").autoIncrement()
-    val planBoardId = integer("plan_board_id").references(PlanBoardTable.id)
+    // DDL 의 fk_plan_subjects_board 와 동일 (on delete cascade)
+    val planBoardId = integer("plan_board_id").references(PlanBoardTable.id, onDelete = ReferenceOption.CASCADE)
     val textbookId = integer("textbook_id") references Textbooks.id
     val startChapterId = integer("start_chapter_id") references Chapters.id
     val endChapterId = integer("end_chapter_id") references Chapters.id
