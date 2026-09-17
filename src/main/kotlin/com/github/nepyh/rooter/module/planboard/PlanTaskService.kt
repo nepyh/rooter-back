@@ -3,6 +3,7 @@ package com.github.nepyh.rooter.module.planboard
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.WeeklyPlanResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
@@ -160,6 +161,52 @@ class PlanTaskService {
 
         task.isCompleted = isCompleted
         task.toResponse()
+    }
+
+    /** taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정 (본인 플랜보드 소유권 확인) */
+    fun updateTask(userId: Int, taskId: Int, request: PlanTaskUpdateRequest): PlanTaskResponse = transaction {
+        val task = PlanTaskRow.findById(taskId)
+            ?: throw PlanTaskNotFoundException()
+
+        if (task.dailyPlan.planBoard.user.id.value != userId) {
+            throw PlanTaskNotFoundException()
+        }
+
+        request.taskName?.let {
+            if (it.isBlank() || it.length > 150) throw PlanTaskValidationException.InvalidTaskNameException()
+            task.taskName = it
+        }
+
+        val newStartTime = request.startTime?.let {
+            runCatching { LocalTime.parse(it) }.getOrElse { throw PlanTaskValidationException.InvalidTimeFormatException() }
+        } ?: task.startTime
+        val newEndTime = request.endTime?.let {
+            runCatching { LocalTime.parse(it) }.getOrElse { throw PlanTaskValidationException.InvalidTimeFormatException() }
+        } ?: task.endTime
+        if (!newEndTime.isAfter(newStartTime)) {
+            throw PlanTaskValidationException.InvalidTimeRangeException()
+        }
+        task.startTime = newStartTime
+        task.endTime = newEndTime
+
+        request.estimatedMinutes?.let {
+            if (it < 1) throw PlanTaskValidationException.InvalidEstimatedMinutesException()
+            task.estimatedMinutes = it
+        }
+
+        task.toResponse()
+    }
+
+    /** 태스크 삭제 (본인 플랜보드 소유권 확인) */
+    fun deleteTask(userId: Int, taskId: Int) = transaction {
+        val task = PlanTaskRow.findById(taskId)
+            ?: throw PlanTaskNotFoundException()
+
+        if (task.dailyPlan.planBoard.user.id.value != userId) {
+            throw PlanTaskNotFoundException()
+        }
+
+        task.delete()
     }
 
     private fun PlanTaskRow.toResponse() = PlanTaskResponse(

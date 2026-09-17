@@ -23,3 +23,10 @@ data class PlanBoardCreateResponse(
     val id: Int,
     val message: String
 )
+
+@Serializable
+data class PlanBoardUpdateRequest(
+    val title: String? = null,
+    val startDate: String? = null,
+    val endDate: String? = null
+)
