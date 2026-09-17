@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.taskquiz
 
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.scheduler.DueJob
 import com.github.nepyh.rooter.module.scheduler.SchedulerJob
@@ -46,6 +47,7 @@ class TaskQuizTriggerJob(
     }
 
     private fun findInitialTriggers(today: LocalDate, zonedNow: ZonedDateTime): List<DueJob> {
+        // FK id 만 뽑아 쓰는 조회라 DAO 대신 Table DSL 을 쓴다 (Row 로 읽으면 행마다 참조 엔티티를 추가 조회).
         val alreadyStarted = TaskQuizAttemptTable.selectAll()
             .where { TaskQuizAttemptTable.attemptNumber eq 1 }
             .map { it[TaskQuizAttemptTable.planTaskId].value }
@@ -73,6 +75,7 @@ class TaskQuizTriggerJob(
     private fun findRetryTriggers(zonedNow: ZonedDateTime): List<DueJob> {
         // 태스크별로 "가장 최근(attemptNumber 최댓값)" attempt만 봐야 한다 — passed=false 로만 필터링하면
         // 그 뒤에 이미 새 attempt(성공/실패 불문)가 생겼는데도 옛날 실패 attempt가 다시 잡히는 버그가 생김.
+        // 전체 attempt 를 스캔해 태스크별 최신 attempt 만 골라내는 집계성 조회라 Table DSL 을 유지한다.
         val latestByTask = TaskQuizAttemptTable.selectAll()
             .orderBy(TaskQuizAttemptTable.attemptNumber to SortOrder.DESC)
             .groupBy { it[TaskQuizAttemptTable.planTaskId].value }
@@ -88,10 +91,7 @@ class TaskQuizTriggerJob(
             if (retryAt.isAfter(zonedNow)) return@mapNotNull null
 
             val planTaskId = row[TaskQuizAttemptTable.planTaskId].value
-            val taskName = PlanTaskTable.selectAll()
-                .where { PlanTaskTable.id eq planTaskId }
-                .firstOrNull()
-                ?.get(PlanTaskTable.taskName) ?: return@mapNotNull null
+            val taskName = PlanTaskRow.findById(planTaskId)?.taskName ?: return@mapNotNull null
 
             val nextAttempt = attemptNumber + 1
             val payload = TaskQuizJobPayload(planTaskId, nextAttempt, taskName)

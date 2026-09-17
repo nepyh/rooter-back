@@ -4,13 +4,12 @@ import com.github.nepyh.rooter.module.studystyle.dto.StudyStyleAnswerResponse
 import com.github.nepyh.rooter.module.studystyle.dto.StudyStyleResponse
 import com.github.nepyh.rooter.module.studystyle.dto.StudyStyleSubmitRequest
 import com.github.nepyh.rooter.module.studystyle.exception.StudyStyleValidationException
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerRow
 import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerTable
+import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.deleteWhere
-import org.jetbrains.exposed.v1.jdbc.insert
-import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 
 private const val MIN_QUESTION_NUMBER = 1
@@ -38,14 +37,17 @@ class StudyStyleService {
         }
 
         return transaction {
+            val user = UserRow[userId]
             request.answers.forEach { answer ->
-                StudyStyleAnswerTable.deleteWhere {
-                    (StudyStyleAnswerTable.userId eq userId) and (StudyStyleAnswerTable.questionNumber eq answer.questionNumber.toShort())
-                }
-                StudyStyleAnswerTable.insert {
-                    it[this.userId] = userId
-                    it[questionNumber] = answer.questionNumber.toShort()
-                    it[answerOption] = answer.answerOption.toShort()
+                StudyStyleAnswerRow.find {
+                    (StudyStyleAnswerTable.userId eq user.id) and
+                        (StudyStyleAnswerTable.questionNumber eq answer.questionNumber.toShort())
+                }.forEach { it.delete() }
+
+                StudyStyleAnswerRow.new {
+                    this.user = user
+                    this.questionNumber = answer.questionNumber.toShort()
+                    this.answerOption = answer.answerOption.toShort()
                 }
             }
 
@@ -56,13 +58,12 @@ class StudyStyleService {
     fun getAnswers(userId: Int): StudyStyleResponse = transaction { fetchAnswers(userId) }
 
     private fun fetchAnswers(userId: Int): StudyStyleResponse {
-        val answers = StudyStyleAnswerTable.selectAll()
-            .where { StudyStyleAnswerTable.userId eq userId }
+        val answers = StudyStyleAnswerRow.find { StudyStyleAnswerTable.userId eq userId }
             .orderBy(StudyStyleAnswerTable.questionNumber to SortOrder.ASC)
             .map {
                 StudyStyleAnswerResponse(
-                    questionNumber = it[StudyStyleAnswerTable.questionNumber].toInt(),
-                    answerOption = it[StudyStyleAnswerTable.answerOption].toInt()
+                    questionNumber = it.questionNumber.toInt(),
+                    answerOption = it.answerOption.toInt()
                 )
             }
         return StudyStyleResponse(answers)

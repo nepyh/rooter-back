@@ -1,6 +1,9 @@
 import com.github.nepyh.rooter.module.planboard.CatalogService
+import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionRow
 import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
@@ -12,7 +15,6 @@ import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
-import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
@@ -81,22 +83,22 @@ class CatalogServiceTest : StringSpec({
     }
 
     fun seedSubject(name: String): Int = transaction(db) {
-        (SubjectTable.insert { it[this.name] = name } get SubjectTable.id).value
+        SubjectRow.new { this.name = name }.id.value
     }
 
     fun seedTextbook(subjectId: Int, title: String): Int = transaction(db) {
-        (TextbookTable.insert {
-            it[this.subjectId] = subjectId
-            it[this.title] = title
-        } get TextbookTable.id).value
+        TextbookRow.new {
+            subject = SubjectRow[subjectId]
+            this.title = title
+        }.id.value
     }
 
     fun seedAdoption(schoolId: String, grade: Int, subjectId: Int, textbookId: Int) = transaction(db) {
-        SchoolTextbookAdoptionTable.insert {
-            it[this.schoolId] = schoolId
-            it[this.grade] = grade
-            it[this.subjectId] = subjectId
-            it[this.textbookId] = textbookId
+        SchoolTextbookAdoptionRow.new {
+            this.schoolId = schoolId
+            this.grade = grade
+            subject = SubjectRow[subjectId]
+            textbook = TextbookRow[textbookId]
         }
     }
 

@@ -6,23 +6,27 @@ import com.github.nepyh.rooter.module.chat.dto.ChatMessageResponse
 import com.github.nepyh.rooter.module.chat.dto.ChatTurnResponse
 import com.github.nepyh.rooter.module.chat.exception.ChatValidationException
 import com.github.nepyh.rooter.module.chat.exception.DailyPlanNotFoundException
+import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerRow
 import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerTable
+import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
+import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.deleteWhere
-import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
@@ -41,11 +45,13 @@ class ChatService(
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private fun requireOwnedDailyPlan(userId: Int, dailyPlanId: Int) =
+    /** 소유자 확인은 daily_plans + plan_boards 조인이 필요해 Table DSL 로 조회한 뒤 엔티티로 감싼다. */
+    private fun requireOwnedDailyPlan(userId: Int, dailyPlanId: Int): DailyPlanRow =
         (DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
             .where { (DailyPlanTable.id eq dailyPlanId) and (PlanBoardTable.userId eq userId) }
             .firstOrNull()
+            ?.let { DailyPlanRow.wrapRow(it) }
             ?: throw DailyPlanNotFoundException()
 
     suspend fun sendMessage(userId: Int, dailyPlanId: Int, message: String): ChatMessageResponse {
@@ -54,37 +60,32 @@ class ChatService(
 
         val context = newSuspendedTransaction {
             val dailyPlanRow = requireOwnedDailyPlan(userId, dailyPlanId)
-            val planDate = dailyPlanRow[DailyPlanTable.planDate]
+            val planDate = dailyPlanRow.planDate
 
-            val tasks = PlanTaskTable.selectAll()
-                .where { PlanTaskTable.dailyPlanId eq dailyPlanId }
+            val tasks = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
                 .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
-                .map { it[PlanTaskTable.taskName] to it[PlanTaskTable.estimatedMinutes] }
+                .map { it.taskName to it.estimatedMinutes }
 
-            val profileRow = StudentProfileTable.selectAll()
-                .where { StudentProfileTable.user eq userId }
+            val profileRow = StudentProfileRow.find { StudentProfileTable.user eq userId }
                 .firstOrNull()
-            val grade = profileRow?.get(StudentProfileTable.grade) ?: 2
-            val schoolId = profileRow?.get(StudentProfileTable.schoolId)
-            val classNumber = profileRow?.get(StudentProfileTable.classNumber)
-            val customUnavailableRows = UnavailableTimeTable.selectAll()
-                .where { UnavailableTimeTable.user eq userId }
+            val grade = profileRow?.grade ?: 2
+            val schoolId = profileRow?.schoolId
+            val classNumber = profileRow?.classNumber
+            val customUnavailableRows = UnavailableTimeRow.find { UnavailableTimeTable.user eq userId }
                 .map {
-                    it[UnavailableTimeTable.dayOfWeek].code.toInt() to
-                        (PlanTaskScheduler.toMinutes(it[UnavailableTimeTable.startTime]) to PlanTaskScheduler.toMinutes(it[UnavailableTimeTable.endTime]))
+                    it.dayOfWeek.code.toInt() to
+                        (PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime))
                 }
 
-            val studyStyleSummary = StudyStyleAnswerTable.selectAll()
-                .where { StudyStyleAnswerTable.userId eq userId }
+            val studyStyleSummary = StudyStyleAnswerRow.find { StudyStyleAnswerTable.userId eq userId }
                 .orderBy(StudyStyleAnswerTable.questionNumber to SortOrder.ASC)
-                .map { "문항${it[StudyStyleAnswerTable.questionNumber]}=${it[StudyStyleAnswerTable.answerOption]}" }
+                .map { "문항${it.questionNumber}=${it.answerOption}" }
                 .joinToString(", ")
                 .ifBlank { "응답 없음" }
 
-            val history = ChatTurnTable.selectAll()
-                .where { ChatTurnTable.dailyPlanId eq dailyPlanId }
+            val history = ChatTurnRow.find { ChatTurnTable.dailyPlanId eq dailyPlanId }
                 .orderBy(ChatTurnTable.createdAt to SortOrder.ASC)
-                .map { AiChatTurn(role = it[ChatTurnTable.role], content = it[ChatTurnTable.content]) }
+                .map { AiChatTurn(role = it.role, content = it.content) }
                 .takeLast(HISTORY_LIMIT)
 
             ChatContext(
@@ -138,20 +139,20 @@ class ChatService(
         }
 
         return newSuspendedTransaction {
-            ChatTurnTable.insert {
-                it[this.dailyPlanId] = dailyPlanId
-                it[role] = "user"
-                it[content] = trimmed
-                it[createdAt] = OffsetDateTime.now()
+            ChatTurnRow.new {
+                this.dailyPlan = DailyPlanRow[dailyPlanId]
+                role = "user"
+                content = trimmed
+                createdAt = OffsetDateTime.now()
             }
 
             if (result == null) {
                 val fallback = "죄송해요, 지금은 답변을 드릴 수 없어요. 잠시 후 다시 시도해주세요."
-                ChatTurnTable.insert {
-                    it[this.dailyPlanId] = dailyPlanId
-                    it[role] = "assistant"
-                    it[content] = fallback
-                    it[createdAt] = OffsetDateTime.now()
+                ChatTurnRow.new {
+                    this.dailyPlan = DailyPlanRow[dailyPlanId]
+                    role = "assistant"
+                    content = fallback
+                    createdAt = OffsetDateTime.now()
                 }
                 return@newSuspendedTransaction ChatMessageResponse(reply = fallback, planChanged = false)
             }
@@ -163,17 +164,18 @@ class ChatService(
                     freeIntervals
                 )
 
-                PlanTaskTable.deleteWhere { PlanTaskTable.dailyPlanId eq dailyPlanId }
+                val dailyPlan = DailyPlanRow[dailyPlanId]
+                PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.forEach { it.delete() }
                 updatedTasks = placed.map { task ->
-                    val id = PlanTaskTable.insert {
-                        it[this.dailyPlanId] = dailyPlanId
-                        it[taskName] = task.taskName
-                        it[startTime] = task.startTime
-                        it[endTime] = task.endTime
-                        it[estimatedMinutes] = task.estimatedMinutes
-                    } get PlanTaskTable.id
+                    val planTask = PlanTaskRow.new {
+                        this.dailyPlan = dailyPlan
+                        taskName = task.taskName
+                        startTime = task.startTime
+                        endTime = task.endTime
+                        estimatedMinutes = task.estimatedMinutes
+                    }
                     PlanTaskResponse(
-                        id = id.value,
+                        id = planTask.id.value,
                         taskName = task.taskName,
                         startTime = task.startTime.toString(),
                         endTime = task.endTime.toString(),
@@ -183,11 +185,11 @@ class ChatService(
                 }
             }
 
-            ChatTurnTable.insert {
-                it[this.dailyPlanId] = dailyPlanId
-                it[role] = "assistant"
-                it[content] = result.reply_message
-                it[createdAt] = OffsetDateTime.now()
+            ChatTurnRow.new {
+                this.dailyPlan = DailyPlanRow[dailyPlanId]
+                role = "assistant"
+                content = result.reply_message
+                createdAt = OffsetDateTime.now()
             }
 
             ChatMessageResponse(
@@ -201,14 +203,13 @@ class ChatService(
     suspend fun getHistory(userId: Int, dailyPlanId: Int): List<ChatTurnResponse> = newSuspendedTransaction {
         requireOwnedDailyPlan(userId, dailyPlanId)
 
-        ChatTurnTable.selectAll()
-            .where { ChatTurnTable.dailyPlanId eq dailyPlanId }
+        ChatTurnRow.find { ChatTurnTable.dailyPlanId eq dailyPlanId }
             .orderBy(ChatTurnTable.createdAt to SortOrder.ASC)
             .map {
                 ChatTurnResponse(
-                    role = it[ChatTurnTable.role],
-                    content = it[ChatTurnTable.content],
-                    createdAt = it[ChatTurnTable.createdAt].toString()
+                    role = it.role,
+                    content = it.content,
+                    createdAt = it.createdAt.toString()
                 )
             }
     }

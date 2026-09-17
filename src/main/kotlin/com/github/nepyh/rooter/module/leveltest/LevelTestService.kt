@@ -8,18 +8,21 @@ import com.github.nepyh.rooter.module.leveltest.dto.LevelTestSubjectScoreRespons
 import com.github.nepyh.rooter.module.leveltest.dto.LevelTestSubmitResponse
 import com.github.nepyh.rooter.module.leveltest.exception.LevelTestNotFoundException
 import com.github.nepyh.rooter.module.leveltest.exception.LevelTestValidationException
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestAttemptRow
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestAttemptTable
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestChoiceRow
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestChoiceTable
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestQuestionRow
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestQuestionTable
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultRow
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
-import org.jetbrains.exposed.v1.jdbc.insert
-import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
-import org.jetbrains.exposed.v1.jdbc.update
 import java.time.OffsetDateTime
 import kotlin.math.roundToInt
 
@@ -34,33 +37,33 @@ class LevelTestService(
         val generated = llmClient.generateQuestions(referenceGradeLabel)
 
         return newSuspendedTransaction {
-            val attemptId = LevelTestAttemptTable.insert {
-                it[this.userId] = userId
-                it[this.grade] = grade
-                it[this.referenceGradeLabel] = referenceGradeLabel
-                it[createdAt] = OffsetDateTime.now()
-            } get LevelTestAttemptTable.id
+            val attempt = LevelTestAttemptRow.new {
+                user = UserRow[userId]
+                this.grade = grade
+                this.referenceGradeLabel = referenceGradeLabel
+                createdAt = OffsetDateTime.now()
+            }
 
             val questions = generated.map { question ->
-                val subjectId = findOrCreateSubject(question.subject)
+                val subject = findOrCreateSubject(question.subject)
 
-                val questionId = LevelTestQuestionTable.insert {
-                    it[this.attemptId] = attemptId.value
-                    it[this.subjectId] = subjectId
-                    it[questionText] = question.question_text
-                } get LevelTestQuestionTable.id
+                val levelTestQuestion = LevelTestQuestionRow.new {
+                    this.attempt = attempt
+                    this.subject = subject
+                    questionText = question.question_text
+                }
 
                 question.choices.forEachIndexed { index, choiceText ->
-                    LevelTestChoiceTable.insert {
-                        it[this.questionId] = questionId
-                        it[this.choiceText] = choiceText
-                        it[isCorrect] = index == question.correct_index
-                        it[explanation] = question.explanation
+                    LevelTestChoiceRow.new {
+                        this.question = levelTestQuestion
+                        this.choiceText = choiceText
+                        isCorrect = index == question.correct_index
+                        explanation = question.explanation
                     }
                 }
 
                 LevelTestQuestionPublicResponse(
-                    id = questionId.value,
+                    id = levelTestQuestion.id.value,
                     subject = question.subject,
                     questionText = question.question_text,
                     choices = question.choices
@@ -68,7 +71,7 @@ class LevelTestService(
             }
 
             LevelTestGenerateResponse(
-                attemptId = attemptId.value,
+                attemptId = attempt.id.value,
                 referenceGradeLabel = referenceGradeLabel,
                 questions = questions
             )
@@ -77,18 +80,16 @@ class LevelTestService(
 
     suspend fun submitTest(userId: Int, attemptId: Int, answers: List<LevelTestAnswer>): LevelTestSubmitResponse =
         newSuspendedTransaction {
-            val attemptRow = LevelTestAttemptTable.selectAll()
-                .where { (LevelTestAttemptTable.id eq attemptId) and (LevelTestAttemptTable.userId eq userId) }
-                .firstOrNull()
-                ?: throw LevelTestNotFoundException()
+            val attempt = LevelTestAttemptRow.find {
+                (LevelTestAttemptTable.id eq attemptId) and (LevelTestAttemptTable.userId eq userId)
+            }.firstOrNull() ?: throw LevelTestNotFoundException()
 
-            if (attemptRow[LevelTestAttemptTable.isSubmitted]) {
+            if (attempt.isSubmitted) {
                 throw LevelTestValidationException.AlreadySubmittedException()
             }
 
-            val questionRows = LevelTestQuestionTable.selectAll()
-                .where { LevelTestQuestionTable.attemptId eq attemptId }
-                .associateBy { it[LevelTestQuestionTable.id].value }
+            val questionRows = LevelTestQuestionRow.find { LevelTestQuestionTable.attemptId eq attemptId }
+                .associateBy { it.id.value }
             if (questionRows.isEmpty()) throw LevelTestNotFoundException()
 
             val questionIds = questionRows.keys
@@ -96,10 +97,9 @@ class LevelTestService(
                 throw LevelTestValidationException.InvalidAnswerException()
             }
 
-            val choicesByQuestion = LevelTestChoiceTable.selectAll()
-                .where { LevelTestChoiceTable.questionId inList questionIds }
-                .groupBy { it[LevelTestChoiceTable.questionId].value }
-                .mapValues { (_, rows) -> rows.sortedBy { it[LevelTestChoiceTable.id].value } }
+            val choicesByQuestion = LevelTestChoiceRow.find { LevelTestChoiceTable.questionId inList questionIds }
+                .groupBy { it.question.id.value }
+                .mapValues { (_, rows) -> rows.sortedBy { it.id.value } }
 
             val results = answers.map { answer ->
                 val questionRow = questionRows.getValue(answer.questionId)
@@ -107,48 +107,41 @@ class LevelTestService(
                 if (answer.selectedIndex !in choices.indices) {
                     throw LevelTestValidationException.InvalidAnswerException()
                 }
-                val correctIndex = choices.indexOfFirst { it[LevelTestChoiceTable.isCorrect] }
-                val subjectName = SubjectTable.selectAll()
-                    .where { SubjectTable.id eq questionRow[LevelTestQuestionTable.subjectId] }
-                    .first()[SubjectTable.name]
+                val correctIndex = choices.indexOfFirst { it.isCorrect }
 
                 LevelTestQuestionResultResponse(
                     questionId = answer.questionId,
-                    subject = subjectName,
+                    subject = questionRow.subject.name,
                     isCorrect = answer.selectedIndex == correctIndex,
                     selectedIndex = answer.selectedIndex,
                     correctIndex = correctIndex,
-                    explanation = choices[correctIndex][LevelTestChoiceTable.explanation]
+                    explanation = choices[correctIndex].explanation
                 )
             }
 
-            val subjectScores = results.groupBy { it.subject }.map { (subject, subjectResults) ->
+            val subjectScores = results.groupBy { it.subject }.map { (subjectName, subjectResults) ->
                 val correctCount = subjectResults.count { it.isCorrect }
                 val totalCount = subjectResults.size
-                val subjectId = SubjectTable.selectAll()
-                    .where { SubjectTable.name eq subject }
-                    .first()[SubjectTable.id]
+                val subject = SubjectRow.find { SubjectTable.name eq subjectName }.first()
 
-                LevelTestResultTable.insert {
-                    it[this.userId] = userId
-                    it[this.subjectId] = subjectId
+                LevelTestResultRow.new {
+                    user = UserRow[userId]
+                    this.subject = subject
                     // score는 0~100 정답률(%)로 저장한다. 문항 수가 시도마다 다를 수 있어 원시 정답
                     // 개수만 저장하면 나중에 총 문항 수 없이는 등급을 다시 계산할 수 없기 때문.
-                    it[score] = ((correctCount.toDouble() / totalCount) * 100).roundToInt()
-                    it[createdAt] = OffsetDateTime.now()
+                    score = ((correctCount.toDouble() / totalCount) * 100).roundToInt()
+                    createdAt = OffsetDateTime.now()
                 }
 
                 LevelTestSubjectScoreResponse(
-                    subject = subject,
+                    subject = subjectName,
                     correctCount = correctCount,
                     totalCount = totalCount,
                     tier = computeTier(correctCount, totalCount)
                 )
             }
 
-            LevelTestAttemptTable.update({ LevelTestAttemptTable.id eq attemptId }) {
-                it[isSubmitted] = true
-            }
+            attempt.isSubmitted = true
 
             val correctCount = results.count { it.isCorrect }
             val totalCount = results.size
@@ -162,12 +155,9 @@ class LevelTestService(
             )
         }
 
-    private fun findOrCreateSubject(name: String): Int {
-        SubjectTable.selectAll().where { SubjectTable.name eq name }.firstOrNull()?.let {
-            return it[SubjectTable.id].value
-        }
-        return (SubjectTable.insert { it[this.name] = name } get SubjectTable.id).value
-    }
+    private fun findOrCreateSubject(name: String): SubjectRow =
+        SubjectRow.find { SubjectTable.name eq name }.firstOrNull()
+            ?: SubjectRow.new { this.name = name }
 
     /** 실력 테스트는 현재 학년보다 한 단계 아래 수준으로 출제한다 (중1은 초6 수준까지 내려간다). */
     private fun referenceGradeLabelFor(grade: Int): String = when (grade) {

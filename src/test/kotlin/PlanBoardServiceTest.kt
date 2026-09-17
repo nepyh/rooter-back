@@ -11,6 +11,7 @@ import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationExc
 import com.github.nepyh.rooter.module.planboard.exception.PlanSubjectNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
+import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
@@ -19,7 +20,9 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
@@ -32,7 +35,6 @@ import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
-import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
@@ -123,22 +125,22 @@ class PlanBoardServiceTest : StringSpec({
     }
 
     fun seedSubject(name: String): Int = transaction(db) {
-        (SubjectTable.insert { it[this.name] = name } get SubjectTable.id).value
+        SubjectRow.new { this.name = name }.id.value
     }
 
     fun seedTextbook(subjectId: Int, title: String = "테스트 교과서"): Int = transaction(db) {
-        (TextbookTable.insert {
-            it[this.subjectId] = subjectId
-            it[this.title] = title
-        } get TextbookTable.id).value
+        TextbookRow.new {
+            subject = SubjectRow[subjectId]
+            this.title = title
+        }.id.value
     }
 
     fun seedChapter(textbookId: Int, order: Int, name: String = "${order}단원"): Int = transaction(db) {
-        (ChapterTable.insert {
-            it[this.textbookId] = textbookId
-            it[chapterName] = name
-            it[chapterOrder] = order
-        } get ChapterTable.id).value
+        ChapterRow.new {
+            textbook = TextbookRow[textbookId]
+            chapterName = name
+            chapterOrder = order
+        }.id.value
     }
 
     // ---- createBoard ----

@@ -1,9 +1,14 @@
 package com.github.nepyh.rooter.module.quiz
 
+import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.quiz.dto.InsertedReviewTaskResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizAnswerSubmission
@@ -14,15 +19,17 @@ import com.github.nepyh.rooter.module.quiz.dto.QuizResultResponse
 import com.github.nepyh.rooter.module.quiz.dto.WeakAreaSummary
 import com.github.nepyh.rooter.module.quiz.exception.QuizNotFoundException
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
+import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttemptRow
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttemptTable
+import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceRow
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceTable
+import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionRow
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionTable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.inList
-import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
@@ -37,6 +44,7 @@ class QuizService(
 ) {
 
     suspend fun generateQuiz(userId: Int, date: LocalDate): QuizResponse = newSuspendedTransaction {
+        // 소유자 확인을 위해 daily_plans + plan_boards 를 조인해야 해서 Table DSL 을 쓴다 (집계/조인은 DAO 대상 아님).
         val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
             .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq userId) }
@@ -47,9 +55,9 @@ class QuizService(
         val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
 
         val chapterNames = chapterNamesForPlanBoard(planBoardId)
-        val completedTaskNames = PlanTaskTable.selectAll()
-            .where { (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq true) }
-            .map { it[PlanTaskTable.taskName] }
+        val completedTaskNames = PlanTaskRow.find {
+            (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq true)
+        }.map { it.taskName }
 
         val context = buildString {
             appendLine("학습 범위: ${chapterNames.joinToString(", ").ifBlank { "지정 안 됨" }}")
@@ -59,44 +67,42 @@ class QuizService(
         val generated = llmClient.generateQuestions(context, DEFAULT_QUESTION_COUNT)
 
         val questions = generated.map { question ->
-            val questionId = DailyQuizQuestionTable.insert {
-                it[this.dailyPlanId] = dailyPlanId
-                it[questionText] = question.questionText
-            } get DailyQuizQuestionTable.id
-
-            val choices = question.choices.mapIndexed { index, choiceText ->
-                val choiceId = DailyQuizChoiceTable.insert {
-                    it[this.questionId] = questionId
-                    it[this.choiceText] = choiceText
-                    it[isCorrect] = index == question.correctIndex
-                } get DailyQuizChoiceTable.id
-                QuizChoiceResponse(id = choiceId.value, choiceText = choiceText)
+            val quizQuestion = DailyQuizQuestionRow.new {
+                this.dailyPlan = DailyPlanRow[dailyPlanId]
+                questionText = question.questionText
             }
 
-            QuizQuestionResponse(id = questionId.value, questionText = question.questionText, choices = choices)
+            val choices = question.choices.mapIndexed { index, choiceText ->
+                val choice = DailyQuizChoiceRow.new {
+                    this.question = quizQuestion
+                    this.choiceText = choiceText
+                    isCorrect = index == question.correctIndex
+                }
+                QuizChoiceResponse(id = choice.id.value, choiceText = choiceText)
+            }
+
+            QuizQuestionResponse(id = quizQuestion.id.value, questionText = question.questionText, choices = choices)
         }
 
         QuizResponse(dailyPlanId = dailyPlanId, quizDate = date.toString(), questions = questions)
     }
 
     suspend fun getQuiz(userId: Int, dailyPlanId: Int): QuizResponse = newSuspendedTransaction {
+        // 소유자 확인용 조인 조회 (위 generateQuiz 와 같은 이유로 Table DSL 유지)
         val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
             .where { (DailyPlanTable.id eq dailyPlanId) and (PlanBoardTable.userId eq userId) }
             .firstOrNull()
             ?: throw QuizNotFoundException()
 
-        val questions = DailyQuizQuestionTable.selectAll()
-            .where { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
-            .map { questionRow ->
-                val questionId = questionRow[DailyQuizQuestionTable.id].value
-                val choices = DailyQuizChoiceTable.selectAll()
-                    .where { DailyQuizChoiceTable.questionId eq questionId }
-                    .map { QuizChoiceResponse(id = it[DailyQuizChoiceTable.id].value, choiceText = it[DailyQuizChoiceTable.choiceText]) }
+        val questions = DailyQuizQuestionRow.find { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
+            .map { question ->
+                val choices = DailyQuizChoiceRow.find { DailyQuizChoiceTable.questionId eq question.id }
+                    .map { QuizChoiceResponse(id = it.id.value, choiceText = it.choiceText) }
 
                 QuizQuestionResponse(
-                    id = questionId,
-                    questionText = questionRow[DailyQuizQuestionTable.questionText],
+                    id = question.id.value,
+                    questionText = question.questionText,
                     choices = choices
                 )
             }
@@ -111,6 +117,7 @@ class QuizService(
         dailyPlanId: Int,
         answers: List<QuizAnswerSubmission>
     ): QuizResultResponse = newSuspendedTransaction {
+        // 소유자 확인용 조인 조회 (위 generateQuiz 와 같은 이유로 Table DSL 유지)
         val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
             .where { (DailyPlanTable.id eq dailyPlanId) and (PlanBoardTable.userId eq userId) }
@@ -120,13 +127,13 @@ class QuizService(
         val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
         val quizDate = dailyPlanRow[DailyPlanTable.planDate]
 
-        val questionIds = DailyQuizQuestionTable.selectAll()
-            .where { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
-            .map { it[DailyQuizQuestionTable.id].value }
+        val questionIds = DailyQuizQuestionRow.find { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
+            .map { it.id.value }
             .toSet()
 
         if (questionIds.isEmpty()) throw QuizNotFoundException()
 
+        // 이미 제출했는지 확인하려면 daily_quiz_attempts + daily_quiz_choices 조인이 필요해 Table DSL 유지
         val alreadySubmitted = (DailyQuizAttemptTable innerJoin DailyQuizChoiceTable)
             .selectAll()
             .where { DailyQuizChoiceTable.questionId inList questionIds }
@@ -141,24 +148,20 @@ class QuizService(
         val wrongQuestionTexts = mutableListOf<String>()
 
         for (answer in answers) {
-            val choiceRow = DailyQuizChoiceTable.selectAll()
-                .where { (DailyQuizChoiceTable.id eq answer.selectedChoiceId) and (DailyQuizChoiceTable.questionId eq answer.questionId) }
-                .firstOrNull()
-                ?: throw QuizValidationException.InvalidAnswerException()
+            val choiceRow = DailyQuizChoiceRow.find {
+                (DailyQuizChoiceTable.id eq answer.selectedChoiceId) and (DailyQuizChoiceTable.questionId eq answer.questionId)
+            }.firstOrNull() ?: throw QuizValidationException.InvalidAnswerException()
 
-            DailyQuizAttemptTable.insert {
-                it[this.userId] = userId
-                it[selectedChoiceId] = answer.selectedChoiceId
-                it[createdAt] = OffsetDateTime.now()
+            DailyQuizAttemptRow.new {
+                this.userId = userId
+                selectedChoice = choiceRow
+                createdAt = OffsetDateTime.now()
             }
 
-            if (choiceRow[DailyQuizChoiceTable.isCorrect]) {
+            if (choiceRow.isCorrect) {
                 correctCount++
             } else {
-                val questionText = DailyQuizQuestionTable.selectAll()
-                    .where { DailyQuizQuestionTable.id eq answer.questionId }
-                    .first()[DailyQuizQuestionTable.questionText]
-                wrongQuestionTexts.add(questionText)
+                wrongQuestionTexts.add(DailyQuizQuestionRow[answer.questionId].questionText)
             }
         }
 
@@ -167,9 +170,7 @@ class QuizService(
 
         if (wrongQuestionTexts.isNotEmpty()) {
             val chapterNames = chapterNamesForPlanBoard(planBoardId)
-            val boardEndDate = PlanBoardTable.selectAll()
-                .where { PlanBoardTable.id eq planBoardId }
-                .first()[PlanBoardTable.endDate]
+            val boardEndDate = PlanBoardRow[planBoardId].endDate
 
             val suggestions = llmClient.analyzeWeakAreas(wrongQuestionTexts, chapterNames)
 
@@ -183,20 +184,20 @@ class QuizService(
 
                 val targetDailyPlan = findOrCreateNextDailyPlan(planBoardId, quizDate, boardEndDate) ?: continue
                 val taskName = "복습: ${suggestion.reviewTaskDescription}".take(150)
-                val startTime = lastTaskEndTime(targetDailyPlan.first) ?: LocalTime.of(9, 0)
+                val startTime = lastTaskEndTime(targetDailyPlan.first.id.value) ?: LocalTime.of(9, 0)
                 val endTime = startTime.plusMinutes(REVIEW_TASK_MINUTES.toLong())
 
-                PlanTaskTable.insert {
-                    it[PlanTaskTable.dailyPlanId] = targetDailyPlan.first
-                    it[this.taskName] = taskName
-                    it[this.startTime] = startTime
-                    it[this.endTime] = endTime
-                    it[estimatedMinutes] = REVIEW_TASK_MINUTES
+                PlanTaskRow.new {
+                    this.dailyPlan = targetDailyPlan.first
+                    this.taskName = taskName
+                    this.startTime = startTime
+                    this.endTime = endTime
+                    estimatedMinutes = REVIEW_TASK_MINUTES
                 }
 
                 insertedReviewTasks.add(
                     InsertedReviewTaskResponse(
-                        dailyPlanId = targetDailyPlan.first,
+                        dailyPlanId = targetDailyPlan.first.id.value,
                         planDate = targetDailyPlan.second.toString(),
                         taskName = taskName
                     )
@@ -213,25 +214,16 @@ class QuizService(
     }
 
     private fun chapterNamesForPlanBoard(planBoardId: Int): List<String> {
-        val planSubjects = PlanSubjectTable.selectAll()
-            .where { PlanSubjectTable.planBoardId eq planBoardId }
-            .toList()
+        val planSubjects = PlanSubjectRow.find { PlanSubjectTable.planBoardId eq planBoardId }.toList()
 
         return planSubjects.flatMap { planSubject ->
-            val textbookId = planSubject[PlanSubjectTable.textbookId]
-            val startOrder = ChapterTable.selectAll()
-                .where { ChapterTable.id eq planSubject[PlanSubjectTable.startChapterId] }
-                .first()[ChapterTable.chapterOrder]
-            val endOrder = ChapterTable.selectAll()
-                .where { ChapterTable.id eq planSubject[PlanSubjectTable.endChapterId] }
-                .first()[ChapterTable.chapterOrder]
+            val startChapter = planSubject.startChapter
+            val endChapter = planSubject.endChapter
 
-            ChapterTable.selectAll()
-                .where { ChapterTable.textbookId eq textbookId }
+            ChapterRow.find { ChapterTable.textbookId eq planSubject.textbook.id.value }
                 .orderBy(ChapterTable.chapterOrder to SortOrder.ASC)
-                .map { it[ChapterTable.chapterName] to it[ChapterTable.chapterOrder] }
-                .filter { (_, order) -> order in startOrder..endOrder }
-                .map { (name, _) -> name }
+                .filter { it.chapterOrder in startChapter.chapterOrder..endChapter.chapterOrder }
+                .map { it.chapterName }
         }
     }
 
@@ -239,31 +231,31 @@ class QuizService(
         planBoardId: Int,
         afterDate: LocalDate,
         boardEndDate: LocalDate
-    ): Pair<Int, LocalDate>? {
-        val existing = DailyPlanTable.selectAll()
-            .where { (DailyPlanTable.planBoardId eq planBoardId) and (DailyPlanTable.planDate greater afterDate) }
+    ): Pair<DailyPlanRow, LocalDate>? {
+        val existing = DailyPlanRow.find {
+            (DailyPlanTable.planBoardId eq planBoardId) and (DailyPlanTable.planDate greater afterDate)
+        }
             .orderBy(DailyPlanTable.planDate to SortOrder.ASC)
             .firstOrNull()
 
         if (existing != null) {
-            return existing[DailyPlanTable.id].value to existing[DailyPlanTable.planDate]
+            return existing to existing.planDate
         }
 
         val nextDate = afterDate.plusDays(1)
         if (nextDate.isAfter(boardEndDate)) return null
 
-        val newId = DailyPlanTable.insert {
-            it[this.planBoardId] = planBoardId
-            it[planDate] = nextDate
-        } get DailyPlanTable.id
+        val newPlan = DailyPlanRow.new {
+            planBoard = PlanBoardRow[planBoardId]
+            planDate = nextDate
+        }
 
-        return newId.value to nextDate
+        return newPlan to nextDate
     }
 
     private fun lastTaskEndTime(dailyPlanId: Int): LocalTime? =
-        PlanTaskTable.selectAll()
-            .where { PlanTaskTable.dailyPlanId eq dailyPlanId }
+        PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
             .orderBy(PlanTaskTable.endTime to SortOrder.DESC)
             .firstOrNull()
-            ?.get(PlanTaskTable.endTime)
+            ?.endTime
 }

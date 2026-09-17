@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.planboard
 
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultRow
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultTable
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationDailyResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationRequest
@@ -7,21 +8,29 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationSubjectInput
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationTaskResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
+import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
+import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
+import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.insert
-import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -75,22 +84,20 @@ class PlanGenerationService(
         val planContext = newSuspendedTransaction {
             val resolved = request.subjects.map { it to resolveSubject(it) }
             val tiers = resolved.map { (_, subject) -> subject.subjectName to levelTierFor(userId, subject.subjectName) }.toMap()
-            val profileRow = StudentProfileTable.selectAll()
-                .where { StudentProfileTable.user eq userId }
+            val profileRow = StudentProfileRow.find { StudentProfileTable.user eq userId }
                 .firstOrNull()
-            val customRows = UnavailableTimeTable.selectAll()
-                .where { UnavailableTimeTable.user eq userId }
+            val customRows = UnavailableTimeRow.find { UnavailableTimeTable.user eq userId }
                 .map {
-                    it[UnavailableTimeTable.dayOfWeek].code.toInt() to
-                        (PlanTaskScheduler.toMinutes(it[UnavailableTimeTable.startTime]) to PlanTaskScheduler.toMinutes(it[UnavailableTimeTable.endTime]))
+                    it.dayOfWeek.code.toInt() to
+                        (PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime))
                 }
 
             PlanContext(
                 resolvedSubjects = resolved.map { it.second },
                 levelTiers = tiers,
-                grade = profileRow?.get(StudentProfileTable.grade) ?: 2,
-                schoolId = profileRow?.get(StudentProfileTable.schoolId),
-                classNumber = profileRow?.get(StudentProfileTable.classNumber),
+                grade = profileRow?.grade ?: 2,
+                schoolId = profileRow?.schoolId,
+                classNumber = profileRow?.classNumber,
                 customUnavailableRows = customRows
             )
         }
@@ -123,23 +130,23 @@ class PlanGenerationService(
         if (generated.daily_plans.isEmpty()) throw PlanBoardValidationException.GenerationFailedException()
 
         return newSuspendedTransaction {
-            val createdPlanBoardId = PlanBoardTable.insert {
-                it[this.userId] = userId
-                it[title] = request.title
-                it[this.startDate] = startDate
-                it[this.endDate] = endDate
-                it[this.examDate] = examDate
-                it[isCramMode] = request.isCramMode
-                it[createdAt] = OffsetDateTime.now()
-            } get PlanBoardTable.id
+            val board = PlanBoardRow.new {
+                user = UserRow[userId]
+                title = request.title
+                this.startDate = startDate
+                this.endDate = endDate
+                this.examDate = examDate
+                isCramMode = request.isCramMode
+                createdAt = OffsetDateTime.now()
+            }
 
             request.subjects.forEach { subject ->
-                PlanSubjectTable.insert {
-                    it[this.planBoardId] = createdPlanBoardId.value
-                    it[textbookId] = subject.textbookId
-                    it[startChapterId] = subject.startChapterId
-                    it[endChapterId] = subject.endChapterId
-                    it[customRangeText] = subject.customRangeText
+                PlanSubjectRow.new {
+                    planBoard = board
+                    textbook = TextbookRow[subject.textbookId]
+                    startChapter = ChapterRow[subject.startChapterId]
+                    endChapter = ChapterRow[subject.endChapterId]
+                    customRangeText = subject.customRangeText
                 }
             }
 
@@ -148,26 +155,26 @@ class PlanGenerationService(
                 .sortedBy { it.day }
                 .map { day ->
                     val date = startDate.plusDays((day.day - 1).toLong())
-                    val dailyPlanId = DailyPlanTable.insert {
-                        it[this.planBoardId] = createdPlanBoardId.value
-                        it[planDate] = date
-                    } get DailyPlanTable.id
+                    val dailyPlan = DailyPlanRow.new {
+                        planBoard = board
+                        planDate = date
+                    }
 
                     val freeIntervals = PlanTaskScheduler.freeIntervalsFromBusyRanges(unavailableRanges[date].orEmpty())
                     val placedTasks = PlanTaskScheduler.placeTasks(day.tasks.map { it.task_name to it.estimated_minutes }, freeIntervals)
 
                     placedTasks.forEach { task ->
-                        PlanTaskTable.insert {
-                            it[this.dailyPlanId] = dailyPlanId.value
-                            it[taskName] = task.taskName
-                            it[startTime] = task.startTime
-                            it[endTime] = task.endTime
-                            it[estimatedMinutes] = task.estimatedMinutes
+                        PlanTaskRow.new {
+                            this.dailyPlan = dailyPlan
+                            taskName = task.taskName
+                            startTime = task.startTime
+                            endTime = task.endTime
+                            estimatedMinutes = task.estimatedMinutes
                         }
                     }
 
                     PlanGenerationDailyResponse(
-                        dailyPlanId = dailyPlanId.value,
+                        dailyPlanId = dailyPlan.id.value,
                         date = date.toString(),
                         topics = day.topics,
                         goal = day.goal,
@@ -183,7 +190,7 @@ class PlanGenerationService(
                 }
 
             PlanGenerationResponse(
-                planBoardId = createdPlanBoardId.value,
+                planBoardId = board.id.value,
                 title = request.title,
                 startDate = startDate.toString(),
                 endDate = endDate.toString(),
@@ -196,28 +203,23 @@ class PlanGenerationService(
     }
 
     private fun resolveSubject(input: PlanGenerationSubjectInput): ResolvedSubject {
-        val textbookRow = TextbookTable.selectAll().where { TextbookTable.id eq input.textbookId }.firstOrNull()
+        val textbook = TextbookRow.findById(input.textbookId)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val subjectName = SubjectTable.selectAll()
-            .where { SubjectTable.id eq textbookRow[TextbookTable.subjectId] }
-            .firstOrNull()
-            ?.get(SubjectTable.name)
+        val subjectName = SubjectRow.findById(textbook.subject.id.value)?.name
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
 
-        val startOrder = ChapterTable.selectAll().where { ChapterTable.id eq input.startChapterId }.firstOrNull()
-            ?.get(ChapterTable.chapterOrder)
+        val startChapter = ChapterRow.findById(input.startChapterId)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val endOrder = ChapterTable.selectAll().where { ChapterTable.id eq input.endChapterId }.firstOrNull()
-            ?.get(ChapterTable.chapterOrder)
+        val endChapter = ChapterRow.findById(input.endChapterId)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        if (startOrder > endOrder) throw PlanBoardValidationException.InvalidSubjectRangeException()
+        if (startChapter.chapterOrder > endChapter.chapterOrder) {
+            throw PlanBoardValidationException.InvalidSubjectRangeException()
+        }
 
-        val topics = ChapterTable.selectAll()
-            .where { ChapterTable.textbookId eq input.textbookId }
+        val topics = ChapterRow.find { ChapterTable.textbookId eq input.textbookId }
             .orderBy(ChapterTable.chapterOrder to SortOrder.ASC)
-            .map { it[ChapterTable.chapterName] to it[ChapterTable.chapterOrder] }
-            .filter { (_, order) -> order in startOrder..endOrder }
-            .map { (name, _) -> name }
+            .filter { it.chapterOrder in startChapter.chapterOrder..endChapter.chapterOrder }
+            .map { it.chapterName }
 
         val allTopics = if (input.customRangeText.isNullOrBlank()) topics else topics + input.customRangeText
 
@@ -225,13 +227,14 @@ class PlanGenerationService(
     }
 
     private fun levelTierFor(userId: Int, subjectName: String): String {
-        val subjectId = SubjectTable.selectAll().where { SubjectTable.name eq subjectName }.firstOrNull()?.get(SubjectTable.id)
+        val subject = SubjectRow.find { SubjectTable.name eq subjectName }.firstOrNull()
             ?: return "중"
-        val score = LevelTestResultTable.selectAll()
-            .where { (LevelTestResultTable.userId eq userId) and (LevelTestResultTable.subjectId eq subjectId) }
+        val score = LevelTestResultRow.find {
+            (LevelTestResultTable.userId eq userId) and (LevelTestResultTable.subjectId eq subject.id)
+        }
             .orderBy(LevelTestResultTable.createdAt to SortOrder.DESC)
             .firstOrNull()
-            ?.get(LevelTestResultTable.score)
+            ?.score
             ?: return "중"
 
         return when {
