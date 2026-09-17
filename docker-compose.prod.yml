@@ -10,11 +10,27 @@ services:
       - JDBC_URL=jdbc:postgresql://db:5432/${DB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
       - DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
+
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ISSUER=${JWT_ISSUER}
+
       - NICE_API_KEY=${NICE_API_KEY}
+
+      - AWS_REGION=${AWS_REGION}
+      - AWS_BUCKET=${AWS_BUCKET}
+      # IAM Roles Anywhere — AWS 외부 배포용. 이미지에 임베드된 helper 를
+      # credential_process 로 실행해 임시 자격증명을 얻음 (사이드카/포트 불필요).
+      # 아래 3개 ARN + ./certs 의 client-cert.pem/client-key.pem 이 필요함.
+      - AWS_PROFILE=rooter-prod        # docker/aws/config 의 프로파일명과 일치해야 함
+      - AWS_CONFIG_FILE=/app/aws/config
+      - ROLESANYWHERE_TRUST_ANCHOR_ARN=${ROLESANYWHERE_TRUST_ANCHOR_ARN}
+      - ROLESANYWHERE_PROFILE_ARN=${ROLESANYWHERE_PROFILE_ARN}
+      - ROLESANYWHERE_ROLE_ARN=${ROLESANYWHERE_ROLE_ARN}
+    volumes:
+      - ./certs:/certs:ro            # credential_process 가 읽는 인증서 (읽기 전용)
     depends_on:
       db:
         condition: service_healthy

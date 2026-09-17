@@ -64,10 +64,24 @@ dependencies {
     testImplementation("io.kotest:kotest-assertions-core:6.2.0")
     testImplementation("io.kotest:kotest-property:6.2.0")
     testImplementation("io.ktor:ktor-client-mock:$ktorVersion")
+
+    // aws sdk (for s3 connection)
+    implementation("aws.sdk.kotlin:s3:1.6.107")
 }
 
 tasks.test {
     useJUnitPlatform()
+
+    val envFile = File(projectDir, ".env")
+    if (envFile.exists()) {
+        envFile.bufferedReader().use { reader ->
+            val properties = Properties()
+            properties.load(reader)
+            properties.forEach { (key, value) ->
+                environment(key.toString(), value.toString())
+            }
+        }
+    }
 }
 
 kotlin {

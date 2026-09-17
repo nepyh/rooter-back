@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.user
 
 import com.github.nepyh.rooter.module.storage.FileStorage
+import com.github.nepyh.rooter.module.storage.toUploadableFile
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
@@ -196,7 +197,7 @@ class UserService(
     suspend fun updateAvatar(userId: Int, file: PartData.FileItem): AvatarUpdateResponse {
         userRepo.findUserById(userId) ?: throw UserNotFoundException()
 
-        val avatarImageKey = fileStorage.upload(file, "avatars")
+        val avatarImageKey = fileStorage.upload(file.toUploadableFile(), "avatars")
         userRepo.updateAvatarImageKey(userId, avatarImageKey)
 
         return AvatarUpdateResponse(

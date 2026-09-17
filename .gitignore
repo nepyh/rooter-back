@@ -48,3 +48,8 @@ bin/
 .idea/
 .env
 openocode.json
+
+# 로컬 컨테이너 S3 인증용 클라이언트 인증서 (개인키 포함 — 커밋 금지)
+certs/*
+!certs/.gitkeep
+!certs/README.md

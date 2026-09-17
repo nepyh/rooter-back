@@ -21,6 +21,8 @@ data class AppConfig(
     val storageBaseDir: String?,
     val storageBaseUrl: String?,
     val storageBaseRoute: String?,
+    val storageAwsRegion: String?,
+    val storageAwsBucket: String?,
 
     // jwt related
     val jwtSecret: String,
@@ -72,6 +74,8 @@ data class AppConfig(
                 storageBaseDir = config.propertyOrNull("storage.baseDir")?.getString(),
                 storageBaseUrl = config.propertyOrNull("storage.baseUrl")?.getString(),
                 storageBaseRoute = config.propertyOrNull("storage.baseRoute")?.getString(),
+                storageAwsRegion = config.propertyOrNull("storage.awsRegion")?.getString(),
+                storageAwsBucket = config.propertyOrNull("storage.awsBucket")?.getString(),
 
                 jwtSecret = config.property("jwt.secret").getString(),
                 jwtIssuer = config.property("jwt.issuer").getString(),
