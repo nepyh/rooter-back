@@ -29,6 +29,7 @@ import com.github.nepyh.rooter.module.studystyle.StudyStyleModule
 import com.github.nepyh.rooter.module.swagger.SwaggerDocsModule
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizModule
 import com.github.nepyh.rooter.module.user.UserModule
+import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.HttpStatusCode
@@ -85,6 +86,9 @@ fun Application.configureAppModule() {
     install(StatusPages) {
         exception<UserNotFoundException> { call, cause ->
             call.respondError(HttpStatusCode.NotFound, "USER_NOT_FOUND", cause.message)
+        }
+        exception<UnavailableTimeNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "UNAVAILABLE_TIME_NOT_FOUND", cause.message)
         }
         exception<UserValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
