@@ -3,8 +3,11 @@ package com.github.nepyh.rooter.module.planboard
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
+import com.github.nepyh.rooter.module.planboard.dto.WeeklyPlanResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
+import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
@@ -15,13 +18,16 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.between
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
 
 class PlanTaskService {
 
@@ -40,6 +46,33 @@ class PlanTaskService {
             .map { it.toResponse() }
 
         DailyPlanResponse(planDate = date.toString(), tasks = tasks)
+    }
+
+    /** 본인 플랜보드의 주간(월~일) 태스크 전체, referenceDate가 속한 주 기준 (모든 보드 대상) */
+    fun getWeeklyPlan(userId: Int, referenceDate: LocalDate): WeeklyPlanResponse = transaction {
+        val weekStart = referenceDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val weekEnd = weekStart.plusDays(6)
+
+        val user = UserRow.findById(userId)
+            ?: return@transaction WeeklyPlanResponse(
+                weekStart = weekStart.toString(),
+                weekEnd = weekEnd.toString(),
+                days = (0..6).map { DailyPlanResponse(planDate = weekStart.plusDays(it.toLong()).toString(), tasks = emptyList()) }
+            )
+
+        val tasksByDate = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+            .selectAll()
+            .where { (DailyPlanTable.planDate.between(weekStart, weekEnd)) and (PlanBoardTable.userId eq user.id) }
+            .orderBy(PlanTaskTable.startTime)
+            .map { row -> row[DailyPlanTable.planDate] to PlanTaskRow.wrapRow(row).toResponse() }
+            .groupBy({ it.first }, { it.second })
+
+        val days = (0..6).map { offset ->
+            val date = weekStart.plusDays(offset.toLong())
+            DailyPlanResponse(planDate = date.toString(), tasks = tasksByDate[date].orEmpty())
+        }
+
+        WeeklyPlanResponse(weekStart = weekStart.toString(), weekEnd = weekEnd.toString(), days = days)
     }
 
     /** 특정 플랜보드의 날짜별 플랜 (소유권 확인) */
@@ -86,6 +119,10 @@ class PlanTaskService {
         val endTime = runCatching { LocalTime.parse(request.endTime) }
             .getOrElse { throw PlanTaskValidationException.InvalidTimeFormatException() }
 
+        if (!endTime.isAfter(startTime)) {
+            throw PlanTaskValidationException.InvalidTimeRangeException()
+        }
+
         if (request.estimatedMinutes < 1) {
             throw PlanTaskValidationException.InvalidEstimatedMinutesException()
         }
@@ -111,6 +148,65 @@ class PlanTaskService {
             this.endTime = endTime
             estimatedMinutes = request.estimatedMinutes
         }
+    }
+
+    /** 태스크 완료 처리/취소 (본인 플랜보드 소유권 확인) */
+    fun completeTask(userId: Int, taskId: Int, isCompleted: Boolean): PlanTaskResponse = transaction {
+        val task = PlanTaskRow.findById(taskId)
+            ?: throw PlanTaskNotFoundException()
+
+        if (task.dailyPlan.planBoard.user.id.value != userId) {
+            throw PlanTaskNotFoundException()
+        }
+
+        task.isCompleted = isCompleted
+        task.toResponse()
+    }
+
+    /** taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정 (본인 플랜보드 소유권 확인) */
+    fun updateTask(userId: Int, taskId: Int, request: PlanTaskUpdateRequest): PlanTaskResponse = transaction {
+        val task = PlanTaskRow.findById(taskId)
+            ?: throw PlanTaskNotFoundException()
+
+        if (task.dailyPlan.planBoard.user.id.value != userId) {
+            throw PlanTaskNotFoundException()
+        }
+
+        request.taskName?.let {
+            if (it.isBlank() || it.length > 150) throw PlanTaskValidationException.InvalidTaskNameException()
+            task.taskName = it
+        }
+
+        val newStartTime = request.startTime?.let {
+            runCatching { LocalTime.parse(it) }.getOrElse { throw PlanTaskValidationException.InvalidTimeFormatException() }
+        } ?: task.startTime
+        val newEndTime = request.endTime?.let {
+            runCatching { LocalTime.parse(it) }.getOrElse { throw PlanTaskValidationException.InvalidTimeFormatException() }
+        } ?: task.endTime
+        if (!newEndTime.isAfter(newStartTime)) {
+            throw PlanTaskValidationException.InvalidTimeRangeException()
+        }
+        task.startTime = newStartTime
+        task.endTime = newEndTime
+
+        request.estimatedMinutes?.let {
+            if (it < 1) throw PlanTaskValidationException.InvalidEstimatedMinutesException()
+            task.estimatedMinutes = it
+        }
+
+        task.toResponse()
+    }
+
+    /** 태스크 삭제 (본인 플랜보드 소유권 확인) */
+    fun deleteTask(userId: Int, taskId: Int) = transaction {
+        val task = PlanTaskRow.findById(taskId)
+            ?: throw PlanTaskNotFoundException()
+
+        if (task.dailyPlan.planBoard.user.id.value != userId) {
+            throw PlanTaskNotFoundException()
+        }
+
+        task.delete()
     }
 
     private fun PlanTaskRow.toResponse() = PlanTaskResponse(

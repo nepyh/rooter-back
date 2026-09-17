@@ -46,4 +46,11 @@ sealed class NiceApiException(
         "NICE_UNEXPECTED_RESPONSE",
         message ?: "NICE API 응답을 해석할 수 없습니다."
     )
+
+    /** 학교 검색어(name)가 비어있음 — NICE 호출 전 입력 검증 */
+    class InvalidSearchQueryException(message: String? = null) : NiceApiException(
+        HttpStatusCode.BadRequest,
+        "NICE_INVALID_SEARCH_QUERY",
+        message ?: "검색어(name)는 비어있을 수 없습니다."
+    )
 }

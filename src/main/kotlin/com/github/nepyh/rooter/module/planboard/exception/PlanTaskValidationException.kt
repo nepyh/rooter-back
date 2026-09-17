@@ -22,6 +22,11 @@ sealed class PlanTaskValidationException(
         "INVALID_TIME_FORMAT",
         "시간 형식이 올바르지 않습니다. (HH:mm)"
     )
+    class InvalidTimeRangeException : PlanTaskValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_TIME_RANGE",
+        "종료 시간은 시작 시간보다 늦어야 합니다."
+    )
     class InvalidEstimatedMinutesException : PlanTaskValidationException(
         HttpStatusCode.BadRequest,
         "INVALID_ESTIMATED_MINUTES",

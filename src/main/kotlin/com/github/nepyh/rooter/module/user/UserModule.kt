@@ -17,7 +17,9 @@ fun UserModule(appConfig: AppConfig) = module {
             get(),
             get(),
             appConfig.jwtSecret,
-            appConfig.jwtIssuer
+            appConfig.jwtIssuer,
+            appConfig.googleClientId,
+            appConfig.appleClientId
         )
     }
     single(named("userApi")) { UserApi(get()) }

@@ -15,3 +15,8 @@ data class UserLoginResponse(
     val username: String,
     val token: String
 )
+
+@Serializable
+data class SocialLoginRequest(
+    val idToken: String // Google/Apple 네이티브 SDK 로 발급받은 id_token
+)

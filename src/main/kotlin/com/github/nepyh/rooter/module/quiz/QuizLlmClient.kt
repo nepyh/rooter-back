@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.quiz
 
+import com.github.nepyh.rooter.common.PromptLoader
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
 import io.ktor.client.HttpClient
@@ -54,15 +55,11 @@ class QuizLlmClient(private val appConfig: AppConfig) {
     }
 
     suspend fun generateQuestions(context: String, count: Int): List<GeneratedQuestion> {
-        val prompt = """
-            다음은 학생이 오늘 학습한 범위와 완료한 학습 내용이다.
-            $context
-
-            이 내용을 바탕으로 객관식 문제 ${count}개를 만들어라.
-            각 문제는 보기 4개를 가지며, 그 중 정답은 하나다.
-            반드시 아래 JSON 배열 형식으로만 응답하고, 다른 설명은 절대 붙이지 마라.
-            [{"questionText": "...", "choices": ["...", "...", "...", "..."], "correctIndex": 0}]
-        """.trimIndent()
+        val prompt = PromptLoader.load(
+            "prompts/quiz-generation.md",
+            "CONTEXT" to context,
+            "COUNT" to count.toString()
+        )
 
         val content = requestChatCompletion(prompt)
         return runCatching { json.decodeFromString<List<GeneratedQuestion>>(content) }
@@ -70,15 +67,11 @@ class QuizLlmClient(private val appConfig: AppConfig) {
     }
 
     suspend fun analyzeWeakAreas(wrongQuestionTexts: List<String>, chapterNames: List<String>): List<WeakAreaSuggestion> {
-        val prompt = """
-            학생이 다음 챕터 범위를 학습했다: ${chapterNames.joinToString(", ")}
-            그런데 아래 문제들을 틀렸다:
-            ${wrongQuestionTexts.joinToString("\n") { "- $it" }}
-
-            위 오답들을 바탕으로 학생이 취약한 챕터를 판단하고, 챕터마다 짧은 복습 태스크 설명을 하나씩 제안해라.
-            반드시 아래 JSON 배열 형식으로만 응답하고, 다른 설명은 절대 붙이지 마라.
-            [{"chapterName": "...", "reviewTaskDescription": "..."}]
-        """.trimIndent()
+        val prompt = PromptLoader.load(
+            "prompts/quiz-weak-area-analysis.md",
+            "CHAPTER_NAMES" to chapterNames.joinToString(", "),
+            "WRONG_QUESTIONS" to wrongQuestionTexts.joinToString("\n") { "- $it" }
+        )
 
         val content = requestChatCompletion(prompt)
         return runCatching { json.decodeFromString<List<WeakAreaSuggestion>>(content) }
