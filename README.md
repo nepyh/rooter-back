@@ -38,7 +38,6 @@ class UserRow(id: EntityID<Int>) : IntEntity(id) {
 - 외부 파일에서는 `UserRow.find { UserTable.email eq ... }`, `UserRow.new { ... }` 처럼 `~Row` 를 기본으로 사용한다.
 - `~Table` 은 `insertIgnore` 처럼 DAO 로 표현할 수 없는 연산에서만 직접 사용한다.
   (`JobRunTable.insertIgnore { ... }` — ON CONFLICT DO NOTHING 중복 방지 claim)
-=======
 
 # run
 
