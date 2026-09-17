@@ -53,4 +53,11 @@ sealed class NiceApiException(
         "NICE_INVALID_SEARCH_QUERY",
         message ?: "검색어(name)는 비어있을 수 없습니다."
     )
+
+    /** schoolId 가 비어있음 — NICE 호출 전 입력 검증 */
+    class InvalidSchoolIdException(message: String? = null) : NiceApiException(
+        HttpStatusCode.BadRequest,
+        "NICE_INVALID_SCHOOL_ID",
+        message ?: "schoolId는 비어있을 수 없습니다."
+    )
 }
