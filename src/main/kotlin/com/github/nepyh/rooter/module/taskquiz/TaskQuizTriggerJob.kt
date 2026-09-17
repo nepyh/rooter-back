@@ -1,10 +1,12 @@
 package com.github.nepyh.rooter.module.taskquiz
 
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.scheduler.DueJob
 import com.github.nepyh.rooter.module.scheduler.SchedulerJob
-import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttempts
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptRow
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import kotlinx.serialization.Serializable
 
 import kotlinx.serialization.json.Json
@@ -46,9 +48,8 @@ class TaskQuizTriggerJob(
     }
 
     private fun findInitialTriggers(today: LocalDate, zonedNow: ZonedDateTime): List<DueJob> {
-        val alreadyStarted = TaskQuizAttempts.selectAll()
-            .where { TaskQuizAttempts.attemptNumber eq 1 }
-            .map { it[TaskQuizAttempts.planTaskId].value }
+        val alreadyStarted = TaskQuizAttemptRow.find { TaskQuizAttemptTable.attemptNumber eq 1 }
+            .map { it.planTaskId.value }
             .toSet()
 
         return (PlanTaskTable innerJoin DailyPlanTable)
@@ -73,25 +74,22 @@ class TaskQuizTriggerJob(
     private fun findRetryTriggers(zonedNow: ZonedDateTime): List<DueJob> {
         // 태스크별로 "가장 최근(attemptNumber 최댓값)" attempt만 봐야 한다 — passed=false 로만 필터링하면
         // 그 뒤에 이미 새 attempt(성공/실패 불문)가 생겼는데도 옛날 실패 attempt가 다시 잡히는 버그가 생김.
-        val latestByTask = TaskQuizAttempts.selectAll()
-            .orderBy(TaskQuizAttempts.attemptNumber to SortOrder.DESC)
-            .groupBy { it[TaskQuizAttempts.planTaskId].value }
+        val latestByTask = TaskQuizAttemptRow.all()
+            .orderBy(TaskQuizAttemptTable.attemptNumber to SortOrder.DESC)
+            .groupBy { it.planTaskId.value }
             .mapValues { (_, rows) -> rows.first() }
 
         return latestByTask.values.mapNotNull { row ->
-            if (row[TaskQuizAttempts.passed] != false) return@mapNotNull null // null(미제출) 또는 true(통과)면 재시도 대상 아님
+            if (row.passed != false) return@mapNotNull null // null(미제출) 또는 true(통과)면 재시도 대상 아님
 
-            val attemptNumber = row[TaskQuizAttempts.attemptNumber]
+            val attemptNumber = row.attemptNumber
             if (attemptNumber >= MAX_ATTEMPTS) return@mapNotNull null
 
-            val retryAt = row[TaskQuizAttempts.createdAt].atZoneSameInstant(ZONE).plusMinutes(RETRY_DELAY_MINUTES)
+            val retryAt = row.createdAt.atZoneSameInstant(ZONE).plusMinutes(RETRY_DELAY_MINUTES)
             if (retryAt.isAfter(zonedNow)) return@mapNotNull null
 
-            val planTaskId = row[TaskQuizAttempts.planTaskId].value
-            val taskName = PlanTaskTable.selectAll()
-                .where { PlanTaskTable.id eq planTaskId }
-                .firstOrNull()
-                ?.get(PlanTaskTable.taskName) ?: return@mapNotNull null
+            val planTaskId = row.planTaskId.value
+            val taskName = PlanTaskRow.findById(planTaskId)?.taskName ?: return@mapNotNull null
 
             val nextAttempt = attemptNumber + 1
             val payload = TaskQuizJobPayload(planTaskId, nextAttempt, taskName)

@@ -1,7 +1,10 @@
 import com.github.nepyh.rooter.module.planboard.CatalogService
-import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptions
-import com.github.nepyh.rooter.module.planboard.model.Subjects
-import com.github.nepyh.rooter.module.planboard.model.Textbooks
+import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionRow
+import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookRow
+import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UserRow
@@ -9,10 +12,10 @@ import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
-import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
@@ -46,15 +49,15 @@ class CatalogServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS subjects CASCADE")
             exec("DROP TABLE IF EXISTS student_profiles CASCADE")
             exec("DROP TABLE IF EXISTS users CASCADE")
-            SchemaUtils.create(UserTable, StudentProfileTable, Subjects, Textbooks, SchoolTextbookAdoptions)
+            SchemaUtils.create(UserTable, StudentProfileTable, SubjectTable, TextbookTable, SchoolTextbookAdoptionTable)
         }
     }
 
     beforeEach {
         transaction(db) {
-            SchoolTextbookAdoptions.deleteAll()
-            Textbooks.deleteAll()
-            Subjects.deleteAll()
+            SchoolTextbookAdoptionTable.deleteAll()
+            TextbookTable.deleteAll()
+            SubjectTable.deleteAll()
             StudentProfileTable.deleteAll()
             UserTable.deleteAll()
         }
@@ -81,22 +84,22 @@ class CatalogServiceTest : StringSpec({
     }
 
     fun seedSubject(name: String): Int = transaction(db) {
-        Subjects.insert { it[this.name] = name } get Subjects.id
+        SubjectRow.new { this.name = name }.id.value
     }
 
     fun seedTextbook(subjectId: Int, title: String): Int = transaction(db) {
-        Textbooks.insert {
-            it[this.subjectId] = subjectId
-            it[this.title] = title
-        } get Textbooks.id
+        TextbookRow.new {
+            subject = SubjectRow[subjectId]
+            this.title = title
+        }.id.value
     }
 
     fun seedAdoption(schoolId: String, grade: Int, subjectId: Int, textbookId: Int) = transaction(db) {
-        SchoolTextbookAdoptions.insert {
-            it[this.schoolId] = schoolId
-            it[this.grade] = grade
-            it[this.subjectId] = subjectId
-            it[this.textbookId] = textbookId
+        SchoolTextbookAdoptionRow.new {
+            this.schoolId = schoolId
+            this.grade = grade
+            this.subjectId = EntityID(subjectId, SubjectTable)
+            this.textbookId = EntityID(textbookId, TextbookTable)
         }
     }
 

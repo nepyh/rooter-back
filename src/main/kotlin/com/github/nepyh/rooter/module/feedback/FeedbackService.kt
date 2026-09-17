@@ -7,18 +7,20 @@ import com.github.nepyh.rooter.module.feedback.exception.DailyPlanNotFoundExcept
 import com.github.nepyh.rooter.module.feedback.exception.FeedbackAlreadySubmittedException
 import com.github.nepyh.rooter.module.feedback.exception.FeedbackNotFoundException
 import com.github.nepyh.rooter.module.feedback.exception.FeedbackValidationException
-import com.github.nepyh.rooter.module.feedback.model.DailyFeedbacks
+import com.github.nepyh.rooter.module.feedback.model.DailyFeedbackRow
+import com.github.nepyh.rooter.module.feedback.model.DailyFeedbackTable
+import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
+import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
-import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttempts
-import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoices
-import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestions
-import org.jetbrains.exposed.v1.core.ResultRow
+import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttemptTable
+import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceTable
+import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionTable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
@@ -30,6 +32,7 @@ class FeedbackService(
     private val replanLlmClient: ReplanLlmClient
 ) {
 
+    /** 소유자 확인과 함께 daily_plans/plan_boards 양쪽 컬럼을 한 번에 읽어야 해서 Table DSL 을 유지한다. */
     private suspend fun requireOwnedDailyPlan(userId: Int, dailyPlanId: Int) =
         (DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
@@ -51,19 +54,18 @@ class FeedbackService(
                 throw FeedbackValidationException.InvalidFocusLevelException()
             }
 
-            val alreadySubmitted = DailyFeedbacks.selectAll()
-                .where { DailyFeedbacks.dailyPlanId eq dailyPlanId }
+            val alreadySubmitted = DailyFeedbackRow.find { DailyFeedbackTable.dailyPlanId eq dailyPlanId }
                 .firstOrNull() != null
             if (alreadySubmitted) {
                 throw FeedbackAlreadySubmittedException()
             }
 
-            val row = DailyFeedbacks.insert {
-                it[this.dailyPlanId] = dailyPlanId
-                it[difficulty] = request.difficulty
-                it[timeSpentMinutes] = request.timeSpentMinutes
-                it[focusLevel] = request.focusLevel
-            }.resultedValues!!.first()
+            val row = DailyFeedbackRow.new {
+                this.dailyPlan = DailyPlanRow[dailyPlanId]
+                difficulty = request.difficulty
+                timeSpentMinutes = request.timeSpentMinutes
+                focusLevel = request.focusLevel
+            }
 
             val planBoardId = dailyPlanRow[PlanBoardTable.id].value
             val planDate = dailyPlanRow[DailyPlanTable.planDate]
@@ -76,16 +78,15 @@ class FeedbackService(
             replan(userId, dailyPlanId, planBoardId, planDate, boardEndDate, request)
         }.getOrElse { emptyList() }
 
-        return feedbackRow.toFeedbackResponse(adjustments)
+        return feedbackRow.toFeedbackResponse(dailyPlanId, adjustments)
     }
 
     suspend fun getFeedback(userId: Int, dailyPlanId: Int): FeedbackResponse = newSuspendedTransaction {
         requireOwnedDailyPlan(userId, dailyPlanId)
 
-        DailyFeedbacks.selectAll()
-            .where { DailyFeedbacks.dailyPlanId eq dailyPlanId }
+        DailyFeedbackRow.find { DailyFeedbackTable.dailyPlanId eq dailyPlanId }
             .firstOrNull()
-            ?.toFeedbackResponse(emptyList())
+            ?.toFeedbackResponse(dailyPlanId, emptyList())
             ?: throw FeedbackNotFoundException()
     }
 
@@ -102,14 +103,15 @@ class FeedbackService(
         boardEndDate: LocalDate,
         feedback: FeedbackSubmitRequest
     ): List<ReplanAdjustmentResponse> = newSuspendedTransaction {
-        val wrongQuestionTexts = (DailyQuizQuestions innerJoin DailyQuizChoices innerJoin DailyQuizAttempts)
+        // 퀴즈 오답을 모으려면 3개 테이블 조인이 필요해 Table DSL 을 유지한다.
+        val wrongQuestionTexts = (DailyQuizQuestionTable innerJoin DailyQuizChoiceTable innerJoin DailyQuizAttemptTable)
             .selectAll()
             .where {
-                (DailyQuizQuestions.dailyPlanId eq dailyPlanId) and
-                    (DailyQuizAttempts.userId eq userId) and
-                    (DailyQuizChoices.isCorrect eq false)
+                (DailyQuizQuestionTable.dailyPlanId eq dailyPlanId) and
+                    (DailyQuizAttemptTable.userId eq userId) and
+                    (DailyQuizChoiceTable.isCorrect eq false)
             }
-            .map { it[DailyQuizQuestions.questionText] }
+            .map { it[DailyQuizQuestionTable.questionText] }
             .distinct()
 
         if (wrongQuestionTexts.isEmpty() && feedback.difficulty == "적당" && (feedback.focusLevel == null || feedback.focusLevel >= 3)) {
@@ -131,54 +133,56 @@ class FeedbackService(
             val targetDate = planDate.plusDays(suggestion.dayOffset.toLong())
             if (targetDate.isAfter(boardEndDate)) return@mapNotNull null
 
-            val targetDailyPlanId = findOrCreateDailyPlan(planBoardId, targetDate)
-            val startTime = lastTaskEndTime(targetDailyPlanId) ?: LocalTime.of(9, 0)
+            val targetDailyPlan = findOrCreateDailyPlan(planBoardId, targetDate)
+            val startTime = lastTaskEndTime(targetDailyPlan.id.value) ?: LocalTime.of(9, 0)
             val taskName = suggestion.taskName.take(150)
             val minutes = suggestion.estimatedMinutes.coerceIn(5, 120)
 
-            PlanTaskTable.insert {
-                it[this.dailyPlanId] = targetDailyPlanId
-                it[this.taskName] = taskName
-                it[this.startTime] = startTime
-                it[endTime] = startTime.plusMinutes(minutes.toLong())
-                it[estimatedMinutes] = minutes
+            PlanTaskRow.new {
+                dailyPlan = targetDailyPlan
+                this.taskName = taskName
+                this.startTime = startTime
+                endTime = startTime.plusMinutes(minutes.toLong())
+                estimatedMinutes = minutes
             }
 
             ReplanAdjustmentResponse(
-                dailyPlanId = targetDailyPlanId,
+                dailyPlanId = targetDailyPlan.id.value,
                 planDate = targetDate.toString(),
                 taskName = taskName
             )
         }
     }
 
-    private fun findOrCreateDailyPlan(planBoardId: Int, date: LocalDate): Int {
-        val existing = DailyPlanTable.selectAll()
-            .where { (DailyPlanTable.planBoardId eq planBoardId) and (DailyPlanTable.planDate eq date) }
-            .firstOrNull()
+    private fun findOrCreateDailyPlan(planBoardId: Int, date: LocalDate): DailyPlanRow {
+        val existing = DailyPlanRow.find {
+            (DailyPlanTable.planBoardId eq planBoardId) and (DailyPlanTable.planDate eq date)
+        }.firstOrNull()
 
-        if (existing != null) return existing[DailyPlanTable.id].value
+        if (existing != null) return existing
 
-        return (DailyPlanTable.insert {
-            it[this.planBoardId] = planBoardId
-            it[planDate] = date
-        } get DailyPlanTable.id).value
+        return DailyPlanRow.new {
+            planBoard = PlanBoardRow[planBoardId]
+            planDate = date
+        }
     }
 
     private fun lastTaskEndTime(dailyPlanId: Int): LocalTime? =
-        PlanTaskTable.selectAll()
-            .where { PlanTaskTable.dailyPlanId eq dailyPlanId }
+        PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
             .orderBy(PlanTaskTable.endTime to SortOrder.DESC)
             .firstOrNull()
-            ?.get(PlanTaskTable.endTime)
+            ?.endTime
 
-    private fun ResultRow.toFeedbackResponse(adjustments: List<ReplanAdjustmentResponse>) = FeedbackResponse(
-        id = this[DailyFeedbacks.id],
-        dailyPlanId = this[DailyFeedbacks.dailyPlanId],
-        difficulty = this[DailyFeedbacks.difficulty],
-        timeSpentMinutes = this[DailyFeedbacks.timeSpentMinutes],
-        focusLevel = this[DailyFeedbacks.focusLevel],
-        createdAt = this[DailyFeedbacks.createdAt].toString(),
+    private fun DailyFeedbackRow.toFeedbackResponse(
+        dailyPlanId: Int,
+        adjustments: List<ReplanAdjustmentResponse>
+    ) = FeedbackResponse(
+        id = this.id.value,
+        dailyPlanId = dailyPlanId,
+        difficulty = this.difficulty,
+        timeSpentMinutes = this.timeSpentMinutes,
+        focusLevel = this.focusLevel,
+        createdAt = this.createdAt.toString(),
         insertedAdjustmentTasks = adjustments
     )
 }

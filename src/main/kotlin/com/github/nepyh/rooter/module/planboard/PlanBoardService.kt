@@ -9,25 +9,32 @@ import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenExce
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanSubjectNotFoundException
-import com.github.nepyh.rooter.module.planboard.model.Chapters
+import com.github.nepyh.rooter.module.planboard.model.ChapterRow
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
-import com.github.nepyh.rooter.module.planboard.model.PlanSubjects
-import com.github.nepyh.rooter.module.planboard.model.Subjects
-import com.github.nepyh.rooter.module.planboard.model.Textbooks
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookRow
+import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.deleteWhere
-import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
-import org.jetbrains.exposed.v1.jdbc.update
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
-private data class ResolvedTextbookSubject(val subjectId: Int, val subjectName: String, val textbookTitle: String)
+/** 과목 범위 등록에 필요한 엔티티 묶음 — DAO 로 그대로 연결할 수 있게 Row 타입으로 들고 다닌다. */
+private data class ResolvedTextbookSubject(
+    val subject: SubjectRow,
+    val textbook: TextbookRow,
+    val startChapter: ChapterRow,
+    val endChapter: ChapterRow
+)
 
 class PlanBoardService {
     fun getAllBoards(userId: Int): List<PlanBoardResponse> = transaction {
@@ -108,21 +115,20 @@ class PlanBoardService {
     }
 
     private fun resolveTextbookSubject(request: PlanSubjectCreateRequest): ResolvedTextbookSubject {
-        val textbookRow = Textbooks.selectAll().where { Textbooks.id eq request.textbookId }.firstOrNull()
+        val textbook = TextbookRow.findById(request.textbookId)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val subjectId = textbookRow[Textbooks.subjectId]
-        val subjectName = Subjects.selectAll().where { Subjects.id eq subjectId }.firstOrNull()?.get(Subjects.name)
+        val subject = SubjectRow.findById(textbook.subject.id.value)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
 
-        val startOrder = Chapters.selectAll().where { Chapters.id eq request.startChapterId }.firstOrNull()
-            ?.get(Chapters.chapterOrder)
+        val startChapter = ChapterRow.findById(request.startChapterId)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val endOrder = Chapters.selectAll().where { Chapters.id eq request.endChapterId }.firstOrNull()
-            ?.get(Chapters.chapterOrder)
+        val endChapter = ChapterRow.findById(request.endChapterId)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        if (startOrder > endOrder) throw PlanBoardValidationException.InvalidSubjectRangeException()
+        if (startChapter.chapterOrder > endChapter.chapterOrder) {
+            throw PlanBoardValidationException.InvalidSubjectRangeException()
+        }
 
-        return ResolvedTextbookSubject(subjectId, subjectName, textbookRow[Textbooks.title])
+        return ResolvedTextbookSubject(subject, textbook, startChapter, endChapter)
     }
 
     private fun requireOwnedBoard(userId: Int, boardId: Int): PlanBoardRow {
@@ -137,26 +143,26 @@ class PlanBoardService {
      * 기존 POST /plan-tasks 로 직접 추가해야 한다.
      */
     fun addSubject(userId: Int, boardId: Int, request: PlanSubjectCreateRequest): PlanSubjectResponse = transaction {
-        requireOwnedBoard(userId, boardId)
+        val board = requireOwnedBoard(userId, boardId)
         val resolved = resolveTextbookSubject(request)
 
-        val id = PlanSubjects.insert {
-            it[planBoardId] = boardId
-            it[textbookId] = request.textbookId
-            it[this.startChapterId] = request.startChapterId
-            it[this.endChapterId] = request.endChapterId
-            it[customRangeText] = request.customRangeText
-        } get PlanSubjects.id
+        val planSubject = PlanSubjectRow.new {
+            planBoard = board
+            textbook = resolved.textbook
+            startChapter = resolved.startChapter
+            endChapter = resolved.endChapter
+            customRangeText = request.customRangeText
+        }
 
         PlanSubjectResponse(
-            id = id,
+            id = planSubject.id.value,
             planBoardId = boardId,
-            subjectId = resolved.subjectId,
-            subjectName = resolved.subjectName,
-            textbookId = request.textbookId,
-            textbookTitle = resolved.textbookTitle,
-            startChapterId = request.startChapterId,
-            endChapterId = request.endChapterId,
+            subjectId = resolved.subject.id.value,
+            subjectName = resolved.subject.name,
+            textbookId = resolved.textbook.id.value,
+            textbookTitle = resolved.textbook.title,
+            startChapterId = resolved.startChapter.id.value,
+            endChapterId = resolved.endChapter.id.value,
             customRangeText = request.customRangeText
         )
     }
@@ -164,20 +170,21 @@ class PlanBoardService {
     fun getSubjects(userId: Int, boardId: Int): List<PlanSubjectResponse> = transaction {
         requireOwnedBoard(userId, boardId)
 
-        (PlanSubjects innerJoin Textbooks innerJoin Subjects)
+        // 조인 + 여러 테이블 컬럼 투영이라 DAO 로 표현할 수 없어 Table DSL 을 유지한다.
+        (PlanSubjectTable innerJoin TextbookTable innerJoin SubjectTable)
             .selectAll()
-            .where { PlanSubjects.planBoardId eq boardId }
+            .where { PlanSubjectTable.planBoardId eq boardId }
             .map {
                 PlanSubjectResponse(
-                    id = it[PlanSubjects.id],
+                    id = it[PlanSubjectTable.id].value,
                     planBoardId = boardId,
-                    subjectId = it[Subjects.id],
-                    subjectName = it[Subjects.name],
-                    textbookId = it[Textbooks.id],
-                    textbookTitle = it[Textbooks.title],
-                    startChapterId = it[PlanSubjects.startChapterId],
-                    endChapterId = it[PlanSubjects.endChapterId],
-                    customRangeText = it[PlanSubjects.customRangeText]
+                    subjectId = it[SubjectTable.id].value,
+                    subjectName = it[SubjectTable.name],
+                    textbookId = it[TextbookTable.id].value,
+                    textbookTitle = it[TextbookTable.title],
+                    startChapterId = it[PlanSubjectTable.startChapterId].value,
+                    endChapterId = it[PlanSubjectTable.endChapterId].value,
+                    customRangeText = it[PlanSubjectTable.customRangeText]
                 )
             }
     }
@@ -185,35 +192,34 @@ class PlanBoardService {
     /** textbookId/startChapterId/endChapterId/customRangeText 전체를 다시 받아 통째로 교체 (부분 업데이트 아님 — 서로 연결된 값들이라 일부만 바꾸면 불일치 위험) */
     fun updateSubject(userId: Int, boardId: Int, subjectId: Int, request: PlanSubjectCreateRequest): PlanSubjectResponse = transaction {
         requireOwnedBoard(userId, boardId)
-        PlanSubjects.selectAll()
-            .where { (PlanSubjects.id eq subjectId) and (PlanSubjects.planBoardId eq boardId) }
-            .firstOrNull() ?: throw PlanSubjectNotFoundException()
+        val planSubject = PlanSubjectRow.find {
+            (PlanSubjectTable.id eq subjectId) and (PlanSubjectTable.planBoardId eq boardId)
+        }.firstOrNull() ?: throw PlanSubjectNotFoundException()
 
         val resolved = resolveTextbookSubject(request)
-
-        PlanSubjects.update({ (PlanSubjects.id eq subjectId) and (PlanSubjects.planBoardId eq boardId) }) {
-            it[textbookId] = request.textbookId
-            it[startChapterId] = request.startChapterId
-            it[endChapterId] = request.endChapterId
-            it[customRangeText] = request.customRangeText
-        }
+        planSubject.textbook = resolved.textbook
+        planSubject.startChapter = resolved.startChapter
+        planSubject.endChapter = resolved.endChapter
+        planSubject.customRangeText = request.customRangeText
 
         PlanSubjectResponse(
-            id = subjectId,
+            id = planSubject.id.value,
             planBoardId = boardId,
-            subjectId = resolved.subjectId,
-            subjectName = resolved.subjectName,
-            textbookId = request.textbookId,
-            textbookTitle = resolved.textbookTitle,
-            startChapterId = request.startChapterId,
-            endChapterId = request.endChapterId,
+            subjectId = resolved.subject.id.value,
+            subjectName = resolved.subject.name,
+            textbookId = resolved.textbook.id.value,
+            textbookTitle = resolved.textbook.title,
+            startChapterId = resolved.startChapter.id.value,
+            endChapterId = resolved.endChapter.id.value,
             customRangeText = request.customRangeText
         )
     }
 
     fun deleteSubject(userId: Int, boardId: Int, subjectId: Int) = transaction {
         requireOwnedBoard(userId, boardId)
-        val deleted = PlanSubjects.deleteWhere { (PlanSubjects.id eq subjectId) and (PlanSubjects.planBoardId eq boardId) }
-        if (deleted == 0) throw PlanSubjectNotFoundException()
+        val planSubject = PlanSubjectRow.find {
+            (PlanSubjectTable.id eq subjectId) and (PlanSubjectTable.planBoardId eq boardId)
+        }.firstOrNull() ?: throw PlanSubjectNotFoundException()
+        planSubject.delete()
     }
 }

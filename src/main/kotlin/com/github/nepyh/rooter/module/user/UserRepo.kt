@@ -159,9 +159,11 @@ class UserRepo {
     /** 삭제된 row 수를 반환한다. 0이면 존재하지 않거나 본인 소유가 아님. */
     fun deleteUnavailableTime(userId: Int, timeId: Int): Int {
         return transaction {
-            UnavailableTimeTable.deleteWhere {
+            val targets = UnavailableTimeRow.find {
                 (UnavailableTimeTable.id eq timeId) and (UnavailableTimeTable.user eq userId)
-            }
+            }.toList()
+            targets.forEach { it.delete() }
+            targets.size
         }
     }
 }

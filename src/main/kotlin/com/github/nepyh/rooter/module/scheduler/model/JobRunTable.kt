@@ -1,6 +1,9 @@
 package com.github.nepyh.rooter.module.scheduler.model
 
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
+import org.jetbrains.exposed.v1.dao.IntEntity
+import org.jetbrains.exposed.v1.dao.IntEntityClass
 import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
 
 /**
@@ -22,4 +25,19 @@ object JobRunTable : IntIdTable("job_runs") {
     init {
         uniqueIndex(jobType, runKey)
     }
+}
+
+class JobRunRow(id: EntityID<Int>) : IntEntity(id) {
+    companion object : IntEntityClass<JobRunRow>(JobRunTable)
+
+    var jobType by JobRunTable.jobType
+    var runKey by JobRunTable.runKey
+    var status by JobRunTable.status
+    var scheduledAt by JobRunTable.scheduledAt
+    var firedAt by JobRunTable.firedAt
+    var finishedAt by JobRunTable.finishedAt
+    var retryCount by JobRunTable.retryCount
+    var lastError by JobRunTable.lastError
+    var payload by JobRunTable.payload
+    var createdAt by JobRunTable.createdAt
 }
