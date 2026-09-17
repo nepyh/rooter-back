@@ -1,7 +1,7 @@
 package com.github.nepyh.rooter.module.user
 
 import com.github.nepyh.rooter.module.storage.FileStorage
-import com.github.nepyh.rooter.module.storage.toUploadableFile
+import com.github.nepyh.rooter.module.storage.UploadableFile
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
@@ -21,10 +21,17 @@ import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundExce
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
+import io.ktor.http.HttpHeaders
 import io.ktor.http.content.PartData
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.readAvailable
 import org.mindrot.jbcrypt.BCrypt
+import java.io.ByteArrayOutputStream
 import java.time.LocalDate
 import java.time.LocalTime
+
+private val ALLOWED_AVATAR_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
+private const val MAX_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024L // 5MB
 
 class UserService(
     private val userRepo: UserRepo,
@@ -198,7 +205,24 @@ class UserService(
     suspend fun updateAvatar(userId: Int, file: PartData.FileItem): AvatarUpdateResponse {
         userRepo.findUserById(userId) ?: throw UserNotFoundException()
 
-        val avatarImageKey = fileStorage.upload(file.toUploadableFile(), "avatars")
+        val extension = file.originalFileName?.substringAfterLast('.', "")?.lowercase()
+        if (extension.isNullOrBlank() || extension !in ALLOWED_AVATAR_EXTENSIONS) {
+            throw UserValidationException.UnsupportedAvatarFileTypeException()
+        }
+
+        // Content-Length 헤더는 실제 멀티파트 업로드에서 안 실릴 수 있어 신뢰할 수 없음 —
+        // 읽으면서 직접 바이트 수를 세어 상한을 넘는 순간 중단한다.
+        val bytes = readWithSizeLimit(file.provider(), MAX_AVATAR_FILE_SIZE_BYTES)
+            ?: throw UserValidationException.AvatarFileTooLargeException()
+
+        val boundedFile = UploadableFile(
+            content = ByteReadChannel(bytes),
+            originalFileName = file.originalFileName,
+            contentType = file.headers[HttpHeaders.ContentType],
+            contentLength = bytes.size.toLong()
+        )
+
+        val avatarImageKey = fileStorage.upload(boundedFile, "avatars")
         userRepo.updateAvatarImageKey(userId, avatarImageKey)
 
         return AvatarUpdateResponse(
@@ -236,5 +260,20 @@ class UserService(
 
         val deleted = userRepo.deleteUnavailableTime(userId, timeId)
         if (deleted == 0) throw UnavailableTimeNotFoundException()
+    }
+
+    /** maxBytes 를 넘으면 다 읽지 않고 null 을 반환한다 (업로드된 파일 전체를 메모리에 올리기 전에 상한을 강제). */
+    private suspend fun readWithSizeLimit(channel: ByteReadChannel, maxBytes: Long): ByteArray? {
+        val buffer = ByteArrayOutputStream()
+        val chunk = ByteArray(8192)
+        var total = 0L
+        while (true) {
+            val read = channel.readAvailable(chunk)
+            if (read == -1) break
+            total += read
+            if (total > maxBytes) return null
+            buffer.write(chunk, 0, read)
+        }
+        return buffer.toByteArray()
     }
 }

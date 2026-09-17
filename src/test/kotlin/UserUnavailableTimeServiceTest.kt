@@ -1,4 +1,5 @@
 import com.github.nepyh.rooter.module.storage.FileStorage
+import com.github.nepyh.rooter.module.storage.UploadableFile
 import com.github.nepyh.rooter.module.user.UserRepo
 import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
@@ -56,8 +57,11 @@ class UserUnavailableTimeServiceTest : StringSpec({
 
     // FileStorage 는 이 테스트 범위 밖 — 호출되지 않으므로 아무 동작도 안 하는 더미면 충분
     val noopFileStorage = object : FileStorage {
-        override suspend fun upload(file: PartData.FileItem, directory: String) = error("사용되지 않아야 함")
-        override suspend fun getFile(fileKey: String): PartData.FileItem? = error("사용되지 않아야 함")
+        override suspend fun upload(file: UploadableFile, directory: String) = error("사용되지 않아야 함")
+        override suspend fun <T> readFile(
+            fileKey: String,
+            block: suspend (java.io.InputStream, String?, Long?) -> T
+        ): T? = error("사용되지 않아야 함")
         override suspend fun getUrl(fileKey: String): String? = error("사용되지 않아야 함")
         override suspend fun delete(fileKey: String) = error("사용되지 않아야 함")
     }
