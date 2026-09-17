@@ -19,6 +19,8 @@ class SchoolTextbookAdoptionRow(id: EntityID<Int>) : IntEntity(id) {
 
     var schoolId by SchoolTextbookAdoptionTable.schoolId
     var grade by SchoolTextbookAdoptionTable.grade
-    var subject by SubjectRow referencedOn SchoolTextbookAdoptionTable.subjectId
-    var textbook by TextbookRow referencedOn SchoolTextbookAdoptionTable.textbookId
+
+    // 이 테이블의 FK 는 id 로만 쓰여서(과목명/교과서명 벌크 조회) 참조 엔티티 로드 없이 id 로 접근한다.
+    var subjectId by SchoolTextbookAdoptionTable.subjectId
+    var textbookId by SchoolTextbookAdoptionTable.textbookId
 }

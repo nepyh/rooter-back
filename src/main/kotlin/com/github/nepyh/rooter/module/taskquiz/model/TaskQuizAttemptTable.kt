@@ -1,6 +1,5 @@
 package com.github.nepyh.rooter.module.taskquiz.model
 
-import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
@@ -22,7 +21,8 @@ object TaskQuizAttemptTable : IntIdTable("task_quiz_attempts") {
 class TaskQuizAttemptRow(id: EntityID<Int>) : IntEntity(id) {
     companion object : IntEntityClass<TaskQuizAttemptRow>(TaskQuizAttemptTable)
 
-    var planTask by PlanTaskRow referencedOn TaskQuizAttemptTable.planTaskId
+    // 이 테이블의 FK 는 id 로만 쓰여서(재시도 대상 스캔) 참조 엔티티 로드 없이 id 로 접근한다.
+    var planTaskId by TaskQuizAttemptTable.planTaskId
     var attemptNumber by TaskQuizAttemptTable.attemptNumber
     var totalCount by TaskQuizAttemptTable.totalCount
     var correctCount by TaskQuizAttemptTable.correctCount

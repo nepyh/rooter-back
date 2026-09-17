@@ -12,6 +12,7 @@ import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
@@ -97,8 +98,8 @@ class CatalogServiceTest : StringSpec({
         SchoolTextbookAdoptionRow.new {
             this.schoolId = schoolId
             this.grade = grade
-            subject = SubjectRow[subjectId]
-            textbook = TextbookRow[textbookId]
+            this.subjectId = EntityID(subjectId, SubjectTable)
+            this.textbookId = EntityID(textbookId, TextbookTable)
         }
     }
 

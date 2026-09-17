@@ -36,8 +36,11 @@ class UserRow(id: EntityID<Int>) : IntEntity(id) {
 ```
 
 - 외부 파일에서는 `UserRow.find { UserTable.email eq ... }`, `UserRow.new { ... }` 처럼 `~Row` 를 기본으로 사용한다.
-- `~Table` 은 `insertIgnore` 처럼 DAO 로 표현할 수 없는 연산에서만 직접 사용한다.
-  (`JobRunTable.insertIgnore { ... }` — ON CONFLICT DO NOTHING 중복 방지 claim)
+- `~Table` 은 여러 테이블 조인·집계나 `insertIgnore` 처럼 DAO 로 표현할 수 없는 연산에서만 직접 사용한다.
+  (`PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable` — 소유자 확인/집계 조회,
+  `JobRunTable.insertIgnore { ... }` — ON CONFLICT DO NOTHING 중복 방지 claim)
+- FK 를 id 로만 쓰는 테이블은 참조 엔티티 로드가 없도록 `EntityID` 속성으로 노출한다.
+  (`var subjectId by Table.subjectId` — `.value` 로 id 접근)
 
 # run
 

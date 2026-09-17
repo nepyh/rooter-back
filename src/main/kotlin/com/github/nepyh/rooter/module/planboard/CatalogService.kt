@@ -8,6 +8,7 @@ import com.github.nepyh.rooter.module.planboard.dto.TextbookDetailResponse
 import com.github.nepyh.rooter.module.planboard.dto.TextbookResponse
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
+import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionRow
 import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
@@ -19,7 +20,6 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
-import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 
 class CatalogService {
@@ -65,36 +65,33 @@ class CatalogService {
      * 프로필이 없거나, 학교/학년에 매핑 데이터가 없는 과목은 결과에서 그냥 빠진다 (에러 아님) —
      * 프론트는 빈 목록/일부 누락 시 기존 교과서 직접 선택 플로우(getTextbooksBySubject 등)로 폴백해야 한다.
      *
-     * 과목명/교과서명은 id 목록으로 한 번에 읽는 벌크 조회라 DAO 대신 Table DSL 을 쓴다
-     * (Row 참조로 읽으면 행마다 참조 엔티티를 추가 조회하게 됨).
+     * 과목명/교과서명은 FK id 목록으로 한 번에 읽는다 (Row 의 EntityID 속성이라 추가 조회 없음).
      */
     suspend fun getRecommendedTextbooks(userId: Int): List<RecommendedTextbookResponse> = newSuspendedTransaction {
         val profile = StudentProfileRow.find { StudentProfileTable.user eq userId }
             .firstOrNull() ?: return@newSuspendedTransaction emptyList()
 
-        val adoptions = SchoolTextbookAdoptionTable.selectAll()
-            .where {
-                (SchoolTextbookAdoptionTable.schoolId eq profile.schoolId) and
-                    (SchoolTextbookAdoptionTable.grade eq profile.grade)
-            }
-            .map { it[SchoolTextbookAdoptionTable.subjectId] to it[SchoolTextbookAdoptionTable.textbookId] }
+        val adoptions = SchoolTextbookAdoptionRow.find {
+            (SchoolTextbookAdoptionTable.schoolId eq profile.schoolId) and
+                (SchoolTextbookAdoptionTable.grade eq profile.grade)
+        }.toList()
 
         if (adoptions.isEmpty()) return@newSuspendedTransaction emptyList()
 
-        val subjectNames = SubjectTable.selectAll()
-            .where { SubjectTable.id inList adoptions.map { it.first } }
-            .associate { it[SubjectTable.id] to it[SubjectTable.name] }
-        val textbookTitles = TextbookTable.selectAll()
-            .where { TextbookTable.id inList adoptions.map { it.second } }
-            .associate { it[TextbookTable.id] to it[TextbookTable.title] }
+        val subjectNames = SubjectRow.find { SubjectTable.id inList adoptions.map { it.subjectId } }
+            .associate { it.id.value to it.name }
+        val textbookTitles = TextbookRow.find { TextbookTable.id inList adoptions.map { it.textbookId } }
+            .associate { it.id.value to it.title }
 
-        adoptions.mapNotNull { (subjectId, textbookId) ->
+        adoptions.mapNotNull { adoption ->
+            val subjectId = adoption.subjectId.value
+            val textbookId = adoption.textbookId.value
             val subjectName = subjectNames[subjectId] ?: return@mapNotNull null
             val textbookTitle = textbookTitles[textbookId] ?: return@mapNotNull null
             RecommendedTextbookResponse(
-                subjectId = subjectId.value,
+                subjectId = subjectId,
                 subjectName = subjectName,
-                textbookId = textbookId.value,
+                textbookId = textbookId,
                 textbookTitle = textbookTitle
             )
         }

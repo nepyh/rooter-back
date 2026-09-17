@@ -18,6 +18,7 @@ import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceTable
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestionRow
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestionTable
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
@@ -42,7 +43,7 @@ class TaskQuizService(
 
         newSuspendedTransaction {
             val attempt = TaskQuizAttemptRow.new {
-                planTask = PlanTaskRow[planTaskId]
+                this.planTaskId = EntityID(planTaskId, PlanTaskTable)
                 this.attemptNumber = attemptNumber
                 totalCount = generated.size
                 createdAt = OffsetDateTime.now()
