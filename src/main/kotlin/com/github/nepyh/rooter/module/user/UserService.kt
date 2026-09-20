@@ -82,7 +82,7 @@ class UserService(
         )
     }
 
-    fun getUserInfo(id: Int): UserInfoResponse {
+    suspend fun getUserInfo(id: Int): UserInfoResponse {
         val user = userRepo.findUserById(id) ?: throw UserNotFoundException()
         val profile = userRepo.findStudentProfileByUserId(id) ?: throw UserNotFoundException()
 
@@ -95,6 +95,7 @@ class UserService(
             classNumber = profile.classNumber,
             createdAt = user.createdAt.toString(),
             avatarImageKey = user.avatarImageKey,
+            avatarUrl = user.avatarImageKey?.let { fileStorage.getUrl(it) },
             bio = user.bio
         )
     }
@@ -227,7 +228,8 @@ class UserService(
 
         return AvatarUpdateResponse(
             userId = userId,
-            avatarImageKey = avatarImageKey
+            avatarImageKey = avatarImageKey,
+            avatarUrl = fileStorage.getUrl(avatarImageKey)
         )
     }
 

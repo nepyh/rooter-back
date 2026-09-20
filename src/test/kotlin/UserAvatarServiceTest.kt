@@ -87,7 +87,7 @@ class UserAvatarServiceTest : StringSpec({
             fileKey: String,
             block: suspend (java.io.InputStream, String?, Long?) -> T
         ): T? = error("사용되지 않아야 함")
-        override suspend fun getUrl(fileKey: String): String? = error("사용되지 않아야 함")
+        override suspend fun getUrl(fileKey: String): String? = "https://fake-storage.test/$fileKey"
         override suspend fun delete(fileKey: String): Boolean = error("사용되지 않아야 함")
     }
 
@@ -100,6 +100,7 @@ class UserAvatarServiceTest : StringSpec({
         val response = userService.updateAvatar(userId, fileItem("photo.png", bytes))
 
         response.userId shouldBe userId
+        response.avatarUrl shouldBe "https://fake-storage.test/${response.avatarImageKey}"
         storage.uploadedBytes shouldBe bytes
     }
 
