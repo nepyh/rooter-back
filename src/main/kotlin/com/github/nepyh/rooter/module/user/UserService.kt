@@ -1,7 +1,7 @@
 package com.github.nepyh.rooter.module.user
 
 import com.github.nepyh.rooter.module.storage.FileStorage
-import com.github.nepyh.rooter.module.storage.UploadableFile
+import com.github.nepyh.rooter.module.storage.toUploadableFile
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
@@ -21,7 +21,6 @@ import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundExce
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
-import io.ktor.http.HttpHeaders
 import io.ktor.http.content.PartData
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
@@ -31,7 +30,12 @@ import java.io.ByteArrayOutputStream
 import java.time.LocalDate
 import java.time.LocalTime
 
-private val ALLOWED_AVATAR_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
+private val AVATAR_CONTENT_TYPES = mapOf(
+    "jpg" to "image/jpeg",
+    "jpeg" to "image/jpeg",
+    "png" to "image/png",
+    "webp" to "image/webp",
+)
 private const val MAX_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024L // 5MB
 
 class UserService(
@@ -210,7 +214,7 @@ class UserService(
         val previousKey = user.avatarImageKey
 
         val extension = file.originalFileName?.substringAfterLast('.', "")?.lowercase()
-        if (extension.isNullOrBlank() || extension !in ALLOWED_AVATAR_EXTENSIONS) {
+        if (extension.isNullOrBlank() || extension !in AVATAR_CONTENT_TYPES) {
             throw UserValidationException.UnsupportedAvatarFileTypeException()
         }
 
@@ -219,11 +223,12 @@ class UserService(
         val bytes = readWithSizeLimit(file.provider(), MAX_AVATAR_FILE_SIZE_BYTES)
             ?: throw UserValidationException.AvatarFileTooLargeException()
 
-        val boundedFile = UploadableFile(
+        // Content-Type 은 파트 헤더를 믿지 않고 확장자로 정한다 — 헤더가 비어 있으면 S3 오브젝트가
+        // octet-stream 으로 저장돼 브라우저가 이미지를 바로 표시하지 못한다.
+        val boundedFile = file.toUploadableFile(
             content = ByteReadChannel(bytes),
-            originalFileName = file.originalFileName,
-            contentType = file.headers[HttpHeaders.ContentType],
-            contentLength = bytes.size.toLong()
+            contentLength = bytes.size.toLong(),
+            contentType = AVATAR_CONTENT_TYPES.getValue(extension)
         )
 
         val avatarImageKey = fileStorage.upload(boundedFile, "avatars")
