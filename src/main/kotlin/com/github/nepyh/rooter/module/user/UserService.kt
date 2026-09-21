@@ -26,6 +26,7 @@ import io.ktor.http.content.PartData
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
 import org.mindrot.jbcrypt.BCrypt
+import org.slf4j.LoggerFactory
 import java.io.ByteArrayOutputStream
 import java.time.LocalDate
 import java.time.LocalTime
@@ -37,6 +38,7 @@ class UserService(
     private val userRepo: UserRepo,
     private val fileStorage: FileStorage
 ) {
+    private val logger = LoggerFactory.getLogger(UserService::class.java)
 
     fun registerUser(request: UserRegisterRequest): UserRegisterResponse {
 
@@ -204,7 +206,8 @@ class UserService(
     }
 
     suspend fun updateAvatar(userId: Int, file: PartData.FileItem): AvatarUpdateResponse {
-        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+        val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
+        val previousKey = user.avatarImageKey
 
         val extension = file.originalFileName?.substringAfterLast('.', "")?.lowercase()
         if (extension.isNullOrBlank() || extension !in ALLOWED_AVATAR_EXTENSIONS) {
@@ -225,6 +228,13 @@ class UserService(
 
         val avatarImageKey = fileStorage.upload(boundedFile, "avatars")
         userRepo.updateAvatarImageKey(userId, avatarImageKey)
+
+        // 이전 아바타 오브젝트는 지우지 않으면 아무도 참조하지 않는 채로 스토리지에 계속 쌓인다.
+        // 정리 실패가 아바타 교체 자체를 실패로 만들면 안 되므로 로그만 남기고 넘어간다.
+        if (previousKey != null && previousKey != avatarImageKey) {
+            runCatching { fileStorage.delete(previousKey) }
+                .onFailure { logger.warn("이전 아바타 오브젝트 삭제 실패: key={}", previousKey, it) }
+        }
 
         return AvatarUpdateResponse(
             userId = userId,
