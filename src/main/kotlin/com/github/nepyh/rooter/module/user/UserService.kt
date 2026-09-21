@@ -100,7 +100,6 @@ class UserService(
             grade = profile.grade,
             classNumber = profile.classNumber,
             createdAt = user.createdAt.toString(),
-            avatarImageKey = user.avatarImageKey,
             avatarUrl = user.avatarImageKey?.let { fileStorage.getUrl(it) },
             bio = user.bio
         )
@@ -243,7 +242,6 @@ class UserService(
 
         return AvatarUpdateResponse(
             userId = userId,
-            avatarImageKey = avatarImageKey,
             avatarUrl = fileStorage.getUrl(avatarImageKey)
         )
     }

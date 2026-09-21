@@ -303,7 +303,7 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
         }.describe {
             tag("User")
             summary = "아바타 이미지 업로드"
-            description = "이미지 파일을 업로드하고 유저의 avatarImageKey 를 갱신. 응답의 avatarUrl 로 바로 이미지를 표시할 수 있음 " +
+            description = "이미지 파일을 아바타로 등록하고 응답의 avatarUrl 로 바로 표시할 수 있음 " +
                 "(S3 사용 시 presigned URL 이라 일정 시간 후 만료되므로, 다시 보려면 유저 정보 조회로 새로 받아야 함). " +
                 "본인 정보만 수정 가능. 허용 확장자: jpg, jpeg, png, webp / 최대 용량: 5MB"
             parameters {
