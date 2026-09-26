@@ -22,6 +22,6 @@ fun UserModule(appConfig: AppConfig) = module {
             appConfig.appleClientId
         )
     }
-    single(named("userApi")) { UserApi(get()) }
+    single(named("userApi")) { UserApi(get(), get()) }
     single(named("authApi")) { AuthApi(get()) }
 }
