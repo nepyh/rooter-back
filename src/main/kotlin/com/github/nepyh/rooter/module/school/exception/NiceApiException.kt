@@ -4,7 +4,7 @@ import io.ktor.http.HttpStatusCode
 
 /**
  * NICE API 호출 실패를 나타내는 예외.
- * NICE RESULT 코드(INFO-xxx) 를 HTTP 의미에 맞게 매핑한다.
+ * NICE RESULT 코드(INFO-xxx / ERROR-xxx) 를 HTTP 의미에 맞게 매핑한다.
  */
 sealed class NiceApiException(
     val status: HttpStatusCode,
@@ -12,28 +12,28 @@ sealed class NiceApiException(
     message: String
 ) : Exception(message) {
 
-    /** INFO-100: 인증키가 유효하지 않음 (누락/만료/오타) */
+    /** ERROR-290 / INFO-100: 인증키가 유효하지 않음 (누락/만료/오타) */
     class InvalidKeyException(message: String? = null) : NiceApiException(
         HttpStatusCode.Unauthorized,
         "NICE_INVALID_KEY",
         message ?: "NICE 인증키가 유효하지 않습니다."
     )
 
-    /** INFO-300: 일일 호출량 초과 등 요청 제한 */
+    /** INFO-300: 인증키 사용 제한 / ERROR-337: 일별 트래픽 초과 */
     class RateLimitedException(message: String? = null) : NiceApiException(
         HttpStatusCode.TooManyRequests,
         "NICE_RATE_LIMITED",
         message ?: "NICE API 호출 한도를 초과했습니다."
     )
 
-    /** INFO-400: 파라미터 오류 (잘못된 schoolId 등) */
+    /** ERROR-300·333·336 / INFO-400: 파라미터 오류 (필수값 누락, 잘못된 타입, 1000건 초과 요청 등) */
     class BadRequestException(message: String? = null) : NiceApiException(
         HttpStatusCode.BadRequest,
         "NICE_BAD_REQUEST",
         message ?: "NICE API 요청 파라미터가 올바르지 않습니다."
     )
 
-    /** INFO-500: NICE 서버 오류 */
+    /** ERROR-500·600·601 / INFO-500: NICE 서버·DB 오류 */
     class ServerException(message: String? = null) : NiceApiException(
         HttpStatusCode.BadGateway,
         "NICE_SERVER_ERROR",

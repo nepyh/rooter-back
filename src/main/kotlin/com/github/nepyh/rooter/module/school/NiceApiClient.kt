@@ -17,8 +17,10 @@ import kotlinx.serialization.json.*
  *
  * - 베이스: https://open.neis.go.kr/hub/{서비스명}
  * - 인증: KEY 파라미터 (키가 없으면 응답이 5건으로 제한됨)
- * - 응답: {"<서비스명>": [{"head": [...]}, {"row": [...]}]} 형태
- * - RESULT 코드: INFO-000 정상 / INFO-100 인증키 오류 / INFO-200 데이터 없음 / INFO-300 요청 제한 / INFO-400 파라미터 오류 / INFO-500 서버 오류
+ * - 응답: {"<서비스명>": [{"head": [...]}, {"row": [...]}]} 형태.
+ *   단, 데이터 없음(INFO-200)과 오류(ERROR-xxx)는 서비스 블록 없이 최상위 {"RESULT": {...}} 만 온다.
+ * - RESULT 코드: INFO-000 정상 / INFO-200 데이터 없음 / INFO-300 인증키 사용 제한 /
+ *   ERROR-290 인증키 오류 / ERROR-300·333·336 요청 인자 오류 / ERROR-337 일별 트래픽 초과 / ERROR-500·600·601 서버 오류
  *   (INFO-200 은 빈 목록으로 처리 — 팀 API 컨벤션 "조회 결과 없음 = 빈 배열")
  *
  * 모든 메서드는 suspend (Ktor HttpClient 비동기 IO).
@@ -53,13 +55,20 @@ class NiceApiClient(
 
         val root = json.parseToJsonElement(response.bodyAsText()).jsonObject
         val serviceBlock = root[service]?.jsonArray
-            ?: throw NiceApiException.UnexpectedResponseException("응답에 '$service' 블록이 없습니다.")
 
         var resultCode: String? = null
         var resultMessage: String? = null
         var rows: List<JsonObject> = emptyList()
 
-        for (block in serviceBlock) {
+        if (serviceBlock == null) {
+            // 데이터 없음·오류 응답은 서비스 블록 없이 최상위 RESULT 만 온다
+            val result = root["RESULT"]?.jsonObject
+                ?: throw NiceApiException.UnexpectedResponseException("응답에 '$service' 블록이 없습니다.")
+            resultCode = result["CODE"]?.jsonPrimitive?.content
+            resultMessage = result["MESSAGE"]?.jsonPrimitive?.contentOrNull
+        }
+
+        for (block in serviceBlock.orEmpty()) {
             val blockObj = block.jsonObject
             blockObj["head"]?.jsonArray?.forEach { head ->
                 val result = head.jsonObject["RESULT"] ?: return@forEach
@@ -75,10 +84,10 @@ class NiceApiClient(
             null -> throw NiceApiException.UnexpectedResponseException("응답에 RESULT 블록이 없습니다.")
             "INFO-000" -> Unit
             "INFO-200" -> return emptyList() // 데이터 없음 = 빈 목록 (정상)
-            "INFO-100" -> throw NiceApiException.InvalidKeyException(resultMessage)
-            "INFO-300" -> throw NiceApiException.RateLimitedException(resultMessage)
-            "INFO-400" -> throw NiceApiException.BadRequestException(resultMessage)
-            "INFO-500" -> throw NiceApiException.ServerException(resultMessage)
+            "INFO-100", "ERROR-290" -> throw NiceApiException.InvalidKeyException(resultMessage)
+            "INFO-300", "ERROR-337" -> throw NiceApiException.RateLimitedException(resultMessage)
+            "INFO-400", "ERROR-300", "ERROR-333", "ERROR-336" -> throw NiceApiException.BadRequestException(resultMessage)
+            "INFO-500", "ERROR-500", "ERROR-600", "ERROR-601" -> throw NiceApiException.ServerException(resultMessage)
             else -> throw NiceApiException.UnexpectedResponseException("알 수 없는 RESULT 코드: $resultCode")
         }
 
