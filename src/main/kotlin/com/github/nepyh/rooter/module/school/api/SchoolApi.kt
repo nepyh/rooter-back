@@ -73,7 +73,9 @@ fun SchoolApi(schoolDataFetcher: SchoolDataFetcher) = ApiRoute("school") {
         if (schoolId.isNullOrBlank()) {
             throw NiceApiException.InvalidSchoolIdException()
         }
-        val year = call.request.queryParameters["year"]?.toIntOrNull() ?: LocalDate.now().year
+        // 학년도는 3월에 시작 — 1~2월이면 아직 전년도 학년도
+        val year = call.request.queryParameters["year"]?.toIntOrNull()
+            ?: LocalDate.now().let { if (it.monthValue >= 3) it.year else it.year - 1 }
 
         val candidates = schoolDataFetcher.getExamScheduleCandidates(schoolId, year)
         call.respond(
@@ -92,7 +94,7 @@ fun SchoolApi(schoolDataFetcher: SchoolDataFetcher) = ApiRoute("school") {
                 schema = jsonSchema<String>()
             }
             query("year") {
-                description = "학년도(AY). 생략하면 올해"
+                description = "학년도. 해당 연도 3월 1일 ~ 다음 해 2월 말일의 학사일정을 조회. 생략하면 현재 학년도(1~2월이면 전년도)"
                 required = false
                 schema = jsonSchema<Int>()
             }
