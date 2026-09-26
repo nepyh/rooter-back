@@ -37,7 +37,32 @@ class NiceApiClient(
      * @param params 서비스별 파라미터 (pSize 는 기본 100, params 로 오버라이드 가능)
      * @param serializer row DTO 의 kotlinx.serialization 시리얼라이저
      */
-    suspend fun <T> getRows(service: String, params: Map<String, String>, serializer: KSerializer<T>): List<T> {
+    suspend fun <T> getRows(service: String, params: Map<String, String>, serializer: KSerializer<T>): List<T> =
+        fetchPage(service, params, serializer).rows
+
+    /**
+     * [getRows] 와 같지만 list_total_count 를 보고 pIndex 를 넘겨가며 모든 페이지를 모아 반환한다.
+     * 한 페이지(pSize 100)를 넘을 수 있는 조회(예: 1년치 학사일정)에 쓴다. 호출 수 폭주를 막기 위해 [maxPages] 에서 멈춘다.
+     */
+    suspend fun <T> getAllRows(
+        service: String,
+        params: Map<String, String>,
+        serializer: KSerializer<T>,
+        maxPages: Int = DEFAULT_MAX_PAGES
+    ): List<T> {
+        val first = fetchPage(service, params, serializer)
+        val rows = first.rows.toMutableList()
+        var pageIndex = 1
+        while (rows.size < first.totalCount && pageIndex < maxPages) {
+            pageIndex++
+            val page = fetchPage(service, params + ("pIndex" to pageIndex.toString()), serializer)
+            if (page.rows.isEmpty()) break
+            rows += page.rows
+        }
+        return rows
+    }
+
+    private suspend fun <T> fetchPage(service: String, params: Map<String, String>, serializer: KSerializer<T>): NicePage<T> {
         val allParams = buildMap {
             put("KEY", apiKey)
             put("Type", "json")
@@ -58,6 +83,7 @@ class NiceApiClient(
 
         var resultCode: String? = null
         var resultMessage: String? = null
+        var totalCount = 0
         var rows: List<JsonObject> = emptyList()
 
         if (serviceBlock == null) {
@@ -71,6 +97,7 @@ class NiceApiClient(
         for (block in serviceBlock.orEmpty()) {
             val blockObj = block.jsonObject
             blockObj["head"]?.jsonArray?.forEach { head ->
+                head.jsonObject["list_total_count"]?.jsonPrimitive?.intOrNull?.let { totalCount = it }
                 val result = head.jsonObject["RESULT"] ?: return@forEach
                 resultCode = result.jsonObject["CODE"]?.jsonPrimitive?.content
                 resultMessage = result.jsonObject["MESSAGE"]?.jsonPrimitive?.contentOrNull
@@ -83,7 +110,7 @@ class NiceApiClient(
         when (resultCode) {
             null -> throw NiceApiException.UnexpectedResponseException("응답에 RESULT 블록이 없습니다.")
             "INFO-000" -> Unit
-            "INFO-200" -> return emptyList() // 데이터 없음 = 빈 목록 (정상)
+            "INFO-200" -> return NicePage(emptyList(), 0) // 데이터 없음 = 빈 목록 (정상)
             "INFO-100", "ERROR-290" -> throw NiceApiException.InvalidKeyException(resultMessage)
             "INFO-300", "ERROR-337" -> throw NiceApiException.RateLimitedException(resultMessage)
             "INFO-400", "ERROR-300", "ERROR-333", "ERROR-336" -> throw NiceApiException.BadRequestException(resultMessage)
@@ -91,12 +118,13 @@ class NiceApiClient(
             else -> throw NiceApiException.UnexpectedResponseException("알 수 없는 RESULT 코드: $resultCode")
         }
 
-        return rows.map { json.decodeFromJsonElement(serializer, it) }
+        return NicePage(rows.map { json.decodeFromJsonElement(serializer, it) }, totalCount)
     }
 
     companion object {
         const val DEFAULT_BASE_URL = "https://open.neis.go.kr/hub"
         const val MAX_PAGE_SIZE = "100"
+        const val DEFAULT_MAX_PAGES = 10
 
         val json = Json { ignoreUnknownKeys = true }
 
@@ -108,6 +136,8 @@ class NiceApiClient(
         }
     }
 }
+
+private data class NicePage<T>(val rows: List<T>, val totalCount: Int)
 
 // ---- NICE 응답 row DTO (와이어 포맷 — 필드명은 NICE 원본 대문자 스네이크) ----
 
