@@ -78,7 +78,7 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
         }.describe {
             tag("User")
             summary = "유저 정보 조회"
-            description = "유저 기본 정보와 학생 프로필을 함께 조회. 본인 정보만 조회 가능"
+            description = "유저 기본 정보와 학생 프로필을 함께 조회. 본인 정보만 조회 가능. 학생 프로필 등록 전이면 schoolId·grade·classNumber 는 null"
             parameters {
                 path("id") {
                     description = "유저 ID"
