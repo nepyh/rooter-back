@@ -62,9 +62,11 @@ class ChatService(
             val dailyPlanRow = requireOwnedDailyPlan(userId, dailyPlanId)
             val planDate = dailyPlanRow.planDate
 
-            val tasks = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
+            // 이미 완료한 태스크는 재조정 대상이 아니다 — AI 에는 미완료 태스크만 보내고,
+            // 완료 태스크의 시간대는 재배치할 때 막아둔다.
+            val (completedTasks, pendingTasks) = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
                 .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
-                .map { it.taskName to it.estimatedMinutes }
+                .partition { it.isCompleted }
 
             val profileRow = StudentProfileRow.find { StudentProfileTable.user eq userId }
                 .firstOrNull()
@@ -91,7 +93,10 @@ class ChatService(
             ChatContext(
                 planDate = planDate.toString(),
                 dayOfWeekLabel = planDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.KOREAN),
-                tasks = tasks,
+                pendingTasks = pendingTasks.map { it.taskName to it.estimatedMinutes },
+                completedRanges = completedTasks.map {
+                    PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime)
+                },
                 grade = grade,
                 schoolId = schoolId,
                 classNumber = classNumber,
@@ -105,7 +110,7 @@ class ChatService(
             grade = context.grade,
             studyStyleSummary = context.studyStyleSummary,
             targetDate = "${context.planDate} (${context.dayOfWeekLabel})",
-            currentTasksJson = json.encodeToString(context.tasks.map { AiChatTask(it.first, it.second) }),
+            currentTasksJson = json.encodeToString(context.pendingTasks.map { AiChatTask(it.first, it.second) }),
             chatHistoryJson = json.encodeToString(context.history),
             userMessage = trimmed
         )
@@ -133,7 +138,7 @@ class ChatService(
             } else {
                 emptyList()
             }
-            PlanTaskScheduler.freeIntervalsFromBusyRanges(busyRanges + extraBusy)
+            PlanTaskScheduler.freeIntervalsFromBusyRanges(busyRanges + extraBusy + context.completedRanges)
         } else {
             emptyList()
         }
@@ -165,8 +170,19 @@ class ChatService(
                 )
 
                 val dailyPlan = DailyPlanRow[dailyPlanId]
-                PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.forEach { it.delete() }
-                updatedTasks = placed.map { task ->
+                PlanTaskRow.find { (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq false) }
+                    .forEach { it.delete() }
+                val keptTasks = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.map {
+                    PlanTaskResponse(
+                        id = it.id.value,
+                        taskName = it.taskName,
+                        startTime = it.startTime.toString(),
+                        endTime = it.endTime.toString(),
+                        estimatedMinutes = it.estimatedMinutes,
+                        isCompleted = it.isCompleted
+                    )
+                }
+                val newTasks = placed.map { task ->
                     val planTask = PlanTaskRow.new {
                         this.dailyPlan = dailyPlan
                         taskName = task.taskName
@@ -183,6 +199,7 @@ class ChatService(
                         isCompleted = false
                     )
                 }
+                updatedTasks = (keptTasks + newTasks).sortedBy { it.startTime }
             }
 
             ChatTurnRow.new {
@@ -218,7 +235,8 @@ class ChatService(
 private data class ChatContext(
     val planDate: String,
     val dayOfWeekLabel: String,
-    val tasks: List<Pair<String, Int>>,
+    val pendingTasks: List<Pair<String, Int>>,
+    val completedRanges: List<Pair<Int, Int>>,
     val grade: Int,
     val schoolId: String?,
     val classNumber: Int?,
