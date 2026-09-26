@@ -22,6 +22,9 @@ services:
 
       - NICE_API_KEY=${NICE_API_KEY}
 
+      # 로컬 파일 스토리지가 내려주는 URL 의 호스트 (미설정 시 상대 경로로 내려감)
+      - STORAGE_BASE_URL
+
       # IAM Roles Anywhere helper 가 뜨는 경우에만 S3 인증에 사용됨 (없으면 무해)
       - AWS_EC2_METADATA_SERVICE_ENDPOINT=http://roles-anywhere-helper:9911
       # S3 스토리지용 값은 '설정된 경우에만' 전달함 (빈 문자열이 들어가면 HOCON 치환이 성공해버려
