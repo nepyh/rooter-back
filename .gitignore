@@ -56,3 +56,7 @@ openocode.json
 certs/*
 !certs/.gitkeep
 !certs/README.md
+
+# ECS task definition 스냅샷 — 정본은 AWS (deploy.yml 이 배포 때마다 내려받아 씀). 설정 값이 평문이라 커밋 금지
+*task-def*.json
+task-definition.json
