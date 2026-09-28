@@ -5,5 +5,5 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class AvatarUpdateResponse(
     val userId: Int,
-    val avatarImageKey: String
+    val avatarUrl: String?
 )

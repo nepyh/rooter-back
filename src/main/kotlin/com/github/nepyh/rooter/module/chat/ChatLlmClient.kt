@@ -28,7 +28,7 @@ private data class ChatCompletionChoice(val message: ChatMessage)
 @Serializable
 private data class ChatCompletionResponse(val choices: List<ChatCompletionChoice>)
 
-class ChatLlmClient(private val appConfig: AppConfig) {
+open class ChatLlmClient(private val appConfig: AppConfig) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -38,7 +38,7 @@ class ChatLlmClient(private val appConfig: AppConfig) {
         }
     }
 
-    suspend fun adjustPlan(
+    open suspend fun adjustPlan(
         grade: Int,
         studyStyleSummary: String,
         targetDate: String,

@@ -121,7 +121,10 @@ ef88babdc8c3  localhost/rooter-back_app:latest                  21 seconds ago  
 
 ### S3 로 띄우기 (선택)
 
-기본값은 로컬 파일 스토리지입니다(`APP_CONFIG=dev.conf`, `run/store` 디렉터리 사용). S3 로 띄우려면:
+기본값은 로컬 파일 스토리지입니다(`APP_CONFIG=dev.conf`, `run/store` 디렉터리 사용).
+파일 URL 은 `STORAGE_BASE_URL`(절대 URL) 로 만들어집니다 — 미설정 시 `/api/files`(상대 경로)라 앱 클라이언트에서는 로드되지 않습니다.
+
+S3 로 띄우려면:
 
 1. `./certs/` 에 클라이언트 인증서(`client-cert.pem` / `client-key.pem`)를 둡니다
 2. `.env` 에 아래를 설정합니다

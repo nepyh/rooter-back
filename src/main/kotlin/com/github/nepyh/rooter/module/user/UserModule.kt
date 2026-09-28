@@ -9,7 +9,7 @@ import org.koin.dsl.module
 
 
 fun UserModule(appConfig: AppConfig) = module {
-    single { UserRepo() }
+    single<UserRepo> { ExposedUserRepo() }
     single<JwtValidator> { UserJwtValidator(get()) }
     single { UserService(get(), get()) }
     single {

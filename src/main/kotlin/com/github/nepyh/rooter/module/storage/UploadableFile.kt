@@ -12,9 +12,17 @@ data class UploadableFile(
     val contentLength: Long?,
 )
 
-fun PartData.FileItem.toUploadableFile(): UploadableFile = UploadableFile(
-    content = provider(),
+/**
+ * 파트를 그대로 업로드용 파일로 감싼다.
+ * 내용을 이미 읽어놨거나(용량 제한 등) Content-Type 을 다르게 정해야 할 때는 각 인자를 넘긴다.
+ */
+fun PartData.FileItem.toUploadableFile(
+    content: ByteReadChannel = provider(),
+    contentLength: Long? = headers[HttpHeaders.ContentLength]?.toLongOrNull(),
+    contentType: String? = headers[HttpHeaders.ContentType],
+): UploadableFile = UploadableFile(
+    content = content,
     originalFileName = originalFileName,
-    contentType = headers[HttpHeaders.ContentType],
-    contentLength = headers[HttpHeaders.ContentLength]?.toLongOrNull(),
+    contentType = contentType,
+    contentLength = contentLength,
 )
