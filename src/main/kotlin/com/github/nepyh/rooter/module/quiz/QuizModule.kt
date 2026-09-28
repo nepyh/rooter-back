@@ -7,7 +7,7 @@ import org.koin.dsl.module
 
 fun QuizModule(appConfig: AppConfig) = module {
     single { QuizLlmClient(appConfig) }
-    single { QuizService(get()) }
+    single { QuizService(get(), get()) }
 
     single(named("quizApi")) { QuizApi(get()) }
 }
