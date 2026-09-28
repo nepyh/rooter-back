@@ -73,14 +73,15 @@ object PlanTaskScheduler {
         endDate: LocalDate
     ): Map<LocalDate, Int> {
         val className = classNumber?.toString()
-        val semesters = generateSequence(startDate) { it.plusDays(1) }
+        // 학기별로 계획 기간에 해당하는 날짜 범위만 조회한다 (학기 전체를 받으면 수백~수천 건)
+        val datesBySemester = generateSequence(startDate) { it.plusDays(1) }
             .takeWhile { !it.isAfter(endDate) }
-            .map { academicYearAndSemester(it) }
-            .distinct()
+            .groupBy { academicYearAndSemester(it) }
 
         val lastPeriodByDate = mutableMapOf<LocalDate, Int>()
-        for ((year, semester) in semesters) {
-            schoolDataFetcher.getTimetable(schoolId, year, semester, grade, className).forEach { entry ->
+        for ((yearAndSemester, dates) in datesBySemester) {
+            val (year, semester) = yearAndSemester
+            schoolDataFetcher.getTimetable(schoolId, year, semester, grade, className, from = dates.first(), to = dates.last()).forEach { entry ->
                 if (entry.period > (lastPeriodByDate[entry.date] ?: 0)) {
                     lastPeriodByDate[entry.date] = entry.period
                 }

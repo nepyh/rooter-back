@@ -159,6 +159,35 @@ class SchoolDataFetcherTest : StringSpec({
         classParam shouldBe "3"
     }
 
+    "시간표는 기간을 주면 TI_FROM_YMD/TI_TO_YMD 로 걸고, 한 페이지를 넘으면 pIndex 로 모두 모은다" {
+        val requested = mutableListOf<Map<String, String?>>()
+        val fetcher = fetcherWith { request ->
+            val pageIndex = request.url.parameters["pIndex"]
+            requested += listOf("TI_FROM_YMD", "TI_TO_YMD", "pIndex").associateWith { request.url.parameters[it] }
+            val rows = when (pageIndex) {
+                null -> """{"ALL_TI_YMD":"20260928","PERIO":"1","ITRT_CNTNT":"국어","CLASS_NM":"1"}"""
+                "2" -> """{"ALL_TI_YMD":"20261009","PERIO":"6","ITRT_CNTNT":"수학","CLASS_NM":"1"}"""
+                else -> error("3페이지 이상은 요청하면 안 됨")
+            }
+            jsonResponse(
+                """
+                {"misTimetable":[{"head":[{"list_total_count":2},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[$rows]}]}
+                """.trimIndent()
+            )
+        }
+
+        val timetable = fetcher.getTimetable(
+            "B107132131", 2026, 2, 1, "1",
+            from = LocalDate.of(2026, 9, 28), to = LocalDate.of(2026, 10, 10)
+        )
+
+        requested shouldBe listOf(
+            mapOf("TI_FROM_YMD" to "20260928", "TI_TO_YMD" to "20261010", "pIndex" to null),
+            mapOf("TI_FROM_YMD" to "20260928", "TI_TO_YMD" to "20261010", "pIndex" to "2")
+        )
+        timetable.map { it.date to it.period } shouldBe listOf(LocalDate.of(2026, 9, 28) to 1, LocalDate.of(2026, 10, 9) to 6)
+    }
+
     "학사일정은 SchoolSchedule row 를 SchoolEvent 로 변환한다" {
         val fetcher = fetcherWith {
             jsonResponse(
@@ -233,6 +262,49 @@ class SchoolDataFetcherTest : StringSpec({
         }
 
         fetcher.getExamScheduleCandidates("C107181084", 2026).shouldBeEmpty()
+    }
+
+    "학사일정은 AY 대신 학년도 기간(3월 1일 ~ 다음 해 2월 말일)을 AA_FROM_YMD/AA_TO_YMD 로 걸어 조회한다" {
+        val requested = mutableListOf<Map<String, String?>>()
+        val fetcher = fetcherWith { request ->
+            requested += listOf("AY", "AA_FROM_YMD", "AA_TO_YMD").associateWith { request.url.parameters[it] }
+            jsonResponse(
+                """
+                {"SchoolSchedule":[{"head":[{"list_total_count":1},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[{"AA_YMD":"20260301","EVENT_NM":"3·1절"}]}]}
+                """.trimIndent()
+            )
+        }
+
+        fetcher.getSchoolEvents("C107181084", 2026)
+        fetcher.getSchoolEvents("C107181084", 2027) // 다음 해가 윤년 — 2월 말일이 29일
+
+        requested shouldBe listOf(
+            mapOf("AY" to null, "AA_FROM_YMD" to "20260301", "AA_TO_YMD" to "20270228"),
+            mapOf("AY" to null, "AA_FROM_YMD" to "20270301", "AA_TO_YMD" to "20280229")
+        )
+    }
+
+    "학사일정이 한 페이지(100건)를 넘으면 list_total_count 만큼 pIndex 를 넘겨가며 모두 모은다" {
+        val requestedPages = mutableListOf<String?>()
+        val fetcher = fetcherWith { request ->
+            val pageIndex = request.url.parameters["pIndex"]
+            requestedPages += pageIndex
+            val rows = when (pageIndex) {
+                null -> """{"AA_YMD":"20260429","EVENT_NM":"중간고사"},{"AA_YMD":"20260715","EVENT_NM":"여름방학식"}"""
+                "2" -> """{"AA_YMD":"20261016","EVENT_NM":"2학기 중간고사"}"""
+                else -> error("3페이지 이상은 요청하면 안 됨")
+            }
+            jsonResponse(
+                """
+                {"SchoolSchedule":[{"head":[{"list_total_count":3},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[$rows]}]}
+                """.trimIndent()
+            )
+        }
+
+        val candidates = fetcher.getExamScheduleCandidates("C107181084", 2026)
+
+        requestedPages shouldBe listOf(null, "2")
+        candidates.map { it.date } shouldBe listOf(LocalDate.of(2026, 4, 29), LocalDate.of(2026, 10, 16))
     }
 
     "잘못된 schoolId 형식은 HTTP 호출 전에 BadRequestException 을 던진다" {

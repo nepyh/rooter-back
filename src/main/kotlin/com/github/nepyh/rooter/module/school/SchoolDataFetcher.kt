@@ -53,13 +53,17 @@ class SchoolDataFetcher(
      * 특정 학년/반의 중학교 시간표를 조회한다.
      * @param schoolId 합성 식별자 (예: "C107181084")
      * @param className 반 — 없으면 해당 학년 전체 반의 시간표가 반환됨 (학년 단위 기본값)
+     * @param from, to 조회 기간(TI_FROM_YMD/TI_TO_YMD) — 없으면 학기 전체. 학기 전체는 반 하나만 해도 수백 건이라
+     *   필요한 기간만 거는 게 좋다. 100건을 넘어도 모든 페이지를 모은다.
      */
     suspend fun getTimetable(
         schoolId: String,
         year: Int,
         semester: Int,
         grade: Int,
-        className: String? = null
+        className: String? = null,
+        from: LocalDate? = null,
+        to: LocalDate? = null
     ): List<TimetableEntry> {
         val (officeCode, schoolCode) = School.splitSchoolId(schoolId)
         val params = buildMap {
@@ -69,8 +73,10 @@ class SchoolDataFetcher(
             put("SEM", semester.toString())
             put("GRADE", grade.toString())
             className?.let { put("CLASS_NM", it) }
+            from?.let { put("TI_FROM_YMD", it.format(DateTimeFormatter.BASIC_ISO_DATE)) }
+            to?.let { put("TI_TO_YMD", it.format(DateTimeFormatter.BASIC_ISO_DATE)) }
         }
-        return niceClient.getRows("misTimetable", params, TimetableRow.serializer()).map { row ->
+        return niceClient.getAllRows("misTimetable", params, TimetableRow.serializer()).map { row ->
             TimetableEntry(
                 date = parseNiceDate(row.date, "ALL_TI_YMD"),
                 period = row.period.toIntOrNull() ?: 0,
@@ -98,18 +104,27 @@ class SchoolDataFetcher(
     /**
      * 학교 학사일정을 조회한다. (방학, 행사, 일부 학교는 시험기간 포함)
      * @param schoolId 합성 식별자 (예: "C107181084")
-     * @param year 학년도
+     * @param year 학년도 — [year]년 3월 1일 ~ 다음 해 2월 말일
      * @param date 특정 날짜(YYYYMMDD) 필터 — 없으면 학년도 전체
+     *
+     * SchoolSchedule 은 AY 파라미터를 무시하고 모든 연도를 돌려주기 때문에 AA_FROM_YMD/AA_TO_YMD 로 기간을 건다.
+     * 1년치는 100건(1페이지)을 넘으므로 전체 페이지를 모은다.
      */
     suspend fun getSchoolEvents(schoolId: String, year: Int, date: String? = null): List<SchoolEvent> {
         val (officeCode, schoolCode) = School.splitSchoolId(schoolId)
+        val academicYearStart = LocalDate.of(year, 3, 1)
+        val academicYearEnd = LocalDate.of(year + 1, 3, 1).minusDays(1)
         val params = buildMap {
             put("ATPT_OFCDC_SC_CODE", officeCode)
             put("SD_SCHUL_CODE", schoolCode)
-            put("AY", year.toString())
-            date?.let { put("AA_YMD", it) }
+            if (date != null) {
+                put("AA_YMD", date)
+            } else {
+                put("AA_FROM_YMD", academicYearStart.format(DateTimeFormatter.BASIC_ISO_DATE))
+                put("AA_TO_YMD", academicYearEnd.format(DateTimeFormatter.BASIC_ISO_DATE))
+            }
         }
-        return niceClient.getRows("SchoolSchedule", params, SchoolEventRow.serializer()).map { row ->
+        return niceClient.getAllRows("SchoolSchedule", params, SchoolEventRow.serializer()).map { row ->
             SchoolEvent(date = parseNiceDate(row.date, "AA_YMD"), name = row.name)
         }
     }
