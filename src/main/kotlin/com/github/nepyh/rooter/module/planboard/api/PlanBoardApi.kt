@@ -91,7 +91,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
         }.describe {
             tag("PlanBoard")
             summary = "플랜보드 수정"
-            description = "title/startDate/endDate 중 전달된 필드만 수정. 본인 보드만 가능"
+            description = "title/startDate/endDate/examDate 중 전달된 필드만 수정 (전달하지 않거나 null 인 필드는 변경 없음). 본인 보드만 가능"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<PlanBoardUpdateRequest>()
