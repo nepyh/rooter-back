@@ -90,6 +90,7 @@ class CalendarService {
                 .map {
                     PlanTaskResponse(
                         id = it.id.value,
+                        dailyPlanId = it.readValues[PlanTaskTable.dailyPlanId].value,
                         taskName = it.taskName,
                         startTime = it.startTime.toString(),
                         endTime = it.endTime.toString(),

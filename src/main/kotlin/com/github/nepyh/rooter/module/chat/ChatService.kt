@@ -175,6 +175,7 @@ class ChatService(
                 val keptTasks = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.map {
                     PlanTaskResponse(
                         id = it.id.value,
+                        dailyPlanId = dailyPlanId,
                         taskName = it.taskName,
                         startTime = it.startTime.toString(),
                         endTime = it.endTime.toString(),
@@ -192,6 +193,7 @@ class ChatService(
                     }
                     PlanTaskResponse(
                         id = planTask.id.value,
+                        dailyPlanId = dailyPlanId,
                         taskName = task.taskName,
                         startTime = task.startTime.toString(),
                         endTime = task.endTime.toString(),
