@@ -159,6 +159,35 @@ class SchoolDataFetcherTest : StringSpec({
         classParam shouldBe "3"
     }
 
+    "시간표는 기간을 주면 TI_FROM_YMD/TI_TO_YMD 로 걸고, 한 페이지를 넘으면 pIndex 로 모두 모은다" {
+        val requested = mutableListOf<Map<String, String?>>()
+        val fetcher = fetcherWith { request ->
+            val pageIndex = request.url.parameters["pIndex"]
+            requested += listOf("TI_FROM_YMD", "TI_TO_YMD", "pIndex").associateWith { request.url.parameters[it] }
+            val rows = when (pageIndex) {
+                null -> """{"ALL_TI_YMD":"20260928","PERIO":"1","ITRT_CNTNT":"국어","CLASS_NM":"1"}"""
+                "2" -> """{"ALL_TI_YMD":"20261009","PERIO":"6","ITRT_CNTNT":"수학","CLASS_NM":"1"}"""
+                else -> error("3페이지 이상은 요청하면 안 됨")
+            }
+            jsonResponse(
+                """
+                {"misTimetable":[{"head":[{"list_total_count":2},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[$rows]}]}
+                """.trimIndent()
+            )
+        }
+
+        val timetable = fetcher.getTimetable(
+            "B107132131", 2026, 2, 1, "1",
+            from = LocalDate.of(2026, 9, 28), to = LocalDate.of(2026, 10, 10)
+        )
+
+        requested shouldBe listOf(
+            mapOf("TI_FROM_YMD" to "20260928", "TI_TO_YMD" to "20261010", "pIndex" to null),
+            mapOf("TI_FROM_YMD" to "20260928", "TI_TO_YMD" to "20261010", "pIndex" to "2")
+        )
+        timetable.map { it.date to it.period } shouldBe listOf(LocalDate.of(2026, 9, 28) to 1, LocalDate.of(2026, 10, 9) to 6)
+    }
+
     "학사일정은 SchoolSchedule row 를 SchoolEvent 로 변환한다" {
         val fetcher = fetcherWith {
             jsonResponse(
