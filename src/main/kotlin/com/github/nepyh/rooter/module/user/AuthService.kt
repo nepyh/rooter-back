@@ -130,6 +130,7 @@ class AuthService(
             .sign(Algorithm.HMAC256(jwtSecret))
 
         return UserLoginResponse(
+            userId = user.id.value,
             email = user.email,
             username = user.username,
             token = token
