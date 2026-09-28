@@ -53,13 +53,17 @@ class SchoolDataFetcher(
      * 특정 학년/반의 중학교 시간표를 조회한다.
      * @param schoolId 합성 식별자 (예: "C107181084")
      * @param className 반 — 없으면 해당 학년 전체 반의 시간표가 반환됨 (학년 단위 기본값)
+     * @param from, to 조회 기간(TI_FROM_YMD/TI_TO_YMD) — 없으면 학기 전체. 학기 전체는 반 하나만 해도 수백 건이라
+     *   필요한 기간만 거는 게 좋다. 100건을 넘어도 모든 페이지를 모은다.
      */
     suspend fun getTimetable(
         schoolId: String,
         year: Int,
         semester: Int,
         grade: Int,
-        className: String? = null
+        className: String? = null,
+        from: LocalDate? = null,
+        to: LocalDate? = null
     ): List<TimetableEntry> {
         val (officeCode, schoolCode) = School.splitSchoolId(schoolId)
         val params = buildMap {
@@ -69,8 +73,10 @@ class SchoolDataFetcher(
             put("SEM", semester.toString())
             put("GRADE", grade.toString())
             className?.let { put("CLASS_NM", it) }
+            from?.let { put("TI_FROM_YMD", it.format(DateTimeFormatter.BASIC_ISO_DATE)) }
+            to?.let { put("TI_TO_YMD", it.format(DateTimeFormatter.BASIC_ISO_DATE)) }
         }
-        return niceClient.getRows("misTimetable", params, TimetableRow.serializer()).map { row ->
+        return niceClient.getAllRows("misTimetable", params, TimetableRow.serializer()).map { row ->
             TimetableEntry(
                 date = parseNiceDate(row.date, "ALL_TI_YMD"),
                 period = row.period.toIntOrNull() ?: 0,

@@ -42,7 +42,8 @@ class NiceApiClient(
 
     /**
      * [getRows] 와 같지만 list_total_count 를 보고 pIndex 를 넘겨가며 모든 페이지를 모아 반환한다.
-     * 한 페이지(pSize 100)를 넘을 수 있는 조회(예: 1년치 학사일정)에 쓴다. 호출 수 폭주를 막기 위해 [maxPages] 에서 멈춘다.
+     * 한 페이지를 넘을 수 있는 조회(예: 1년치 학사일정, 시간표)에 쓴다. 호출 수를 줄이려고 NICE 최대치인 1000건씩 요청하고,
+     * 호출 수 폭주를 막기 위해 [maxPages] 에서 멈춘다. (params 에 pSize 를 주면 그 값을 쓴다)
      */
     suspend fun <T> getAllRows(
         service: String,
@@ -50,12 +51,13 @@ class NiceApiClient(
         serializer: KSerializer<T>,
         maxPages: Int = DEFAULT_MAX_PAGES
     ): List<T> {
-        val first = fetchPage(service, params, serializer)
+        val pagedParams = mapOf("pSize" to ALL_ROWS_PAGE_SIZE) + params
+        val first = fetchPage(service, pagedParams, serializer)
         val rows = first.rows.toMutableList()
         var pageIndex = 1
         while (rows.size < first.totalCount && pageIndex < maxPages) {
             pageIndex++
-            val page = fetchPage(service, params + ("pIndex" to pageIndex.toString()), serializer)
+            val page = fetchPage(service, pagedParams + ("pIndex" to pageIndex.toString()), serializer)
             if (page.rows.isEmpty()) break
             rows += page.rows
         }
@@ -124,6 +126,7 @@ class NiceApiClient(
     companion object {
         const val DEFAULT_BASE_URL = "https://open.neis.go.kr/hub"
         const val MAX_PAGE_SIZE = "100"
+        const val ALL_ROWS_PAGE_SIZE = "1000" // NICE 한 번 요청 최대치 (넘으면 ERROR-336)
         const val DEFAULT_MAX_PAGES = 10
 
         val json = Json { ignoreUnknownKeys = true }
