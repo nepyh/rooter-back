@@ -11,6 +11,6 @@ data class UserInfoResponse(
     val grade: Int? = null,
     val classNumber: Int? = null,
     val createdAt: String,
-    val avatarImageKey: String? = null,
+    val avatarUrl: String? = null,
     val bio: String? = null
 )

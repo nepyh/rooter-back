@@ -29,9 +29,9 @@ object PlanTaskScheduler {
      * 날짜별 학습 불가 시간대를 만든다 (plan-generation 의 여러 날짜 생성, chat 재조정의
      * 하루짜리 범위 둘 다 이 함수로 통일해서 씀 — 재조정은 startDate == endDate 로 호출).
      *
-     * 사용자가 직접 등록한 시간대(customRows)가 있으면 그것만 쓰고(기존 동작 유지),
-     * 없으면 취침시간 기본값 + 평일 학교시간을 채우는데, 학교시간은 NICE 실시간 시간표로
-     * 그날의 마지막 교시를 조회해 하교시각을 계산한다 (실패/데이터없음 시 기존 기본값으로 폴백).
+     * 취침시간 기본값 + 평일 학교시간을 항상 채우고, 사용자가 직접 등록한 시간대(customRows)는
+     * 그 위에 더한다. 학교시간은 NICE 실시간 시간표로 그날의 마지막 교시를 조회해 하교시각을
+     * 계산한다 (실패/데이터없음 시 기존 기본값으로 폴백).
      */
     suspend fun buildUnavailableRanges(
         schoolDataFetcher: SchoolDataFetcher,
@@ -43,11 +43,7 @@ object PlanTaskScheduler {
         customRows: List<Pair<Int, Pair<Int, Int>>>
     ): Map<LocalDate, List<Pair<Int, Int>>> {
         val dates = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
-
-        if (customRows.isNotEmpty()) {
-            val byWeekday = customRows.groupBy({ it.first }, { it.second })
-            return dates.associateWith { date -> byWeekday[date.dayOfWeek.value].orEmpty() }
-        }
+        val customByWeekday = customRows.groupBy({ it.first }, { it.second })
 
         val dismissalMinutesByDate = if (schoolId != null) {
             runCatching { fetchDismissalMinutesByDate(schoolDataFetcher, schoolId, classNumber, grade, startDate, endDate) }.getOrElse { emptyMap() }
@@ -62,6 +58,7 @@ object PlanTaskScheduler {
                 val schoolHours = dismissalMinutesByDate[date]?.let { SCHOOL_START_MINUTES to it } ?: DEFAULT_SCHOOL_HOURS
                 ranges.add(schoolHours)
             }
+            ranges.addAll(customByWeekday[date.dayOfWeek.value].orEmpty())
             ranges
         }
     }
