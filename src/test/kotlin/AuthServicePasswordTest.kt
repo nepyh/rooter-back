@@ -3,7 +3,7 @@ import com.github.nepyh.rooter.module.storage.FileStorage
 import com.github.nepyh.rooter.module.storage.UploadableFile
 import com.github.nepyh.rooter.module.user.AuthService
 import com.github.nepyh.rooter.module.user.UserJwtValidator
-import com.github.nepyh.rooter.module.user.UserRepo
+import com.github.nepyh.rooter.module.user.ExposedUserRepo
 import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
@@ -66,7 +66,7 @@ class AuthServicePasswordTest : StringSpec({
         override suspend fun getUrl(fileKey: String): String? = error("사용되지 않아야 함")
         override suspend fun delete(fileKey: String) = error("사용되지 않아야 함")
     }
-    val userRepo = UserRepo()
+    val userRepo = ExposedUserRepo()
     val authService = AuthService(
         userRepo,
         UserService(userRepo, noopFileStorage),

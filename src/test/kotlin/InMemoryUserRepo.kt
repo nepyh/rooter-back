@@ -109,6 +109,7 @@ class InMemoryUserRepo : UserRepo {
     override fun updatePassword(userId: Int, hashedPassword: String): UserRow {
         val stored = users[userId] ?: throw UserNotFoundException()
         stored.password = hashedPassword
+        stored.tokenVersion += 1
         return stored.toRow()
     }
 
