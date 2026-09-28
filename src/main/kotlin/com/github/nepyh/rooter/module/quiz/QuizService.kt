@@ -38,52 +38,97 @@ import java.time.OffsetDateTime
 private const val DEFAULT_QUESTION_COUNT = 5
 private const val REVIEW_TASK_MINUTES = 20
 
+/** generateQuiz 의 첫 트랜잭션 결과 — 이미 있는 퀴즈를 돌려줄지, LLM 으로 새로 만들지 */
+private sealed interface QuizPreparation {
+    data class Existing(val quiz: QuizResponse) : QuizPreparation
+    data class New(val dailyPlanId: Int, val context: String) : QuizPreparation
+}
+
 class QuizService(
     private val llmClient: QuizLlmClient
 ) {
 
-    suspend fun generateQuiz(userId: Int, date: LocalDate): QuizResponse = newSuspendedTransaction {
-        // 소유자 확인을 위해 daily_plans + plan_boards 를 조인해야 해서 Table DSL 을 쓴다 (집계/조인은 DAO 대상 아님).
-        val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
-            .selectAll()
-            .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq userId) }
-            .firstOrNull()
-            ?: throw QuizValidationException.NoPlanForDateException()
+    /**
+     * 그날의 일일 퀴즈를 만든다. 이미 만들어진 퀴즈가 있으면 새로 만들지 않고 그대로 돌려준다
+     * (앱이 태스크를 완료할 때마다 불러도 문제가 계속 쌓이지 않게).
+     *
+     * LLM 호출(수 초)은 DB 트랜잭션 밖에서 하고, 저장할 때 일일 계획 행을 잠근 뒤 한 번 더 확인해서
+     * 동시에 두 번 요청돼도 한 세트만 저장되게 한다.
+     */
+    suspend fun generateQuiz(userId: Int, date: LocalDate): QuizResponse {
+        val prepared = newSuspendedTransaction {
+            // 소유자 확인을 위해 daily_plans + plan_boards 를 조인해야 해서 Table DSL 을 쓴다 (집계/조인은 DAO 대상 아님).
+            val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
+                .selectAll()
+                .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq userId) }
+                .firstOrNull()
+                ?: throw QuizValidationException.NoPlanForDateException()
 
-        val dailyPlanId = dailyPlanRow[DailyPlanTable.id].value
-        val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
+            val dailyPlanId = dailyPlanRow[DailyPlanTable.id].value
+            existingQuiz(dailyPlanId, date)?.let { return@newSuspendedTransaction QuizPreparation.Existing(it) }
 
-        val chapterNames = chapterNamesForPlanBoard(planBoardId)
-        val completedTaskNames = PlanTaskRow.find {
-            (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq true)
-        }.map { it.taskName }
+            val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
+            val chapterNames = chapterNamesForPlanBoard(planBoardId)
+            val completedTaskNames = PlanTaskRow.find {
+                (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq true)
+            }.map { it.taskName }
 
-        val context = buildString {
-            appendLine("학습 범위: ${chapterNames.joinToString(", ").ifBlank { "지정 안 됨" }}")
-            appendLine("오늘 완료한 학습: ${completedTaskNames.joinToString(", ").ifBlank { "없음" }}")
+            QuizPreparation.New(
+                dailyPlanId = dailyPlanId,
+                context = buildString {
+                    appendLine("학습 범위: ${chapterNames.joinToString(", ").ifBlank { "지정 안 됨" }}")
+                    appendLine("오늘 완료한 학습: ${completedTaskNames.joinToString(", ").ifBlank { "없음" }}")
+                }
+            )
+        }
+
+        val (dailyPlanId, context) = when (prepared) {
+            is QuizPreparation.Existing -> return prepared.quiz
+            is QuizPreparation.New -> prepared
         }
 
         val generated = llmClient.generateQuestions(context, DEFAULT_QUESTION_COUNT)
+        if (generated.isEmpty()) throw QuizValidationException.QuizGenerationFailedException()
 
-        val questions = generated.map { question ->
-            val quizQuestion = DailyQuizQuestionRow.new {
-                this.dailyPlan = DailyPlanRow[dailyPlanId]
-                questionText = question.questionText
-            }
+        return newSuspendedTransaction {
+            // 같은 일일 계획에 대한 동시 생성 요청을 직렬화한다 — 먼저 저장한 쪽의 퀴즈를 뒤 요청도 그대로 받는다
+            DailyPlanTable.selectAll().where { DailyPlanTable.id eq dailyPlanId }.forUpdate().single()
+            existingQuiz(dailyPlanId, date)?.let { return@newSuspendedTransaction it }
 
-            val choices = question.choices.mapIndexed { index, choiceText ->
-                val choice = DailyQuizChoiceRow.new {
-                    this.question = quizQuestion
-                    this.choiceText = choiceText
-                    isCorrect = index == question.correctIndex
+            val questions = generated.map { question ->
+                val quizQuestion = DailyQuizQuestionRow.new {
+                    this.dailyPlan = DailyPlanRow[dailyPlanId]
+                    questionText = question.questionText
                 }
-                QuizChoiceResponse(id = choice.id.value, choiceText = choiceText)
+
+                val choices = question.choices.mapIndexed { index, choiceText ->
+                    val choice = DailyQuizChoiceRow.new {
+                        this.question = quizQuestion
+                        this.choiceText = choiceText
+                        isCorrect = index == question.correctIndex
+                    }
+                    QuizChoiceResponse(id = choice.id.value, choiceText = choiceText)
+                }
+
+                QuizQuestionResponse(id = quizQuestion.id.value, questionText = question.questionText, choices = choices)
             }
 
-            QuizQuestionResponse(id = quizQuestion.id.value, questionText = question.questionText, choices = choices)
+            QuizResponse(dailyPlanId = dailyPlanId, quizDate = date.toString(), questions = questions)
         }
+    }
 
-        QuizResponse(dailyPlanId = dailyPlanId, quizDate = date.toString(), questions = questions)
+    /** 이미 저장된 퀴즈가 있으면 응답 형태로, 없으면 null. 트랜잭션 안에서 호출한다. */
+    private fun existingQuiz(dailyPlanId: Int, quizDate: LocalDate): QuizResponse? {
+        val questions = DailyQuizQuestionRow.find { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
+            .orderBy(DailyQuizQuestionTable.id to SortOrder.ASC)
+            .map { question ->
+                val choices = DailyQuizChoiceRow.find { DailyQuizChoiceTable.questionId eq question.id }
+                    .orderBy(DailyQuizChoiceTable.id to SortOrder.ASC)
+                    .map { QuizChoiceResponse(id = it.id.value, choiceText = it.choiceText) }
+
+                QuizQuestionResponse(id = question.id.value, questionText = question.questionText, choices = choices)
+            }
+        return if (questions.isEmpty()) null else QuizResponse(dailyPlanId = dailyPlanId, quizDate = quizDate.toString(), questions = questions)
     }
 
     suspend fun getQuiz(userId: Int, dailyPlanId: Int): QuizResponse = newSuspendedTransaction {
@@ -94,21 +139,7 @@ class QuizService(
             .firstOrNull()
             ?: throw QuizNotFoundException()
 
-        val questions = DailyQuizQuestionRow.find { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
-            .map { question ->
-                val choices = DailyQuizChoiceRow.find { DailyQuizChoiceTable.questionId eq question.id }
-                    .map { QuizChoiceResponse(id = it.id.value, choiceText = it.choiceText) }
-
-                QuizQuestionResponse(
-                    id = question.id.value,
-                    questionText = question.questionText,
-                    choices = choices
-                )
-            }
-
-        if (questions.isEmpty()) throw QuizNotFoundException()
-
-        QuizResponse(dailyPlanId = dailyPlanId, quizDate = dailyPlanRow[DailyPlanTable.planDate].toString(), questions = questions)
+        existingQuiz(dailyPlanId, dailyPlanRow[DailyPlanTable.planDate]) ?: throw QuizNotFoundException()
     }
 
     suspend fun submitQuiz(

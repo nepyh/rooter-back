@@ -44,7 +44,7 @@ private data class ChatCompletionChoice(val message: ChatMessage)
 @Serializable
 private data class ChatCompletionResponse(val choices: List<ChatCompletionChoice>)
 
-class QuizLlmClient(private val appConfig: AppConfig) {
+open class QuizLlmClient(private val appConfig: AppConfig) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -54,7 +54,7 @@ class QuizLlmClient(private val appConfig: AppConfig) {
         }
     }
 
-    suspend fun generateQuestions(context: String, count: Int): List<GeneratedQuestion> {
+    open suspend fun generateQuestions(context: String, count: Int): List<GeneratedQuestion> {
         val prompt = PromptLoader.load(
             "prompts/quiz-generation.md",
             "CONTEXT" to context,
