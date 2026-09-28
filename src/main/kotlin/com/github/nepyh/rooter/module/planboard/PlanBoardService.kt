@@ -48,6 +48,7 @@ class PlanBoardService {
                     title = it.title,
                     startDate = it.startDate.toString(),
                     endDate = it.endDate.toString(),
+                    examDate = it.examDate?.toString(),
                     createdAt = it.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
                 )
             }
@@ -62,6 +63,9 @@ class PlanBoardService {
             .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
         val endDate = runCatching { LocalDate.parse(request.endDate) }
             .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
+        val examDate = request.examDate?.let {
+            runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
+        }
 
         if (endDate.isBefore(startDate)) {
             throw PlanBoardValidationException.InvalidDateRangeException()
@@ -73,12 +77,13 @@ class PlanBoardService {
                 title = request.title
                 this.startDate = startDate
                 this.endDate = endDate
+                this.examDate = examDate
                 createdAt = OffsetDateTime.now()
             }.id.value
         }
     }
 
-    /** title/startDate/endDate 중 전달된 필드만 수정. 본인 보드만 가능 */
+    /** title/startDate/endDate/examDate 중 전달된 필드만 수정 (null 은 변경 없음). 본인 보드만 가능 */
     fun updateBoard(userId: Int, boardId: Int, request: PlanBoardUpdateRequest): PlanBoardResponse = transaction {
         val board = PlanBoardRow.findById(boardId) ?: throw PlanBoardNotFoundException()
         if (board.user.id.value != userId) throw PlanBoardForbiddenException()
@@ -98,11 +103,17 @@ class PlanBoardService {
         board.startDate = newStartDate
         board.endDate = newEndDate
 
+        request.examDate?.let {
+            board.examDate = runCatching { LocalDate.parse(it) }
+                .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
+        }
+
         PlanBoardResponse(
             id = board.id.value,
             title = board.title,
             startDate = board.startDate.toString(),
             endDate = board.endDate.toString(),
+            examDate = board.examDate?.toString(),
             createdAt = board.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
         )
     }
