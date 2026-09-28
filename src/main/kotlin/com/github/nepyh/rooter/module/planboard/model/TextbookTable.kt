@@ -4,8 +4,8 @@ import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
 import org.jetbrains.exposed.v1.dao.IntEntity
 import org.jetbrains.exposed.v1.dao.IntEntityClass
-import org.jetbrains.exposed.v1.javatime.CurrentDateTime
-import org.jetbrains.exposed.v1.javatime.datetime
+import org.jetbrains.exposed.v1.javatime.CurrentTimestampWithTimeZone
+import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
 
 object TextbookTable : IntIdTable("textbooks") {
     val subjectId = reference("subject_id", SubjectTable)
@@ -13,7 +13,7 @@ object TextbookTable : IntIdTable("textbooks") {
     val title = varchar("title", 150)
     val fileUrl = varchar("file_url", 500).nullable()
     val aiStatus = varchar("ai_status", 20).default("pending")
-    val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
+    val createdAt = timestampWithTimeZone("created_at").defaultExpression(CurrentTimestampWithTimeZone) // DDL: timestamptz
 }
 
 class TextbookRow(id: EntityID<Int>) : IntEntity(id) {
