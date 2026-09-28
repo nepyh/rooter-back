@@ -96,7 +96,7 @@ class PlanTaskService {
             .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
             .map { it.toResponse() }
 
-        DailyPlanResponse(planDate = targetDate.toString(), tasks = tasks)
+        DailyPlanResponse(dailyPlanId = dailyPlan.id.value, planDate = targetDate.toString(), tasks = tasks)
     }
 
     fun createTask(userId: Int, request: PlanTaskCreateRequest) = transaction {
@@ -211,6 +211,7 @@ class PlanTaskService {
 
     private fun PlanTaskRow.toResponse() = PlanTaskResponse(
         id = id.value,
+        dailyPlanId = readValues[PlanTaskTable.dailyPlanId].value,
         taskName = taskName,
         startTime = startTime.format(timeFormat),
         endTime = endTime.format(timeFormat),

@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class PlanTaskResponse(
     val id: Int,
+    val dailyPlanId: Int,         // 피드백·챗봇(/daily-plans/{dailyPlanId}/...) 호출용
     val taskName: String,
     val startTime: String,        // "17:30"
     val endTime: String,          // "19:30"
@@ -14,6 +15,9 @@ data class PlanTaskResponse(
 
 @Serializable
 data class DailyPlanResponse(
+    // 플랜보드 하나 기준 조회(/plan-boards/{id}/daily)에서만 채움. 여러 보드를 합치는 조회(/plan-tasks, /week)는
+    // 한 날짜에 일일 계획이 여러 개일 수 있어 null — 각 태스크의 dailyPlanId 를 쓸 것
+    val dailyPlanId: Int? = null,
     val planDate: String,         // "2026-06-30"
     val tasks: List<PlanTaskResponse>
 )
