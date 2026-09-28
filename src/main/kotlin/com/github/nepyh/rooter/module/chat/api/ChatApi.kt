@@ -1,16 +1,14 @@
 package com.github.nepyh.rooter.module.chat.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.chat.ChatService
 import com.github.nepyh.rooter.module.chat.dto.ChatMessageRequest
 import com.github.nepyh.rooter.module.chat.dto.ChatMessageResponse
 import com.github.nepyh.rooter.module.chat.dto.ChatTurnResponse
-import com.github.nepyh.rooter.module.chat.exception.ChatValidationException
-import com.github.nepyh.rooter.module.chat.exception.DailyPlanNotFoundException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
-import io.ktor.server.application.log
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.principal
@@ -25,25 +23,16 @@ import io.ktor.utils.io.ExperimentalKtorApi
 fun ChatApi(chatService: ChatService) = ApiRoute("daily-plans") {
     authenticate("auth-jwt") {
         post("/{dailyPlanId}/chat/message") {
-            try {
-                val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
-                if (dailyPlanId == null) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("message" to "잘못된 dailyPlanId 입니다."))
-                    return@post
-                }
-
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val request = call.receive<ChatMessageRequest>()
-                val response = chatService.sendMessage(userId, dailyPlanId, request.message)
-                call.respond(HttpStatusCode.OK, response)
-            } catch (_: DailyPlanNotFoundException) {
-                call.respond(HttpStatusCode.NotFound, mapOf("message" to "존재하지 않거나 본인 소유가 아닌 일일 계획입니다."))
-            } catch (e: ChatValidationException.MessageRequiredException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("code" to "CHAT_001", "message" to e.message))
-            } catch (e: Exception) {
-                call.application.log.error("챗봇 메시지 처리 중 오류 발생", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+            val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
+            if (dailyPlanId == null) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "잘못된 dailyPlanId 입니다."))
+                return@post
             }
+
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val request = call.receive<ChatMessageRequest>()
+            val response = chatService.sendMessage(userId, dailyPlanId, request.message)
+            call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("Chat")
             summary = "챗봇에게 메시지 보내기 (계획 재조정)"
@@ -64,13 +53,13 @@ fun ChatApi(chatService: ChatService) = ApiRoute("daily-plans") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "잘못된 dailyPlanId, 또는 메시지가 비어있음 (code=CHAT_001)"
+                    description = "잘못된 dailyPlanId (code=INVALID_ID), 또는 메시지가 비어있음 (code=CHAT_001)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 일일 계획"
+                    description = "존재하지 않거나 본인 소유가 아닌 일일 계획 (code=DAILY_PLAN_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -79,22 +68,15 @@ fun ChatApi(chatService: ChatService) = ApiRoute("daily-plans") {
         }
 
         get("/{dailyPlanId}/chat") {
-            try {
-                val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
-                if (dailyPlanId == null) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("message" to "잘못된 dailyPlanId 입니다."))
-                    return@get
-                }
-
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val history = chatService.getHistory(userId, dailyPlanId)
-                call.respond(HttpStatusCode.OK, history)
-            } catch (_: DailyPlanNotFoundException) {
-                call.respond(HttpStatusCode.NotFound, mapOf("message" to "존재하지 않거나 본인 소유가 아닌 일일 계획입니다."))
-            } catch (e: Exception) {
-                call.application.log.error("챗봇 대화 이력 조회 중 오류 발생", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+            val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
+            if (dailyPlanId == null) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "잘못된 dailyPlanId 입니다."))
+                return@get
             }
+
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val history = chatService.getHistory(userId, dailyPlanId)
+            call.respond(HttpStatusCode.OK, history)
         }.describe {
             tag("Chat")
             summary = "챗봇 대화 이력 조회"
@@ -107,13 +89,13 @@ fun ChatApi(chatService: ChatService) = ApiRoute("daily-plans") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "잘못된 dailyPlanId"
+                    description = "잘못된 dailyPlanId (code=INVALID_ID)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 일일 계획"
+                    description = "존재하지 않거나 본인 소유가 아닌 일일 계획 (code=DAILY_PLAN_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
