@@ -11,6 +11,7 @@ data class UserLoginRequest(
 
 @Serializable
 data class UserLoginResponse(
+    val userId: Int,
     val email: String,
     val username: String,
     val token: String
