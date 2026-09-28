@@ -33,6 +33,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.format.TextStyle
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /** 한 번의 챗봇 호출에 함께 실어 보내는 최근 대화 턴 수. 너무 길면 프롬프트가 불필요하게 커진다. */
@@ -61,6 +62,7 @@ class ChatService(
         val context = newSuspendedTransaction {
             val dailyPlanRow = requireOwnedDailyPlan(userId, dailyPlanId)
             val planDate = dailyPlanRow.planDate
+            val board = dailyPlanRow.planBoard
 
             // 이미 완료한 태스크는 재조정 대상이 아니다 — AI 에는 미완료 태스크만 보내고,
             // 완료 태스크의 시간대는 재배치할 때 막아둔다.
@@ -102,6 +104,7 @@ class ChatService(
                 classNumber = classNumber,
                 customUnavailableRows = customUnavailableRows,
                 studyStyleSummary = studyStyleSummary,
+                planBoardSummary = planBoardSummaryOf(board.title, board.startDate, board.endDate, board.examDate, planDate),
                 history = history
             )
         }
@@ -112,6 +115,7 @@ class ChatService(
             targetDate = "${context.planDate} (${context.dayOfWeekLabel})",
             currentTasksJson = json.encodeToString(context.pendingTasks.map { AiChatTask(it.first, it.second) }),
             chatHistoryJson = json.encodeToString(context.history),
+            planBoardSummary = context.planBoardSummary,
             userMessage = trimmed
         )
 
@@ -234,6 +238,23 @@ class ChatService(
     }
 }
 
+/**
+ * 챗봇 프롬프트의 <PLAN_BOARD> 에 넣는 플랜보드 요약. 학생이 시험 날짜·남은 기간을 물으면 AI 가 이 값으로 답한다
+ * (이게 없으면 AI 가 TARGET_DATE 를 시험일처럼 답했음). D-day 는 대화 중인 날짜(planDate) 기준.
+ */
+internal fun planBoardSummaryOf(title: String, startDate: LocalDate, endDate: LocalDate, examDate: LocalDate?, planDate: LocalDate): String {
+    val examLine = examDate?.let {
+        val days = ChronoUnit.DAYS.between(planDate, it)
+        val dDay = when {
+            days > 0 -> "D-$days"
+            days == 0L -> "D-day(오늘)"
+            else -> "이미 지남(${-days}일 전)"
+        }
+        "시험일: $it ($dDay)"
+    } ?: "시험일: 등록되지 않음"
+    return "플랜보드: $title\n학습 기간: $startDate ~ $endDate\n$examLine"
+}
+
 private data class ChatContext(
     val planDate: String,
     val dayOfWeekLabel: String,
@@ -244,5 +265,6 @@ private data class ChatContext(
     val classNumber: Int?,
     val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>,
     val studyStyleSummary: String,
+    val planBoardSummary: String,
     val history: List<AiChatTurn>
 )
