@@ -208,17 +208,7 @@ class PlanGenerationService(
         val subjectName = SubjectRow.findById(textbook.subject.id.value)?.name
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
 
-        val startChapter = ChapterRow.findById(input.startChapterId)
-            ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val endChapter = ChapterRow.findById(input.endChapterId)
-            ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        // 다른 교과서의 단원 id 를 섞어 보내는 경우를 막는다
-        if (listOf(startChapter, endChapter).any { it.readValues[ChapterTable.textbookId].value != textbook.id.value }) {
-            throw PlanBoardValidationException.InvalidSubjectRangeException()
-        }
-        if (startChapter.chapterOrder > endChapter.chapterOrder) {
-            throw PlanBoardValidationException.InvalidSubjectRangeException()
-        }
+        val (startChapter, endChapter) = resolveChapterRange(textbook, input.startChapterId, input.endChapterId)
 
         val topics = ChapterRow.find { ChapterTable.textbookId eq input.textbookId }
             .orderBy(ChapterTable.chapterOrder to SortOrder.ASC)
