@@ -124,6 +124,10 @@ class PlanBoardService {
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
         val endChapter = ChapterRow.findById(request.endChapterId)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
+        // 다른 교과서의 단원 id 를 섞어 보내는 경우를 막는다
+        if (listOf(startChapter, endChapter).any { it.readValues[ChapterTable.textbookId].value != textbook.id.value }) {
+            throw PlanBoardValidationException.InvalidSubjectRangeException()
+        }
         if (startChapter.chapterOrder > endChapter.chapterOrder) {
             throw PlanBoardValidationException.InvalidSubjectRangeException()
         }

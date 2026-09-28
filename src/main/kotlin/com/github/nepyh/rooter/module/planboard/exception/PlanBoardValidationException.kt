@@ -30,7 +30,7 @@ sealed class PlanBoardValidationException(
     class InvalidSubjectRangeException : PlanBoardValidationException(
         HttpStatusCode.BadRequest,
         "INVALID_SUBJECT_RANGE",
-        "존재하지 않는 교과서/단원이거나, 시작 단원이 끝 단원보다 뒤에 있습니다."
+        "존재하지 않는 교과서/단원이거나, 해당 교과서의 단원이 아니거나, 시작 단원이 끝 단원보다 뒤에 있습니다."
     )
     class MissingDateInfoException : PlanBoardValidationException(
         HttpStatusCode.BadRequest,
