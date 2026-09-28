@@ -4,11 +4,9 @@ import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.module.studystyle.StudyStyleService
 import com.github.nepyh.rooter.module.studystyle.dto.StudyStyleResponse
 import com.github.nepyh.rooter.module.studystyle.dto.StudyStyleSubmitRequest
-import com.github.nepyh.rooter.module.studystyle.exception.StudyStyleValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
-import io.ktor.server.application.log
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.principal
@@ -23,18 +21,11 @@ import io.ktor.utils.io.ExperimentalKtorApi
 fun StudyStyleApi(studyStyleService: StudyStyleService) = ApiRoute("study-style") {
     authenticate("auth-jwt") {
         post("") {
-            try {
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val request = call.receive<StudyStyleSubmitRequest>()
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val request = call.receive<StudyStyleSubmitRequest>()
 
-                val response = studyStyleService.submitAnswers(userId, request)
-                call.respond(HttpStatusCode.OK, response)
-            } catch (e: StudyStyleValidationException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("message" to e.message))
-            } catch (e: Exception) {
-                call.application.log.error("공부스타일 설문 제출 중 예외 발생", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-            }
+            val response = studyStyleService.submitAnswers(userId, request)
+            call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("StudyStyle")
             summary = "공부스타일 설문 제출"
@@ -52,7 +43,7 @@ fun StudyStyleApi(studyStyleService: StudyStyleService) = ApiRoute("study-style"
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "answers가 비어있거나, questionNumber/answerOption 범위 오류, 또는 같은 문항 중복 제출"
+                    description = "answers가 비어있음 (code=STUDY_STYLE_EMPTY_ANSWERS), questionNumber 범위 오류 (code=STUDY_STYLE_INVALID_QUESTION_NUMBER), answerOption 범위 오류 (code=STUDY_STYLE_INVALID_ANSWER_OPTION), 또는 같은 문항 중복 제출 (code=STUDY_STYLE_DUPLICATE_QUESTION_NUMBER)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

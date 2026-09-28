@@ -1,16 +1,14 @@
 package com.github.nepyh.rooter.module.taskquiz.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizSubmitRequest
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizSubmitResponse
-import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizNotFoundException
-import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
-import io.ktor.server.application.log
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.principal
@@ -25,19 +23,12 @@ import io.ktor.utils.io.ExperimentalKtorApi
 fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
     authenticate("auth-jwt") {
         get("{taskId}/quiz") {
-            try {
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val taskId = call.parameters["taskId"]?.toIntOrNull()
-                    ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val taskId = call.parameters["taskId"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
 
-                val response = taskQuizService.getCurrentQuiz(userId, taskId)
-                call.respond(HttpStatusCode.OK, response)
-            } catch (e: TaskQuizNotFoundException) {
-                call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-            } catch (e: Exception) {
-                call.application.log.error("태스크 완료 퀴즈 조회 중 예외 발생 (taskId=${call.parameters["taskId"]})", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-            }
+            val response = taskQuizService.getCurrentQuiz(userId, taskId)
+            call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("TaskQuiz")
             summary = "태스크 완료 확인 퀴즈 조회"
@@ -50,13 +41,13 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID"
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
-                    description = "아직 생성되지 않았거나 본인 소유가 아닌 태스크"
+                    description = "아직 생성되지 않았거나 본인 소유가 아닌 태스크 (code=TASK_QUIZ_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -65,22 +56,13 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
         }
 
         post("{taskId}/quiz/submit") {
-            try {
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val taskId = call.parameters["taskId"]?.toIntOrNull()
-                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
-                val request = call.receive<TaskQuizSubmitRequest>()
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val taskId = call.parameters["taskId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val request = call.receive<TaskQuizSubmitRequest>()
 
-                val response = taskQuizService.submitQuiz(userId, taskId, request.answers)
-                call.respond(HttpStatusCode.OK, response)
-            } catch (e: TaskQuizNotFoundException) {
-                call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-            } catch (e: TaskQuizValidationException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("message" to e.message))
-            } catch (e: Exception) {
-                call.application.log.error("태스크 완료 퀴즈 제출 중 예외 발생 (taskId=${call.parameters["taskId"]})", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-            }
+            val response = taskQuizService.submitQuiz(userId, taskId, request.answers)
+            call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("TaskQuiz")
             summary = "태스크 완료 확인 퀴즈 제출"
@@ -100,13 +82,13 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "이미 채점된 퀴즈, 또는 문제 구성과 맞지 않는 답안"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 이미 채점된 퀴즈 (code=TASK_QUIZ_ALREADY_SUBMITTED), 또는 문제 구성과 맞지 않는 답안 (code=TASK_QUIZ_INVALID_ANSWER)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
-                    description = "아직 생성되지 않았거나 본인 소유가 아닌 태스크"
+                    description = "아직 생성되지 않았거나 본인 소유가 아닌 태스크 (code=TASK_QUIZ_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"

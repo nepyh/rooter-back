@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.planboard.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.planboard.PlanBoardService
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateResponse
@@ -83,7 +84,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
 
         patch("{boardId}") {
             val boardId = call.parameters["boardId"]?.toIntOrNull()
-                ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val request = call.receive<PlanBoardUpdateRequest>()
             val response = planBoardService.updateBoard(call.userId(), boardId, request)
             call.respond(HttpStatusCode.OK, response)
@@ -104,7 +105,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID, 제목이 1~100자를 벗어남 (code=INVALID_TITLE), 날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠름 (code=INVALID_DATE_RANGE)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 제목이 1~100자를 벗어남 (code=INVALID_TITLE), 날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠름 (code=INVALID_DATE_RANGE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -123,7 +124,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
 
         delete("{boardId}") {
             val boardId = call.parameters["boardId"]?.toIntOrNull()
-                ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             planBoardService.deleteBoard(call.userId(), boardId)
             call.respond(HttpStatusCode.NoContent)
         }.describe {
@@ -135,7 +136,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     description = "삭제 성공"
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID"
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -154,7 +155,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
 
         post("{boardId}/subjects") {
             val boardId = call.parameters["boardId"]?.toIntOrNull()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val request = call.receive<PlanSubjectCreateRequest>()
             val response = planBoardService.addSubject(call.userId(), boardId, request)
             call.respond(HttpStatusCode.Created, response)
@@ -176,7 +177,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID, 또는 존재하지 않는 교과서/단원이거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 존재하지 않는 교과서/단원이거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -195,7 +196,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
 
         get("{boardId}/subjects") {
             val boardId = call.parameters["boardId"]?.toIntOrNull()
-                ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val response = planBoardService.getSubjects(call.userId(), boardId)
             call.respond(HttpStatusCode.OK, response)
         }.describe {
@@ -210,7 +211,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID"
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -229,9 +230,9 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
 
         patch("{boardId}/subjects/{subjectId}") {
             val boardId = call.parameters["boardId"]?.toIntOrNull()
-                ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val subjectId = call.parameters["subjectId"]?.toIntOrNull()
-                ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val request = call.receive<PlanSubjectCreateRequest>()
             val response = planBoardService.updateSubject(call.userId(), boardId, subjectId, request)
             call.respond(HttpStatusCode.OK, response)
@@ -252,7 +253,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID, 또는 존재하지 않는 교과서/단원이거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 존재하지 않는 교과서/단원이거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -271,9 +272,9 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
 
         delete("{boardId}/subjects/{subjectId}") {
             val boardId = call.parameters["boardId"]?.toIntOrNull()
-                ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val subjectId = call.parameters["subjectId"]?.toIntOrNull()
-                ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             planBoardService.deleteSubject(call.userId(), boardId, subjectId)
             call.respond(HttpStatusCode.NoContent)
         }.describe {
@@ -285,7 +286,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     description = "삭제 성공"
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID"
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
