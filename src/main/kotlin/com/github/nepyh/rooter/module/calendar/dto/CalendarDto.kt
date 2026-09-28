@@ -42,6 +42,13 @@ data class CalendarEventCreateRequest(
 )
 
 @Serializable
+data class CalendarEventUpdateRequest(
+    val title: String? = null,
+    val eventDate: String? = null,   // "2026-07-01"
+    val memo: String? = null
+)
+
+@Serializable
 data class CalendarEventResponse(
     val id: Int,
     val title: String,
