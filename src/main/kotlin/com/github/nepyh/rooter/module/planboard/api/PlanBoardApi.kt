@@ -177,7 +177,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 존재하지 않는 교과서/단원이거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 존재하지 않는 교과서/단원이거나 요청한 교과서의 단원이 아니거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -253,7 +253,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 존재하지 않는 교과서/단원이거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 존재하지 않는 교과서/단원이거나 요청한 교과서의 단원이 아니거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

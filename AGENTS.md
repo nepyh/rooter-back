@@ -88,6 +88,10 @@ class PlanBoardRow(id: EntityID<Int>) : IntEntity(id) {
 예외는 `sealed class` 로 만들고 `status`·`code`·메시지를 예외 자신이 들고 있게 합니다.
 그리고 `AppModule.kt` 의 `StatusPages` 에 매핑합니다. **API 핸들러 안에서 try-catch 하지 않습니다.**
 
+한 `code` 가 여러 사유를 덮을 수 있습니다. 그때는 사유를 `message` 에만 나열하고 `code` 는 그대로 둡니다.
+(예: `INVALID_SUBJECT_RANGE` = 존재하지 않는 교과서·단원 / 요청한 교과서의 단원이 아님 / 시작 단원이 끝 단원보다 뒤)
+프론트가 사유별로 다르게 분기해야 하는 상황이면 `message` 를 파싱하지 말고 **새 `code` 를 추가**합니다.
+
 ```kotlin
 sealed class PlanBoardValidationException(
     val status: HttpStatusCode, val code: String, message: String
