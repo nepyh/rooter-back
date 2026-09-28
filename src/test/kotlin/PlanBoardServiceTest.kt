@@ -10,6 +10,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import com.github.nepyh.rooter.module.planboard.PlanBoardService
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
+import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
+import com.github.nepyh.rooter.module.planboard.orderedTextbookChapters
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectCreateRequest
@@ -153,6 +155,16 @@ class PlanBoardServiceTest : StringSpec({
         }.id.value
     }
 
+    /** 소단원(대단원 안에서 chapter_order 가 다시 1부터 시작하는 계층) 시드 */
+    fun seedSubChapter(textbookId: Int, parentId: Int, order: Int, name: String = "${order}단원"): Int = transaction(db) {
+        ChapterRow.new {
+            textbook = TextbookRow[textbookId]
+            this.parentId = parentId
+            chapterName = name
+            chapterOrder = order
+        }.id.value
+    }
+
     // ---- createBoard ----
 
     "createBoard: 제목이 비어있으면 InvalidTitleException" {
@@ -274,6 +286,105 @@ class PlanBoardServiceTest : StringSpec({
 
         shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
             planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(textbookId, chapter2, chapter1))
+        }
+    }
+
+    // ---- 단원 계층(대단원/소단원) 순서 ----
+
+    "addSubject: 계층에서 트리 순서상 앞뒤인 범위는 통과한다 (대단원1 소단원 order 5 -> 대단원2 소단원 order 2)" {
+        val userId = seedUser("subject-hierarchy-ok@test.com")
+        val boardId = seedBoard(userId)
+        val textbookId = seedTextbook(seedSubject("수학"))
+        val major1 = seedChapter(textbookId, 1, "1단원")
+        val major2 = seedChapter(textbookId, 2, "2단원")
+        val sub15 = seedSubChapter(textbookId, major1, 5, "1-5 소단원")
+        val sub21 = seedSubChapter(textbookId, major2, 1, "2-1 소단원")
+        val sub22 = seedSubChapter(textbookId, major2, 2, "2-2 소단원")
+
+        // chapter_order 만 보면 5 > 2 라 거부되던 요청 (트리 순서로는 1단원 -> 2단원)
+        val created = planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(textbookId, sub15, sub22))
+
+        created.startChapterId shouldBe sub15
+        created.endChapterId shouldBe sub22
+    }
+
+    "addSubject: 계층에서 트리 순서상 뒤->앞이면 InvalidSubjectRangeException" {
+        val userId = seedUser("subject-hierarchy-wrongorder@test.com")
+        val boardId = seedBoard(userId)
+        val textbookId = seedTextbook(seedSubject("수학"))
+        val major1 = seedChapter(textbookId, 1, "1단원")
+        val major2 = seedChapter(textbookId, 2, "2단원")
+        val sub11 = seedSubChapter(textbookId, major1, 1, "1-1 소단원")
+        val sub21 = seedSubChapter(textbookId, major2, 1, "2-1 소단원")
+        val sub23 = seedSubChapter(textbookId, major2, 3, "2-3 소단원")
+
+        // chapter_order 는 3 >= 1 이지만 트리 순서로는 2단원 -> 1단원 이므로 거부
+        shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
+            planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(textbookId, sub23, sub11))
+        }
+        // 같은 대단원 안에서의 order 역순도 거부
+        shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
+            planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(textbookId, sub23, sub21))
+        }
+    }
+
+    "orderedChaptersInRange: chapter_order 가 겹치는 다른 대단원의 소단원을 포함하지 않는다" {
+        val textbookId = seedTextbook(seedSubject("과학"))
+        val major1 = seedChapter(textbookId, 1, "1단원")
+        val sub11 = seedSubChapter(textbookId, major1, 1, "1-1 소단원")
+        val sub12 = seedSubChapter(textbookId, major1, 2, "1-2 소단원")
+        val sub13 = seedSubChapter(textbookId, major1, 5, "1-3 소단원")
+        val major2 = seedChapter(textbookId, 2, "2단원")
+        val sub21 = seedSubChapter(textbookId, major2, 1, "2-1 소단원")
+        val sub22 = seedSubChapter(textbookId, major2, 2, "2-2 소단원")
+
+        fun rangeNames(startId: Int, endId: Int): List<String> = transaction(db) {
+            orderedChaptersInRange(TextbookRow[textbookId], ChapterRow[startId], ChapterRow[endId])
+                .map { it.chapterName }
+        }
+
+        // chapter_order in 1..2 로 뽑던 예전 로직은 2단원(대단원2)의 소단원까지 긁었다
+        rangeNames(sub11, sub12) shouldBe listOf("1-1 소단원", "1-2 소단원")
+        // 시작이 대단원이면 그 대단원부터, 끝이 대단원이면 그 대단원의 소단원까지 포함한다
+        rangeNames(major1, sub12) shouldBe listOf("1단원", "1-1 소단원", "1-2 소단원")
+        rangeNames(major1, major2) shouldBe listOf("1단원", "1-1 소단원", "1-2 소단원", "1-3 소단원", "2단원", "2-1 소단원", "2-2 소단원")
+        // 소단원에서 시작하면 앞 대단원은 범위에 들어오지 않는다
+        rangeNames(sub13, sub22) shouldBe listOf("1-3 소단원", "2단원", "2-1 소단원", "2-2 소단원")
+    }
+
+    "orderedChaptersInRange: 고아 parent_id 와 순환 참조가 있어도 무한 루프 없이 순서를 만든다" {
+        val textbookId = seedTextbook(seedSubject("국어"))
+        val major = seedChapter(textbookId, 1, "1단원")
+        seedSubChapter(textbookId, major, 1, "1-1 소단원")
+        val orphan = seedSubChapter(textbookId, 999999, 2, "고아 소단원") // 없는 부모를 가리키는 행
+        val cycleX = seedChapter(textbookId, 9, "순환 X")
+        val cycleY = seedSubChapter(textbookId, cycleX, 1, "순환 Y")
+        transaction(db) { ChapterRow[cycleX].parentId = cycleY } // X -> Y, Y -> X 순환
+
+        val ordered = transaction(db) { orderedTextbookChapters(textbookId) }
+        val ids = ordered.map { it.id.value }
+
+        ids.size shouldBe 5                      // 누락 없이 전부 포함
+        ids.toSet().size shouldBe ids.size       // 중복 없이 한 번씩만
+        ids.contains(orphan) shouldBe true
+        ids.contains(cycleX) shouldBe true
+        ids.contains(cycleY) shouldBe true
+    }
+
+    "addSubject: 계층이 있어도 다른 교과서의 소단원이 섞이면 InvalidSubjectRangeException" {
+        val userId = seedUser("subject-hierarchy-other@test.com")
+        val boardId = seedBoard(userId)
+        val science = seedTextbook(seedSubject("과학"), title = "과학")
+        val history = seedTextbook(seedSubject("역사"), title = "역사")
+        val scienceMajor = seedChapter(science, 1, "1단원")
+        val scienceSub = seedSubChapter(science, scienceMajor, 5, "1-5 소단원")
+        val historyMajor = seedChapter(history, 1, "1단원")
+        val historySub = seedSubChapter(history, historyMajor, 1, "1-1 소단원")
+
+        listOf(scienceSub to historySub, historySub to scienceSub).forEach { (start, end) ->
+            shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
+                planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(science, start, end))
+            }
         }
     }
 
