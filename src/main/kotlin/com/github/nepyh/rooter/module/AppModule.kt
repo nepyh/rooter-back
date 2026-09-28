@@ -27,6 +27,19 @@ import com.github.nepyh.rooter.module.school.exception.NiceApiException
 import com.github.nepyh.rooter.module.storage.FileStorageModule
 import com.github.nepyh.rooter.module.studystyle.StudyStyleModule
 import com.github.nepyh.rooter.module.swagger.SwaggerDocsModule
+import com.github.nepyh.rooter.module.chat.exception.ChatValidationException
+import com.github.nepyh.rooter.module.chat.exception.DailyPlanNotFoundException as ChatDailyPlanNotFoundException
+import com.github.nepyh.rooter.module.feedback.exception.DailyPlanNotFoundException as FeedbackDailyPlanNotFoundException
+import com.github.nepyh.rooter.module.feedback.exception.FeedbackAlreadySubmittedException
+import com.github.nepyh.rooter.module.feedback.exception.FeedbackNotFoundException
+import com.github.nepyh.rooter.module.feedback.exception.FeedbackValidationException
+import com.github.nepyh.rooter.module.leveltest.exception.LevelTestNotFoundException
+import com.github.nepyh.rooter.module.leveltest.exception.LevelTestValidationException
+import com.github.nepyh.rooter.module.quiz.exception.QuizNotFoundException
+import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
+import com.github.nepyh.rooter.module.studystyle.exception.StudyStyleValidationException
+import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizNotFoundException
+import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizValidationException
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizModule
 import com.github.nepyh.rooter.module.user.UserModule
 import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundException
@@ -119,6 +132,45 @@ fun Application.configureAppModule() {
         }
         exception<PlanSubjectNotFoundException> { call, cause ->
             call.respondError(HttpStatusCode.NotFound, "PLAN_SUBJECT_NOT_FOUND", cause.message)
+        }
+        exception<ChatDailyPlanNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "DAILY_PLAN_NOT_FOUND", cause.message)
+        }
+        exception<FeedbackDailyPlanNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "DAILY_PLAN_NOT_FOUND", cause.message)
+        }
+        exception<ChatValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<FeedbackNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "FEEDBACK_NOT_FOUND", cause.message)
+        }
+        exception<FeedbackAlreadySubmittedException> { call, cause ->
+            call.respondError(HttpStatusCode.Conflict, "FEEDBACK_ALREADY_SUBMITTED", cause.message)
+        }
+        exception<FeedbackValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<QuizNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "QUIZ_NOT_FOUND", cause.message)
+        }
+        exception<QuizValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<TaskQuizNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "TASK_QUIZ_NOT_FOUND", cause.message)
+        }
+        exception<TaskQuizValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<LevelTestNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "LEVEL_TEST_NOT_FOUND", cause.message)
+        }
+        exception<LevelTestValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<StudyStyleValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
         }
         exception<BadRequestException> { call, _ ->
             call.respondError(HttpStatusCode.BadRequest, "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다.")

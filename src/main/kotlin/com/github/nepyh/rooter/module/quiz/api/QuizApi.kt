@@ -1,17 +1,16 @@
 package com.github.nepyh.rooter.module.quiz.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.quiz.QuizService
 import com.github.nepyh.rooter.module.quiz.dto.QuizGenerateRequest
 import com.github.nepyh.rooter.module.quiz.dto.QuizResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizResultResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizSubmitRequest
-import com.github.nepyh.rooter.module.quiz.exception.QuizNotFoundException
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
-import io.ktor.server.application.log
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.principal
@@ -27,21 +26,14 @@ import java.time.LocalDate
 fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
     authenticate("auth-jwt") {
         post("generate") {
-            try {
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val request = call.receive<QuizGenerateRequest>()
-                val date = request.date
-                    ?.let { runCatching { LocalDate.parse(it) }.getOrElse { throw QuizValidationException.InvalidDateFormatException() } }
-                    ?: LocalDate.now()
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val request = call.receive<QuizGenerateRequest>()
+            val date = request.date
+                ?.let { runCatching { LocalDate.parse(it) }.getOrElse { throw QuizValidationException.InvalidDateFormatException() } }
+                ?: LocalDate.now()
 
-                val response = quizService.generateQuiz(userId, date)
-                call.respond(HttpStatusCode.Created, response)
-            } catch (e: QuizValidationException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("message" to e.message))
-            } catch (e: Exception) {
-                call.application.log.error("퀴즈 생성 중 예외 발생", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-            }
+            val response = quizService.generateQuiz(userId, date)
+            call.respond(HttpStatusCode.Created, response)
         }.describe {
             tag("Quiz")
             summary = "일일 퀴즈 생성"
@@ -59,7 +51,7 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "날짜 형식 오류, 해당 날짜에 계획 없음, 또는 퀴즈 생성 실패"
+                    description = "날짜 형식 오류 (code=QUIZ_INVALID_DATE), 해당 날짜에 계획 없음 (code=QUIZ_NO_PLAN_FOR_DATE), 또는 퀴즈 생성 실패 (code=QUIZ_GENERATION_FAILED)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -71,19 +63,12 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
         }
 
         get("{dailyPlanId}") {
-            try {
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
-                    ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
 
-                val response = quizService.getQuiz(userId, dailyPlanId)
-                call.respond(HttpStatusCode.OK, response)
-            } catch (e: QuizNotFoundException) {
-                call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-            } catch (e: Exception) {
-                call.application.log.error("퀴즈 조회 중 예외 발생 (dailyPlanId=${call.parameters["dailyPlanId"]})", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-            }
+            val response = quizService.getQuiz(userId, dailyPlanId)
+            call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("Quiz")
             summary = "퀴즈 문제 조회"
@@ -103,13 +88,13 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID"
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 퀴즈"
+                    description = "존재하지 않거나 본인 소유가 아닌 퀴즈 (code=QUIZ_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -118,22 +103,13 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
         }
 
         post("{dailyPlanId}/submit") {
-            try {
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
-                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
-                val request = call.receive<QuizSubmitRequest>()
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val request = call.receive<QuizSubmitRequest>()
 
-                val response = quizService.submitQuiz(userId, dailyPlanId, request.answers)
-                call.respond(HttpStatusCode.OK, response)
-            } catch (e: QuizNotFoundException) {
-                call.respond(HttpStatusCode.NotFound, mapOf("message" to e.message))
-            } catch (e: QuizValidationException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("message" to e.message))
-            } catch (e: Exception) {
-                call.application.log.error("퀴즈 제출 중 예외 발생 (dailyPlanId=${call.parameters["dailyPlanId"]})", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
-            }
+            val response = quizService.submitQuiz(userId, dailyPlanId, request.answers)
+            call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("Quiz")
             summary = "퀴즈 제출 및 채점"
@@ -158,13 +134,13 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "이미 제출했거나, 문제 구성과 맞지 않는 답안"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 이미 제출함 (code=QUIZ_ALREADY_SUBMITTED), 또는 문제 구성과 맞지 않는 답안 (code=QUIZ_INVALID_ANSWER)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 퀴즈"
+                    description = "존재하지 않거나 본인 소유가 아닌 퀴즈 (code=QUIZ_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"

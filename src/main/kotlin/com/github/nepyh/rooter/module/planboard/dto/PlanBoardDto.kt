@@ -6,7 +6,8 @@ import kotlinx.serialization.Serializable
 data class PlanBoardCreateRequest(
     val title: String,
     val startDate: String,
-    val endDate: String
+    val endDate: String,
+    val examDate: String? = null
 )
 
 @Serializable
@@ -15,6 +16,7 @@ data class PlanBoardResponse(
     val title: String,
     val startDate: String,
     val endDate: String,
+    val examDate: String?,
     val createdAt: String
 )
 
@@ -28,5 +30,6 @@ data class PlanBoardCreateResponse(
 data class PlanBoardUpdateRequest(
     val title: String? = null,
     val startDate: String? = null,
-    val endDate: String? = null
+    val endDate: String? = null,
+    val examDate: String? = null
 )

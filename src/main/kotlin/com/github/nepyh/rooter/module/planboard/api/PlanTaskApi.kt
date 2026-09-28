@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.planboard.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCompleteRequest
@@ -63,7 +64,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.BadRequest {
-                    description = "date 파라미터 형식이 올바르지 않음 (code=TASK_006)"
+                    description = "date 파라미터 형식이 올바르지 않음 (code=INVALID_DATE_PARAM)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -104,7 +105,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.BadRequest {
-                    description = "date 파라미터 형식이 올바르지 않음"
+                    description = "date 파라미터 형식이 올바르지 않음 (code=INVALID_DATE_PARAM)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -150,7 +151,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
 
         patch("{taskId}/complete") {
             val taskId = call.parameters["taskId"]?.toIntOrNull()
-                ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val request = call.receive<PlanTaskCompleteRequest>()
 
             val response = planTaskService.completeTask(call.userId(), taskId, request.isCompleted)
@@ -179,7 +180,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID"
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -195,7 +196,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
 
         patch("{taskId}") {
             val taskId = call.parameters["taskId"]?.toIntOrNull()
-                ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val request = call.receive<PlanTaskUpdateRequest>()
 
             val response = planTaskService.updateTask(call.userId(), taskId, request)
@@ -224,7 +225,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID, 태스크 이름 오류 (code=INVALID_TASK_NAME), 시간 형식 오류 (code=INVALID_TIME_FORMAT), " +
+                    description = "유효하지 않은 ID (code=INVALID_ID), 태스크 이름 오류 (code=INVALID_TASK_NAME), 시간 형식 오류 (code=INVALID_TIME_FORMAT), " +
                         "종료 시간이 시작 시간보다 빠르거나 같음 (code=INVALID_TIME_RANGE), 또는 예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES)"
                 }
                 HttpStatusCode.Unauthorized {
@@ -241,7 +242,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
 
         delete("{taskId}") {
             val taskId = call.parameters["taskId"]?.toIntOrNull()
-                ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("message" to "유효하지 않은 ID입니다."))
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
 
             planTaskService.deleteTask(call.userId(), taskId)
             call.respond(HttpStatusCode.NoContent)
@@ -261,7 +262,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     description = "삭제 성공"
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID"
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
