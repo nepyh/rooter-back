@@ -39,7 +39,7 @@ fun DailyPlanApi(planTaskService: PlanTaskService) = ApiRoute("plan-boards") {
         }.describe {
             tag("DailyPlan")
             summary = "오늘의 스터디 플랜 조회"
-            description = "본인 플랜보드만 조회 가능"
+            description = "본인 플랜보드만 조회 가능. 응답 dailyPlanId 로 피드백·챗봇(/daily-plans/{dailyPlanId}/...)을 호출 (해당 날짜 일일 계획이 없으면 null)"
             responses {
                 HttpStatusCode.OK {
                     description = "조회 성공 (해당 날짜 계획이 없으면 tasks 빈 배열)"
