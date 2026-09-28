@@ -1,7 +1,6 @@
 package com.github.nepyh.rooter.module.quiz
 
-import com.github.nepyh.rooter.module.planboard.model.ChapterRow
-import com.github.nepyh.rooter.module.planboard.model.ChapterTable
+import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
@@ -217,12 +216,9 @@ class QuizService(
         val planSubjects = PlanSubjectRow.find { PlanSubjectTable.planBoardId eq planBoardId }.toList()
 
         return planSubjects.flatMap { planSubject ->
-            val startChapter = planSubject.startChapter
-            val endChapter = planSubject.endChapter
-
-            ChapterRow.find { ChapterTable.textbookId eq planSubject.textbook.id.value }
-                .orderBy(ChapterTable.chapterOrder to SortOrder.ASC)
-                .filter { it.chapterOrder in startChapter.chapterOrder..endChapter.chapterOrder }
+            // 범위 선택은 planboard 의 트리 순회 순서 함수를 그대로 쓴다.
+            // 예전엔 chapter_order 만 비교해서 두 대단원의 소단원이 섞여 들어왔다.
+            orderedChaptersInRange(planSubject.textbook, planSubject.startChapter, planSubject.endChapter)
                 .map { it.chapterName }
         }
     }
