@@ -9,7 +9,6 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationSubjectInput
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationTaskResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
-import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
@@ -210,10 +209,9 @@ class PlanGenerationService(
 
         val (startChapter, endChapter) = resolveChapterRange(textbook, input.startChapterId, input.endChapterId)
 
-        val topics = ChapterRow.find { ChapterTable.textbookId eq input.textbookId }
-            .orderBy(ChapterTable.chapterOrder to SortOrder.ASC)
-            .filter { it.chapterOrder in startChapter.chapterOrder..endChapter.chapterOrder }
-            .map { it.chapterName }
+        // 범위 선택은 검증과 같은 트리 순회 순서(대단원 → 소단원)를 쓴다.
+        // 예전엔 chapter_order 만 비교해 소단원의 order 가 대단원 안에서 다시 1부터 시작하는 계층을 무시했다.
+        val topics = orderedChaptersInRange(textbook, startChapter, endChapter).map { it.chapterName }
 
         val allTopics = if (input.customRangeText.isNullOrBlank()) topics else topics + input.customRangeText
 
