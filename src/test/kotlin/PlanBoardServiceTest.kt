@@ -573,6 +573,55 @@ class PlanBoardServiceTest : StringSpec({
 
         result.tasks.map { it.taskName } shouldBe listOf("보드A 태스크", "보드B 태스크")
     }
+
+    fun dailyPlanIdOf(boardId: Int, date: LocalDate): Int = transaction(db) {
+        DailyPlanRow.find { (DailyPlanTable.planBoardId eq boardId) and (DailyPlanTable.planDate eq date) }
+            .single().id.value
+    }
+
+    "dailyPlanId: 여러 보드를 합치는 일간·주간 조회는 태스크마다 자기 보드의 dailyPlanId 를 주고 최상위는 null" {
+        val userId = seedUser("dp-id@test.com")
+        val boardA = seedBoard(userId)
+        val boardB = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardA, taskName = "A", startTime = "09:00", endTime = "10:00"))
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardB, taskName = "B", startTime = "19:00", endTime = "20:00"))
+        val date = LocalDate.of(2026, 7, 15)
+        val expected = listOf("A" to dailyPlanIdOf(boardA, date), "B" to dailyPlanIdOf(boardB, date))
+
+        val daily = planTaskService.getDailyPlan(userId, date)
+        daily.dailyPlanId shouldBe null
+        daily.tasks.map { it.taskName to it.dailyPlanId } shouldBe expected
+
+        val weekDay = planTaskService.getWeeklyPlan(userId, date).days.single { it.planDate == "2026-07-15" }
+        weekDay.dailyPlanId shouldBe null
+        weekDay.tasks.map { it.taskName to it.dailyPlanId } shouldBe expected
+    }
+
+    "dailyPlanId: 보드 하나 기준 일간 조회는 최상위와 태스크 모두 그 보드의 dailyPlanId 를 준다" {
+        val userId = seedUser("dp-board@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+        val date = LocalDate.of(2026, 7, 15)
+        val dailyPlanId = dailyPlanIdOf(boardId, date)
+
+        val result = planTaskService.getBoardDailyPlan(userId, boardId, date)
+
+        result.dailyPlanId shouldBe dailyPlanId
+        result.tasks.map { it.dailyPlanId } shouldBe listOf(dailyPlanId)
+        // 일일 계획이 없는 날짜는 null
+        planTaskService.getBoardDailyPlan(userId, boardId, LocalDate.of(2026, 7, 20)).dailyPlanId shouldBe null
+    }
+
+    "dailyPlanId: 태스크 수정·완료 응답에도 dailyPlanId 가 들어간다" {
+        val userId = seedUser("dp-update@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+        val dailyPlanId = dailyPlanIdOf(boardId, LocalDate.of(2026, 7, 15))
+        val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
+
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).dailyPlanId shouldBe dailyPlanId
+        planTaskService.completeTask(userId, taskId, true).dailyPlanId shouldBe dailyPlanId
+    }
 })
 
 private fun taskRequest(
