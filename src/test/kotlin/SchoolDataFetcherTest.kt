@@ -82,6 +82,33 @@ class SchoolDataFetcherTest : StringSpec({
         fetcher.searchSchools("없는학교").shouldBeEmpty()
     }
 
+    "실제 NICE 의 데이터 없음 응답(서비스 블록 없이 최상위 RESULT 만)도 빈 목록을 반환한다" {
+        val fetcher = fetcherWith {
+            jsonResponse("""{"RESULT":{"CODE":"INFO-200","MESSAGE":"해당하는 데이터가 없습니다."}}""")
+        }
+
+        fetcher.searchSchools("zzzzqqq").shouldBeEmpty()
+        fetcher.getExamScheduleCandidates("C107181084", 2026).shouldBeEmpty()
+    }
+
+    "실제 NICE 의 오류 응답(최상위 RESULT 의 ERROR-xxx)은 코드에 맞는 예외로 변환한다" {
+        fun fetcherReturning(code: String) = fetcherWith {
+            jsonResponse("""{"RESULT":{"CODE":"$code","MESSAGE":"오류 메시지"}}""")
+        }
+
+        shouldThrow<NiceApiException.InvalidKeyException> { fetcherReturning("ERROR-290").searchSchools("서울") }
+        shouldThrow<NiceApiException.BadRequestException> { fetcherReturning("ERROR-300").searchSchools("서울") }
+        shouldThrow<NiceApiException.BadRequestException> { fetcherReturning("ERROR-336").searchSchools("서울") }
+        shouldThrow<NiceApiException.RateLimitedException> { fetcherReturning("ERROR-337").searchSchools("서울") }
+        shouldThrow<NiceApiException.ServerException> { fetcherReturning("ERROR-500").searchSchools("서울") }
+    }
+
+    "서비스 블록도 최상위 RESULT 도 없으면 UnexpectedResponseException 을 던진다" {
+        val fetcher = fetcherWith { jsonResponse("""{"somethingElse":[]}""") }
+
+        shouldThrow<NiceApiException.UnexpectedResponseException> { fetcher.searchSchools("서울") }
+    }
+
     "인증키 오류(INFO-100) 는 InvalidKeyException 으로 변환한다" {
         val fetcher = fetcherWith {
             jsonResponse(
