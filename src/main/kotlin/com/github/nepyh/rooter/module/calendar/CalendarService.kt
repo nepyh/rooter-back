@@ -3,6 +3,7 @@ package com.github.nepyh.rooter.module.calendar
 import com.github.nepyh.rooter.module.calendar.dto.CalendarDayResponse
 import com.github.nepyh.rooter.module.calendar.dto.CalendarEventCreateRequest
 import com.github.nepyh.rooter.module.calendar.dto.CalendarEventResponse
+import com.github.nepyh.rooter.module.calendar.dto.CalendarEventUpdateRequest
 import com.github.nepyh.rooter.module.calendar.dto.CalendarExamResponse
 import com.github.nepyh.rooter.module.calendar.dto.CalendarRangeResponse
 import com.github.nepyh.rooter.module.calendar.dto.DailyCompletionResponse
@@ -140,6 +141,30 @@ class CalendarService {
                 eventDate = eventDate.toString(),
                 memo = request.memo
             )
+        }
+    }
+
+    fun updateEvent(userId: Int, eventId: Int, request: CalendarEventUpdateRequest): CalendarEventResponse {
+        request.title?.let {
+            if (it.isBlank() || it.length > 100) {
+                throw CalendarValidationException.InvalidTitleException()
+            }
+        }
+
+        val eventDate = request.eventDate?.let {
+            runCatching { LocalDate.parse(it) }
+                .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
+        }
+
+        return transaction {
+            val event = CalendarEventRow.findById(eventId)?.takeIf { it.userId == userId }
+                ?: throw CalendarEventNotFoundException()
+
+            request.title?.let { event.title = it }
+            eventDate?.let { event.eventDate = it }
+            request.memo?.let { event.memo = it }
+
+            event.toCalendarEventResponse()
         }
     }
 
