@@ -44,7 +44,7 @@ private data class ChatCompletionChoice(val message: ChatMessage)
 @Serializable
 private data class ChatCompletionResponse(val choices: List<ChatCompletionChoice>)
 
-class QuizLlmClient(private val appConfig: AppConfig) {
+open class QuizLlmClient(private val appConfig: AppConfig) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -66,7 +66,7 @@ class QuizLlmClient(private val appConfig: AppConfig) {
             .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
     }
 
-    suspend fun analyzeWeakAreas(wrongQuestionTexts: List<String>, chapterNames: List<String>): List<WeakAreaSuggestion> {
+    open suspend fun analyzeWeakAreas(wrongQuestionTexts: List<String>, chapterNames: List<String>): List<WeakAreaSuggestion> {
         val prompt = PromptLoader.load(
             "prompts/quiz-weak-area-analysis.md",
             "CHAPTER_NAMES" to chapterNames.joinToString(", "),
