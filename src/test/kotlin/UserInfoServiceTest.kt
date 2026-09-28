@@ -1,6 +1,6 @@
 import com.github.nepyh.rooter.module.storage.FileStorage
 import com.github.nepyh.rooter.module.storage.UploadableFile
-import com.github.nepyh.rooter.module.user.UserRepo
+import com.github.nepyh.rooter.module.user.ExposedUserRepo
 import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
@@ -62,7 +62,7 @@ class UserInfoServiceTest : StringSpec({
         override suspend fun getUrl(fileKey: String): String? = error("사용되지 않아야 함")
         override suspend fun delete(fileKey: String) = error("사용되지 않아야 함")
     }
-    val userService = UserService(UserRepo(), noopFileStorage)
+    val userService = UserService(ExposedUserRepo(), noopFileStorage)
 
     fun seedUser(email: String): Int = transaction(db) {
         UserRow.new {

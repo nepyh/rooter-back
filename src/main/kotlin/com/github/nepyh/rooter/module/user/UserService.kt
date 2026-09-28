@@ -8,8 +8,6 @@ import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeResponse
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
-import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
-import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.StreakDayResponse
 import com.github.nepyh.rooter.module.user.dto.StreakResponse
 import com.github.nepyh.rooter.module.user.dto.UpdateProfileRequest
@@ -128,24 +126,6 @@ class UserService(
             username = row.username,
             bio = row.bio
         )
-    }
-
-    fun changePassword(userId: Int, request: ChangePasswordRequest): PasswordUpdateResponse {
-        val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
-
-        if (!BCrypt.checkpw(request.currentPassword, user.password)) {
-            throw UserValidationException.WrongCurrentPasswordException()
-        }
-
-        val passwordRegex = Regex("^(?=.*[A-Za-z])(?=.*\\d).{8,}$")
-        if (!passwordRegex.matches(request.newPassword)) {
-            throw UserValidationException.WrongPasswordFormatException()
-        }
-
-        val hashedPassword = BCrypt.hashpw(request.newPassword, BCrypt.gensalt())
-        userRepo.updatePassword(userId, hashedPassword)
-
-        return PasswordUpdateResponse(message = "비밀번호가 변경되었습니다.")
     }
 
     fun getStreak(userId: Int, start: LocalDate, end: LocalDate): StreakResponse {

@@ -2,9 +2,12 @@ package com.github.nepyh.rooter.module.user
 
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
+import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginResponse
 import com.github.nepyh.rooter.module.user.dto.UserLogoutResponse
+import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.mindrot.jbcrypt.BCrypt
@@ -74,6 +77,31 @@ class AuthService(
             ?: throw UserValidationException.InvalidSocialTokenException()
 
         return issueToken(findOrCreateSocialUser(email))
+    }
+
+    /**
+     * 비밀번호를 바꾸면 tokenVersion 을 올려 기존에 발급된 토큰을 모두 무효화하고,
+     * 변경을 요청한 기기가 계속 쓸 수 있도록 새 토큰을 발급해 돌려준다.
+     */
+    fun changePassword(userId: Int, request: ChangePasswordRequest): PasswordUpdateResponse {
+        val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        if (!BCrypt.checkpw(request.currentPassword, user.password)) {
+            throw UserValidationException.WrongCurrentPasswordException()
+        }
+
+        val passwordRegex = Regex("^(?=.*[A-Za-z])(?=.*\\d).{8,}$")
+        if (!passwordRegex.matches(request.newPassword)) {
+            throw UserValidationException.WrongPasswordFormatException()
+        }
+
+        val hashedPassword = BCrypt.hashpw(request.newPassword, BCrypt.gensalt())
+        val updatedUser = userRepo.updatePassword(userId, hashedPassword)
+
+        return PasswordUpdateResponse(
+            message = "비밀번호가 변경되었습니다.",
+            token = issueToken(updatedUser).token
+        )
     }
 
     fun logout(userId: Int): UserLogoutResponse {

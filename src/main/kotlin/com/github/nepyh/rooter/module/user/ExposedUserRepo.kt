@@ -81,6 +81,7 @@ class ExposedUserRepo : UserRepo {
             val user = UserRow.findById(userId)
                 ?: throw UserNotFoundException()
             user.password = hashedPassword
+            user.tokenVersion += 1
             user
         }
     }

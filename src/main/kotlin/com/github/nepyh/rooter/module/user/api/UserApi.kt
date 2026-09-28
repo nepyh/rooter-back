@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module.user.api
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
+import com.github.nepyh.rooter.module.user.AuthService
 import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
@@ -33,7 +34,7 @@ import java.time.LocalDate
 
 
 @OptIn(ExperimentalKtorApi::class)
-fun UserApi(userService: UserService) = ApiRoute("users") {
+fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("users") {
     post("") {
         val request = call.receive<UserRegisterRequest>()
         val response = userService.registerUser(request)
@@ -237,12 +238,12 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 return@put call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 수정할 수 있습니다."))
             }
             val request = call.receive<ChangePasswordRequest>()
-            val response = userService.changePassword(id, request)
+            val response = authService.changePassword(id, request)
             call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("User")
             summary = "비밀번호 변경"
-            description = "현재 비밀번호 확인 후 새 비밀번호로 변경. 본인 정보만 변경 가능"
+            description = "현재 비밀번호 확인 후 새 비밀번호로 변경. 본인 정보만 변경 가능. 변경하면 기존에 발급된 토큰은 모두 무효화되고(다른 기기 로그아웃), 응답의 token 으로 교체해서 써야 함"
             parameters {
                 path("id") {
                     description = "유저 ID"

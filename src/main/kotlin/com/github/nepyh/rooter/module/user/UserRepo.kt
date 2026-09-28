@@ -27,6 +27,7 @@ interface UserRepo {
 
     fun updateProfile(userId: Int, username: String?, bio: String?): UserRow
 
+    /** 비밀번호 변경과 함께 tokenVersion 을 올려, 기존에 발급된 토큰이 더 이상 통과하지 못하게 한다. */
     fun updatePassword(userId: Int, hashedPassword: String): UserRow
 
     fun incrementTokenVersion(userId: Int): UserRow
