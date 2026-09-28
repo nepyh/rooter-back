@@ -1,17 +1,13 @@
 package com.github.nepyh.rooter.module.feedback.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.feedback.FeedbackService
 import com.github.nepyh.rooter.module.feedback.dto.FeedbackResponse
 import com.github.nepyh.rooter.module.feedback.dto.FeedbackSubmitRequest
-import com.github.nepyh.rooter.module.feedback.exception.DailyPlanNotFoundException
-import com.github.nepyh.rooter.module.feedback.exception.FeedbackAlreadySubmittedException
-import com.github.nepyh.rooter.module.feedback.exception.FeedbackNotFoundException
-import com.github.nepyh.rooter.module.feedback.exception.FeedbackValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
-import io.ktor.server.application.log
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.principal
@@ -26,31 +22,16 @@ import io.ktor.utils.io.ExperimentalKtorApi
 fun FeedbackApi(feedbackService: FeedbackService) = ApiRoute("daily-plans") {
     authenticate("auth-jwt") {
         post("/{dailyPlanId}/feedback") {
-            try {
-                val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
-                if (dailyPlanId == null) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("message" to "잘못된 dailyPlanId 입니다."))
-                    return@post
-                }
-
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val request = call.receive<FeedbackSubmitRequest>()
-                val feedback = feedbackService.submitFeedback(userId, dailyPlanId, request)
-                call.respond(HttpStatusCode.Created, feedback)
-            } catch (_: DailyPlanNotFoundException) {
-                call.respond(HttpStatusCode.NotFound, mapOf("message" to "존재하지 않거나 본인 소유가 아닌 일일 계획입니다."))
-            } catch (_: FeedbackAlreadySubmittedException) {
-                call.respond(HttpStatusCode.Conflict, mapOf("message" to "이미 해당 날짜의 피드백을 제출했습니다."))
-            } catch (e: FeedbackValidationException.InvalidDifficultyException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("code" to "FEEDBACK_001", "message" to e.message))
-            } catch (e: FeedbackValidationException.InvalidTimeSpentMinutesException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("code" to "FEEDBACK_002", "message" to e.message))
-            } catch (e: FeedbackValidationException.InvalidFocusLevelException) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("code" to "FEEDBACK_003", "message" to e.message))
-            } catch (e: Exception) {
-                call.application.log.error("일일 피드백 제출 중 오류 발생", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+            val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
+            if (dailyPlanId == null) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "잘못된 dailyPlanId 입니다."))
+                return@post
             }
+
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val request = call.receive<FeedbackSubmitRequest>()
+            val feedback = feedbackService.submitFeedback(userId, dailyPlanId, request)
+            call.respond(HttpStatusCode.Created, feedback)
         }.describe {
             tag("Feedback")
             summary = "일일 학습 피드백 설문 제출"
@@ -70,17 +51,17 @@ fun FeedbackApi(feedbackService: FeedbackService) = ApiRoute("daily-plans") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "잘못된 dailyPlanId, difficulty 값 오류 (code=FEEDBACK_001, 허용값: \"쉬움\"/\"적당\"/\"어려움\"), " +
+                    description = "잘못된 dailyPlanId (code=INVALID_ID), difficulty 값 오류 (code=FEEDBACK_001, 허용값: \"쉬움\"/\"적당\"/\"어려움\"), " +
                         "timeSpentMinutes 오류 (code=FEEDBACK_002), 또는 focusLevel 범위(1~5) 오류 (code=FEEDBACK_003)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 일일 계획"
+                    description = "존재하지 않거나 본인 소유가 아닌 일일 계획 (code=DAILY_PLAN_NOT_FOUND)"
                 }
                 HttpStatusCode.Conflict {
-                    description = "해당 일일 계획에 이미 피드백을 제출함"
+                    description = "해당 일일 계획에 이미 피드백을 제출함 (code=FEEDBACK_ALREADY_SUBMITTED)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -89,24 +70,15 @@ fun FeedbackApi(feedbackService: FeedbackService) = ApiRoute("daily-plans") {
         }
 
         get("/{dailyPlanId}/feedback") {
-            try {
-                val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
-                if (dailyPlanId == null) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("message" to "잘못된 dailyPlanId 입니다."))
-                    return@get
-                }
-
-                val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                val feedback = feedbackService.getFeedback(userId, dailyPlanId)
-                call.respond(HttpStatusCode.OK, feedback)
-            } catch (_: DailyPlanNotFoundException) {
-                call.respond(HttpStatusCode.NotFound, mapOf("message" to "존재하지 않거나 본인 소유가 아닌 일일 계획입니다."))
-            } catch (_: FeedbackNotFoundException) {
-                call.respond(HttpStatusCode.NotFound, mapOf("message" to "아직 제출된 피드백이 없습니다."))
-            } catch (e: Exception) {
-                call.application.log.error("일일 피드백 조회 중 오류 발생", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf("message" to "서버 오류가 발생했습니다."))
+            val dailyPlanId = call.parameters["dailyPlanId"]?.toIntOrNull()
+            if (dailyPlanId == null) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "잘못된 dailyPlanId 입니다."))
+                return@get
             }
+
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val feedback = feedbackService.getFeedback(userId, dailyPlanId)
+            call.respond(HttpStatusCode.OK, feedback)
         }.describe {
             tag("Feedback")
             summary = "일일 학습 피드백 설문 조회"
@@ -119,13 +91,13 @@ fun FeedbackApi(feedbackService: FeedbackService) = ApiRoute("daily-plans") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "잘못된 dailyPlanId"
+                    description = "잘못된 dailyPlanId (code=INVALID_ID)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 일일 계획, 또는 아직 제출된 피드백이 없음"
+                    description = "존재하지 않거나 본인 소유가 아닌 일일 계획 (code=DAILY_PLAN_NOT_FOUND), 또는 아직 제출된 피드백이 없음 (code=FEEDBACK_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
