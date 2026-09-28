@@ -1,3 +1,13 @@
+import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.config.EnvironmentMode
+import com.github.nepyh.rooter.module.planboard.PlanGenerationLlmClient
+import com.github.nepyh.rooter.module.planboard.PlanGenerationService
+import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationRequest
+import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationSubjectInput
+import com.github.nepyh.rooter.module.school.NiceApiClient
+import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
 import com.github.nepyh.rooter.module.planboard.PlanBoardService
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
@@ -264,6 +274,53 @@ class PlanBoardServiceTest : StringSpec({
 
         shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
             planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(textbookId, chapter2, chapter1))
+        }
+    }
+
+    "addSubject·updateSubject: 다른 교과서의 단원이 섞이면 InvalidSubjectRangeException" {
+        val userId = seedUser("subject-othertextbook@test.com")
+        val boardId = seedBoard(userId)
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val english = seedTextbook(seedSubject("영어"), title = "영어")
+        val math1 = seedChapter(math, 1)
+        val math2 = seedChapter(math, 2)
+        val english1 = seedChapter(english, 1)
+        val english2 = seedChapter(english, 2)
+
+        listOf(english1 to english2, math1 to english2, english1 to math2).forEach { (start, end) ->
+            shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
+                planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(math, start, end))
+            }
+        }
+
+        val created = planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(math, math1, math2))
+        shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
+            planBoardService.updateSubject(userId, boardId, created.id, PlanSubjectCreateRequest(math, math1, english2))
+        }
+    }
+
+    "plan-generation: 다른 교과서의 단원이 섞이면 AI 호출 전에 InvalidSubjectRangeException" {
+        val userId = seedUser("gen-othertextbook@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val english = seedTextbook(seedSubject("영어"), title = "영어")
+        val math1 = seedChapter(math, 1)
+        val english2 = seedChapter(english, 2)
+        // 범위 검증에서 먼저 실패하므로 LLM·NICE 는 호출되지 않는다
+        val service = PlanGenerationService(
+            PlanGenerationLlmClient(dummyAppConfig()),
+            SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") })))
+        )
+
+        shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
+            service.generate(
+                userId,
+                PlanGenerationRequest(
+                    title = "시험 대비",
+                    subjects = listOf(PlanGenerationSubjectInput(math, math1, english2)),
+                    startDate = "2026-07-01",
+                    examDate = "2026-07-10"
+                )
+            )
         }
     }
 
@@ -623,6 +680,18 @@ class PlanBoardServiceTest : StringSpec({
         planTaskService.completeTask(userId, taskId, true).dailyPlanId shouldBe dailyPlanId
     }
 })
+
+private fun dummyAppConfig() = AppConfig(
+    environment = EnvironmentMode.DEV,
+    jdbcUrl = "", dbUsername = "", dbPassword = "", dbMaxPoolSize = 1,
+    corsAllowedHosts = emptyList(), corsMaxAgeSeconds = 0,
+    storageType = "local", storageBaseDir = null, storageBaseUrl = null, storageBaseRoute = null,
+    storageAwsRegion = null, storageAwsBucket = null,
+    jwtSecret = "", jwtIssuer = "",
+    llmBaseUrl = "", llmApiKey = "", llmModel = "",
+    niceApiKey = "", niceBaseUrl = "",
+    googleClientId = "", appleClientId = ""
+)
 
 private fun taskRequest(
     planBoardId: Int,
