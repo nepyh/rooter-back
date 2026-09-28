@@ -5,6 +5,7 @@ import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.calendar.CalendarService
 import com.github.nepyh.rooter.module.calendar.dto.CalendarEventCreateRequest
 import com.github.nepyh.rooter.module.calendar.dto.CalendarEventResponse
+import com.github.nepyh.rooter.module.calendar.dto.CalendarEventUpdateRequest
 import com.github.nepyh.rooter.module.calendar.dto.CalendarRangeResponse
 import com.github.nepyh.rooter.module.calendar.dto.DailyCompletionResponse
 import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationException
@@ -20,6 +21,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.openapi.describe
+import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.utils.io.ExperimentalKtorApi
 import java.time.LocalDate
@@ -138,6 +140,50 @@ fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "제목이 1~100자를 벗어남 (code=CALENDAR_004), 또는 날짜 형식 오류 (code=CALENDAR_002)"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        patch("events/{id}") {
+            val eventId = call.parameters["id"]?.toIntOrNull()
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val request = call.receive<CalendarEventUpdateRequest>()
+            val response = calendarService.updateEvent(call.userId(), eventId, request)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("Calendar")
+            summary = "개인 일정 수정"
+            description = "전달된 필드만 수정하고, 본인 소유의 일정만 수정 가능"
+            parameters {
+                path("id") {
+                    description = "일정 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<CalendarEventUpdateRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "수정 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<CalendarEventResponse>()
+                    }
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID, 제목이 1~100자를 벗어남 (code=CALENDAR_004), 또는 날짜 형식 오류 (code=CALENDAR_002)"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않거나 본인 소유가 아닌 일정 (code=CALENDAR_EVENT_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
