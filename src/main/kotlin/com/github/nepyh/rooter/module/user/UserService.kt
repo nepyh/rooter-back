@@ -90,15 +90,15 @@ class UserService(
 
     suspend fun getUserInfo(id: Int): UserInfoResponse {
         val user = userRepo.findUserById(id) ?: throw UserNotFoundException()
-        val profile = userRepo.findStudentProfileByUserId(id) ?: throw UserNotFoundException()
+        val profile = userRepo.findStudentProfileByUserId(id)
 
         return UserInfoResponse(
             id = user.id.value,
             username = user.username,
             email = user.email,
-            schoolId = profile.schoolId,
-            grade = profile.grade,
-            classNumber = profile.classNumber,
+            schoolId = profile?.schoolId,
+            grade = profile?.grade,
+            classNumber = profile?.classNumber,
             createdAt = user.createdAt.toString(),
             avatarUrl = user.avatarImageKey?.let { fileStorage.getUrl(it) },
             bio = user.bio
