@@ -2,6 +2,7 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.chat.ChatLlmClient
 import com.github.nepyh.rooter.module.chat.ChatService
+import com.github.nepyh.rooter.module.chat.planBoardSummaryOf
 import com.github.nepyh.rooter.module.chat.dto.AiChatPlanUpdate
 import com.github.nepyh.rooter.module.chat.dto.AiChatResult
 import com.github.nepyh.rooter.module.chat.dto.AiChatTask
@@ -89,7 +90,7 @@ class ChatServiceTest : StringSpec({
 
     val tuesday = LocalDate.of(2026, 9, 29)
 
-    fun seedDailyPlan(): Pair<Int, Int> = transaction(db) {
+    fun seedDailyPlan(examDate: LocalDate? = null): Pair<Int, Int> = transaction(db) {
         val user = UserRow.new {
             email = "chat@test.com"
             username = "tester"
@@ -101,6 +102,7 @@ class ChatServiceTest : StringSpec({
             title = "테스트 보드"
             startDate = tuesday
             endDate = tuesday
+            this.examDate = examDate
             createdAt = OffsetDateTime.now()
         }
         val dailyPlan = DailyPlanRow.new {
@@ -156,10 +158,36 @@ class ChatServiceTest : StringSpec({
             Triple("남은 태스크2", "18:50", false)
         )
     }
+    "시험 날짜를 물으면 답할 수 있도록 플랜보드의 시험일과 D-day 를 AI 에 넘긴다" {
+        val (userId, dailyPlanId) = seedDailyPlan(examDate = LocalDate.of(2026, 10, 5))
+        val llm = FakeChatLlmClient(AiChatResult(reply_message = "10월 5일이에요", plan_changed = false))
+
+        ChatService(llm, schoolDataFetcher).sendMessage(userId, dailyPlanId, "시험 언제야?")
+
+        // 대화 날짜(2026-09-29) 기준 D-6
+        llm.lastPlanBoardSummary shouldBe "플랜보드: 테스트 보드\n학습 기간: 2026-09-29 ~ 2026-09-29\n시험일: 2026-10-05 (D-6)"
+    }
+
+    "시험일이 없는 플랜보드면 '등록되지 않음' 으로 넘긴다" {
+        val (userId, dailyPlanId) = seedDailyPlan(examDate = null)
+        val llm = FakeChatLlmClient(AiChatResult(reply_message = "아직 몰라요", plan_changed = false))
+
+        ChatService(llm, schoolDataFetcher).sendMessage(userId, dailyPlanId, "시험 언제야?")
+
+        llm.lastPlanBoardSummary!!.lines().last() shouldBe "시험일: 등록되지 않음"
+    }
+
+    "planBoardSummaryOf: 시험 당일과 지난 시험일을 구분한다" {
+        val day = LocalDate.of(2026, 10, 5)
+        planBoardSummaryOf("보드", day, day, day, day).lines().last() shouldBe "시험일: 2026-10-05 (D-day(오늘))"
+        planBoardSummaryOf("보드", day, day, day, day.plusDays(2)).lines().last() shouldBe "시험일: 2026-10-05 (이미 지남(2일 전))"
+    }
 })
+
 
 private class FakeChatLlmClient(private val result: AiChatResult?) : ChatLlmClient(dummyAppConfig()) {
     var lastCurrentTasksJson: String? = null
+    var lastPlanBoardSummary: String? = null
 
     override suspend fun adjustPlan(
         grade: Int,
@@ -167,9 +195,11 @@ private class FakeChatLlmClient(private val result: AiChatResult?) : ChatLlmClie
         targetDate: String,
         currentTasksJson: String,
         chatHistoryJson: String,
+        planBoardSummary: String,
         userMessage: String
     ): AiChatResult? {
         lastCurrentTasksJson = currentTasksJson
+        lastPlanBoardSummary = planBoardSummary
         return result
     }
 }
