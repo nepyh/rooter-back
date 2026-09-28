@@ -25,7 +25,6 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
-import java.time.format.DateTimeFormatter
 
 /** 과목 범위 등록에 필요한 엔티티 묶음 — DAO 로 그대로 연결할 수 있게 Row 타입으로 들고 다닌다. */
 private data class ResolvedTextbookSubject(
@@ -48,7 +47,7 @@ class PlanBoardService {
                     startDate = it.startDate.toString(),
                     endDate = it.endDate.toString(),
                     examDate = it.examDate?.toString(),
-                    createdAt = it.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                    createdAt = it.createdAt.toString()
                 )
             }
     }
@@ -113,7 +112,7 @@ class PlanBoardService {
             startDate = board.startDate.toString(),
             endDate = board.endDate.toString(),
             examDate = board.examDate?.toString(),
-            createdAt = board.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            createdAt = board.createdAt.toString()
         )
     }
 

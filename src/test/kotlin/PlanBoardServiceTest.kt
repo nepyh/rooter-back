@@ -165,6 +165,20 @@ class PlanBoardServiceTest : StringSpec({
         }.id.value
     }
 
+    "createdAt: 목록·수정 응답의 createdAt 은 오프셋이 포함된 시각이다" {
+        val userId = seedUser("created-at@test.com")
+        val boardId = planBoardService.createBoard(userId, PlanBoardCreateRequest("보드", "2026-07-01", "2026-07-31"))
+
+        val listed = planBoardService.getAllBoards(userId).single().createdAt
+        val updated = planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(title = "수정")).createdAt
+
+        listOf(listed, updated).forEach { createdAt ->
+            // 오프셋이 없으면 OffsetDateTime.parse 가 실패한다
+            val parsed = OffsetDateTime.parse(createdAt)
+            java.time.Duration.between(parsed, OffsetDateTime.now()).abs().toMinutes() shouldBe 0L
+        }
+    }
+
     // ---- createBoard ----
 
     "createBoard: 제목이 비어있으면 InvalidTitleException" {
