@@ -13,4 +13,10 @@ sealed class TaskQuizValidationException(
     class InvalidAnswerException : TaskQuizValidationException(
         HttpStatusCode.BadRequest, "TASK_QUIZ_INVALID_ANSWER", "퀴즈 문제 구성과 일치하지 않는 답안입니다."
     )
+    class AlreadyAnsweredException : TaskQuizValidationException(
+        HttpStatusCode.BadRequest, "TASK_QUIZ_QUESTION_ALREADY_ANSWERED", "이미 답변한 문제는 다시 답할 수 없습니다."
+    )
+    class IncompleteAnswersException : TaskQuizValidationException(
+        HttpStatusCode.BadRequest, "TASK_QUIZ_INCOMPLETE_ANSWERS", "아직 답하지 않은 문제가 있습니다."
+    )
 }

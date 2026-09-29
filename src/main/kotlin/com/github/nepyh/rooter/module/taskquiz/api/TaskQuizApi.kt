@@ -3,8 +3,9 @@ package com.github.nepyh.rooter.module.taskquiz.api
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
+import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizAnswerRequest
+import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizAnswerResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizResponse
-import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizSubmitRequest
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizSubmitResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -55,25 +56,76 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
             }
         }
 
+        post("{taskId}/quiz/questions/{questionId}/answer") {
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val taskId = call.parameters["taskId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val questionId = call.parameters["questionId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val request = call.receive<TaskQuizAnswerRequest>()
+
+            val response = taskQuizService.answerQuestion(userId, taskId, questionId, request.selectedChoiceId)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("TaskQuiz")
+            summary = "퀴즈 문제 하나 답변 (즉시 채점)"
+            description = "문제를 풀 때마다(앱에서 '다음'을 누를 때) 호출. 답을 서버에 저장하고 정답 여부·정답·풀이를 바로 돌려줌. " +
+                "한 번 답한 문제는 다시 답할 수 없음 — 정답을 본 뒤 답을 바꿔치기하는 것을 막기 위함. " +
+                "최종 채점(POST .../quiz/submit)은 여기서 저장된 답만 보고, 앱이 별도로 보내는 답은 받지 않음"
+            parameters {
+                path("taskId") {
+                    description = "태스크 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+                path("questionId") {
+                    description = "문제 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<TaskQuizAnswerRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "채점 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<TaskQuizAnswerResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID), 이미 채점이 끝난 퀴즈 (code=TASK_QUIZ_ALREADY_SUBMITTED), " +
+                        "이미 답한 문제 (code=TASK_QUIZ_QUESTION_ALREADY_ANSWERED), 또는 문제 구성과 맞지 않는 답안 (code=TASK_QUIZ_INVALID_ANSWER)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.NotFound {
+                    description = "아직 생성되지 않았거나 본인 소유가 아닌 태스크, 또는 존재하지 않는 문제 (code=TASK_QUIZ_NOT_FOUND)"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
         post("{taskId}/quiz/submit") {
             val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
             val taskId = call.parameters["taskId"]?.toIntOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
-            val request = call.receive<TaskQuizSubmitRequest>()
 
-            val response = taskQuizService.submitQuiz(userId, taskId, request.answers)
+            val response = taskQuizService.submitQuiz(userId, taskId)
             call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("TaskQuiz")
             summary = "태스크 완료 확인 퀴즈 제출"
-            description = "퀴즈 자체가 완료 확인 수단: 4개 이상 정답(통과)이면 해당 태스크가 자동으로 완료 처리됨(passed=true). " +
+            description = "요청 본문 없음 — 채점은 항상 POST .../quiz/questions/{questionId}/answer 로 저장해 둔 답만 본다. " +
+                "4개 이상 정답(통과)이면 해당 태스크가 자동으로 완료 처리됨(passed=true). " +
                 "4개 미만이면 10분 뒤 새 문제로 재시도가 자동 생성되고(retryScheduled=true), " +
                 "최초 1회 + 재시도 2회 모두 실패하면(attemptNumber=3에서 불합격) 해당 태스크가 미완료로 확정됨(taskInvalidated=true)"
-            requestBody {
-                ContentType.Application.Json {
-                    schema = jsonSchema<TaskQuizSubmitRequest>()
-                }
-            }
             responses {
                 HttpStatusCode.OK {
                     description = "채점 성공"
@@ -82,7 +134,8 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 이미 채점된 퀴즈 (code=TASK_QUIZ_ALREADY_SUBMITTED), 또는 문제 구성과 맞지 않는 답안 (code=TASK_QUIZ_INVALID_ANSWER)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 이미 채점된 퀴즈 (code=TASK_QUIZ_ALREADY_SUBMITTED), " +
+                        "또는 아직 답하지 않은 문제가 있음 (code=TASK_QUIZ_INCOMPLETE_ANSWERS)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

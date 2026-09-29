@@ -7,9 +7,10 @@ import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
-import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizAnswer
+import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizAnswerResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizChoiceResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResponse
+import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResult
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizSubmitResponse
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizNotFoundException
@@ -26,7 +27,6 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -76,9 +76,7 @@ class TaskQuizService(
     fun getCurrentQuiz(userId: Int, planTaskId: Int): TaskQuizResponse = transaction {
         requireOwnedTask(userId, planTaskId)
 
-        val latestAttempt = TaskQuizAttemptRow.find { TaskQuizAttemptTable.planTaskId eq planTaskId }
-            .orderBy(TaskQuizAttemptTable.attemptNumber to SortOrder.DESC)
-            .firstOrNull() ?: throw TaskQuizNotFoundException()
+        val latestAttempt = latestAttemptOrThrow(planTaskId)
 
         val questions = TaskQuizQuestionRow.find { TaskQuizQuestionTable.attemptId eq latestAttempt.id }
             .map { question ->
@@ -99,34 +97,78 @@ class TaskQuizService(
         )
     }
 
-    fun submitQuiz(userId: Int, planTaskId: Int, answers: List<TaskQuizAnswer>): TaskQuizSubmitResponse = transaction {
+    /**
+     * 문제 하나를 풀 때마다 즉시 호출. 답을 DB 에 저장하고 바로 채점 결과를 돌려준다.
+     * 이미 답한 문제는 다시 답할 수 없다 (정답을 본 뒤 답을 바꿔치기하는 것을 막기 위함).
+     */
+    fun answerQuestion(userId: Int, planTaskId: Int, questionId: Int, selectedChoiceId: Int): TaskQuizAnswerResponse = transaction {
         requireOwnedTask(userId, planTaskId)
 
-        val attempt = TaskQuizAttemptRow.find { TaskQuizAttemptTable.planTaskId eq planTaskId }
-            .orderBy(TaskQuizAttemptTable.attemptNumber to SortOrder.DESC)
-            .firstOrNull() ?: throw TaskQuizNotFoundException()
-
+        val attempt = latestAttemptOrThrow(planTaskId)
         if (attempt.passed != null) {
             throw TaskQuizValidationException.AlreadySubmittedException()
         }
 
+        val question = TaskQuizQuestionRow.findById(questionId)
+            ?.takeIf { it.attempt.id == attempt.id }
+            ?: throw TaskQuizNotFoundException()
+
+        if (question.selectedChoiceId != null) {
+            throw TaskQuizValidationException.AlreadyAnsweredException()
+        }
+
+        val choices = TaskQuizChoiceRow.find { TaskQuizChoiceTable.questionId eq question.id }.toList()
+        val selectedChoice = choices.find { it.id.value == selectedChoiceId }
+            ?: throw TaskQuizValidationException.InvalidAnswerException()
+        // correct_index 가 범위를 벗어나 정답 보기가 없는 문제가 드물게 생길 수 있음(생성 단계 결함, 별도 이슈).
+        // 그런 경우까지 여기서 크래시내지 않도록 마지막 보기로 대체한다.
+        val correctChoice = choices.find { it.isCorrect } ?: choices.last()
+
+        question.selectedChoiceId = selectedChoiceId
+
+        TaskQuizAnswerResponse(
+            questionId = question.id.value,
+            isCorrect = selectedChoice.isCorrect,
+            correctChoiceId = correctChoice.id.value,
+            explanation = correctChoice.explanation
+        )
+    }
+
+    /** 채점은 항상 answerQuestion 으로 DB에 저장해 둔 답만 본다 — 클라이언트가 이 호출에 보내는 값은 없다. */
+    fun submitQuiz(userId: Int, planTaskId: Int): TaskQuizSubmitResponse = transaction {
+        requireOwnedTask(userId, planTaskId)
+
+        val attempt = latestAttemptOrThrow(planTaskId)
+        if (attempt.passed != null) {
+            throw TaskQuizValidationException.AlreadySubmittedException()
+        }
+
+        val questions = TaskQuizQuestionRow.find { TaskQuizQuestionTable.attemptId eq attempt.id }.toList()
+        if (questions.any { it.selectedChoiceId == null }) {
+            throw TaskQuizValidationException.IncompleteAnswersException()
+        }
+
+        val results = questions.map { question ->
+            val choices = TaskQuizChoiceRow.find { TaskQuizChoiceTable.questionId eq question.id }.toList()
+            // answerQuestion 에서 이미 이 문제의 보기로 검증된 값이라 여기서 못 찾는 건 데이터 정합성이 깨진 것
+            val selectedChoice = choices.find { it.id.value == question.selectedChoiceId }
+                ?: error("task_quiz_question ${question.id.value} 의 selected_choice_id 가 자신의 보기가 아님")
+            val correctChoice = choices.find { it.isCorrect } ?: choices.last()
+
+            TaskQuizQuestionResult(
+                questionId = question.id.value,
+                questionText = question.questionText,
+                selectedChoiceId = selectedChoice.id.value,
+                correctChoiceId = correctChoice.id.value,
+                correctChoiceText = correctChoice.choiceText,
+                isCorrect = selectedChoice.isCorrect,
+                explanation = correctChoice.explanation
+            )
+        }
+
         val attemptNumber = attempt.attemptNumber
         val totalCount = attempt.totalCount
-
-        val questionIds = TaskQuizQuestionRow.find { TaskQuizQuestionTable.attemptId eq attempt.id }
-            .map { it.id.value }
-            .toSet()
-        if (answers.any { it.questionId !in questionIds }) {
-            throw TaskQuizValidationException.InvalidAnswerException()
-        }
-
-        val correctChoiceIds = TaskQuizChoiceRow.find {
-            (TaskQuizChoiceTable.questionId inList questionIds) and (TaskQuizChoiceTable.isCorrect eq true)
-        }
-            .map { it.id.value }
-            .toSet()
-
-        val correctCount = answers.count { it.selectedChoiceId in correctChoiceIds }
+        val correctCount = results.count { it.isCorrect }
         val passed = correctCount >= PASS_THRESHOLD
 
         attempt.correctCount = correctCount
@@ -152,9 +194,15 @@ class TaskQuizService(
             totalCount = totalCount,
             passed = passed,
             retryScheduled = retryScheduled,
-            taskInvalidated = taskInvalidated
+            taskInvalidated = taskInvalidated,
+            results = results
         )
     }
+
+    private fun latestAttemptOrThrow(planTaskId: Int): TaskQuizAttemptRow =
+        TaskQuizAttemptRow.find { TaskQuizAttemptTable.planTaskId eq planTaskId }
+            .orderBy(TaskQuizAttemptTable.attemptNumber to SortOrder.DESC)
+            .firstOrNull() ?: throw TaskQuizNotFoundException()
 
     private fun requireOwnedTask(userId: Int, planTaskId: Int) {
         // plan_tasks -> daily_plans -> plan_boards 소유자 확인 조인이라 Table DSL 을 쓴다
