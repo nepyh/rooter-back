@@ -10,6 +10,10 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.quiz.GeneratedQuestion
+import com.github.nepyh.rooter.module.school.NiceApiClient
+import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
 import com.github.nepyh.rooter.module.quiz.QuizLlmClient
 import com.github.nepyh.rooter.module.quiz.QuizService
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
@@ -91,6 +95,8 @@ class QuizServiceTest : StringSpec({
     }
 
     val day = LocalDate.of(2026, 9, 29)
+    // 퀴즈 생성은 NICE 를 쓰지 않는다 (QuizService 생성자에 필요할 뿐)
+    val noNiceFetcher = SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") })))
 
     fun seedDailyPlan(): Pair<Int, Int> = transaction(db) {
         val user = UserRow.new {
@@ -120,7 +126,7 @@ class QuizServiceTest : StringSpec({
     "generateQuiz: 이미 만든 퀴즈가 있으면 새로 만들지 않고 같은 퀴즈를 돌려준다" {
         val (userId, dailyPlanId) = seedDailyPlan()
         val llm = FakeQuizLlmClient()
-        val service = QuizService(llm)
+        val service = QuizService(llm, noNiceFetcher)
 
         val first = service.generateQuiz(userId, day)
         val second = service.generateQuiz(userId, day)
@@ -136,7 +142,7 @@ class QuizServiceTest : StringSpec({
         val (userId, dailyPlanId) = seedDailyPlan()
         // 두 요청이 모두 '퀴즈 없음' 을 확인한 뒤 LLM 호출 단계에서 겹치도록 응답을 늦춘다
         val llm = FakeQuizLlmClient(delayMillis = 500)
-        val service = QuizService(llm)
+        val service = QuizService(llm, noNiceFetcher)
 
         val results = coroutineScope {
             listOf(async { service.generateQuiz(userId, day) }, async { service.generateQuiz(userId, day) }).awaitAll()
@@ -148,7 +154,7 @@ class QuizServiceTest : StringSpec({
 
     "generateQuiz: LLM 이 빈 목록을 주면 QuizGenerationFailedException 이고 아무것도 저장하지 않는다" {
         val (userId, dailyPlanId) = seedDailyPlan()
-        val service = QuizService(FakeQuizLlmClient(questionCount = 0))
+        val service = QuizService(FakeQuizLlmClient(questionCount = 0), noNiceFetcher)
 
         shouldThrow<QuizValidationException.QuizGenerationFailedException> {
             service.generateQuiz(userId, day)
@@ -160,7 +166,7 @@ class QuizServiceTest : StringSpec({
         val (userId, _) = seedDailyPlan()
 
         shouldThrow<QuizValidationException.NoPlanForDateException> {
-            QuizService(FakeQuizLlmClient()).generateQuiz(userId, day.plusDays(1))
+            QuizService(FakeQuizLlmClient(), noNiceFetcher).generateQuiz(userId, day.plusDays(1))
         }
     }
 })
