@@ -10,6 +10,18 @@ data class AiChatTask(
     val estimated_minutes: Int
 )
 
+/**
+ * 프롬프트 <CURRENT_TASKS> 로 보내는 현재 태스크. AI 가 새 일정(busy window)이 기존 태스크와
+ * 겹치는지 판단할 수 있도록 시각을 함께 보낸다. (응답의 plan_update.tasks 는 [AiChatTask] 그대로 — 시각은 서버가 배정)
+ */
+@Serializable
+data class AiChatCurrentTask(
+    val task_name: String,
+    val estimated_minutes: Int,
+    val start_time: String, // "HH:mm"
+    val end_time: String
+)
+
 @Serializable
 data class AiChatPlanUpdate(
     val tasks: List<AiChatTask>,

@@ -1,6 +1,6 @@
 package com.github.nepyh.rooter.module.chat
 
-import com.github.nepyh.rooter.module.chat.dto.AiChatTask
+import com.github.nepyh.rooter.module.chat.dto.AiChatCurrentTask
 import com.github.nepyh.rooter.module.chat.dto.AiChatTurn
 import com.github.nepyh.rooter.module.chat.dto.ChatMessageResponse
 import com.github.nepyh.rooter.module.chat.dto.ChatTurnResponse
@@ -38,6 +38,9 @@ import java.util.Locale
 
 /** 한 번의 챗봇 호출에 함께 실어 보내는 최근 대화 턴 수. 너무 길면 프롬프트가 불필요하게 커진다. */
 private const val HISTORY_LIMIT = 10
+
+/** AI 가 plan_changed=true 라고 했지만 적용할 변경이 없었을 때 대신 보여줄 답변 */
+internal const val PLAN_NOT_APPLIED_REPLY = "계획을 바꾸려고 했는데 적용하지 못했어요. 오늘 계획은 그대로예요. 바꾸고 싶은 내용을 조금 더 자세히 말씀해 주세요."
 
 class ChatService(
     private val chatLlmClient: ChatLlmClient,
@@ -95,7 +98,9 @@ class ChatService(
             ChatContext(
                 planDate = planDate.toString(),
                 dayOfWeekLabel = planDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.KOREAN),
-                pendingTasks = pendingTasks.map { it.taskName to it.estimatedMinutes },
+                pendingTasks = pendingTasks.map {
+                    AiChatCurrentTask(it.taskName, it.estimatedMinutes, it.startTime.toString(), it.endTime.toString())
+                },
                 completedRanges = completedTasks.map {
                     PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime)
                 },
@@ -113,14 +118,19 @@ class ChatService(
             grade = context.grade,
             studyStyleSummary = context.studyStyleSummary,
             targetDate = "${context.planDate} (${context.dayOfWeekLabel})",
-            currentTasksJson = json.encodeToString(context.pendingTasks.map { AiChatTask(it.first, it.second) }),
+            currentTasksJson = json.encodeToString(context.pendingTasks),
             chatHistoryJson = json.encodeToString(context.history),
             planBoardSummary = context.planBoardSummary,
             userMessage = trimmed
         )
 
         val update = result?.plan_update
-        val shouldReplan = result != null && result.plan_changed && update != null && update.tasks.isNotEmpty()
+        // AI 는 시각 비교를 자주 틀린다 (18:00~18:30 태스크가 19~21시와 겹친다고 판단하는 식).
+        // 새로 생긴 공부 불가능 시간이 남은 태스크와 겹치는지는 서버가 직접 판단하고, 안 겹치면 계획을 건드리지 않는다.
+        val busyWindow = update?.let { busyWindowOf(it.busy_window_start, it.busy_window_end) }
+        val busyWindowOverlapsNothing = busyWindow != null && context.pendingTasks.none { overlaps(it, busyWindow) }
+        val shouldReplan = result != null && result.plan_changed && update != null && update.tasks.isNotEmpty() &&
+            !busyWindowOverlapsNothing
 
         // NICE 시간표 조회(네트워크 호출)가 있어 트랜잭션 밖에서 미리 계산해둔다.
         val freeIntervals = if (shouldReplan) {
@@ -208,15 +218,22 @@ class ChatService(
                 updatedTasks = (keptTasks + newTasks).sortedBy { it.startTime }
             }
 
+            // AI 가 계획을 바꿨다고 했는데 서버가 적용하지 못한 경우(바꿀 태스크 목록 없음 등), 사용자가 바뀐 줄 알지 않도록 답변을 바로잡는다
+            val reply = when {
+                result.plan_changed && busyWindowOverlapsNothing -> noOverlapReply(busyWindow!!)
+                result.plan_changed && updatedTasks == null -> PLAN_NOT_APPLIED_REPLY
+                else -> result.reply_message
+            }
+
             ChatTurnRow.new {
                 this.dailyPlan = DailyPlanRow[dailyPlanId]
                 role = "assistant"
-                content = result.reply_message
+                content = reply
                 createdAt = OffsetDateTime.now()
             }
 
             ChatMessageResponse(
-                reply = result.reply_message,
+                reply = reply,
                 planChanged = updatedTasks != null,
                 updatedTasks = updatedTasks
             )
@@ -238,6 +255,19 @@ class ChatService(
     }
 }
 
+/** AI 가 준 공부 불가능 시간대("HH:mm") 를 파싱한다. 형식이 틀리거나 시작이 끝보다 늦으면 null */
+private fun busyWindowOf(start: String?, end: String?): Pair<LocalTime, LocalTime>? {
+    val from = start?.let { runCatching { LocalTime.parse(it) }.getOrNull() } ?: return null
+    val to = end?.let { runCatching { LocalTime.parse(it) }.getOrNull() } ?: return null
+    return if (from.isBefore(to)) from to to else null
+}
+
+private fun overlaps(task: AiChatCurrentTask, window: Pair<LocalTime, LocalTime>): Boolean =
+    LocalTime.parse(task.start_time).isBefore(window.second) && window.first.isBefore(LocalTime.parse(task.end_time))
+
+internal fun noOverlapReply(window: Pair<LocalTime, LocalTime>): String =
+    "그 시간(${window.first}~${window.second})에는 잡혀 있는 공부가 없어서 오늘 계획은 그대로 둘게요."
+
 /**
  * 챗봇 프롬프트의 <PLAN_BOARD> 에 넣는 플랜보드 요약. 학생이 시험 날짜·남은 기간을 물으면 AI 가 이 값으로 답한다
  * (이게 없으면 AI 가 TARGET_DATE 를 시험일처럼 답했음). D-day 는 대화 중인 날짜(planDate) 기준.
@@ -258,7 +288,7 @@ internal fun planBoardSummaryOf(title: String, startDate: LocalDate, endDate: Lo
 private data class ChatContext(
     val planDate: String,
     val dayOfWeekLabel: String,
-    val pendingTasks: List<Pair<String, Int>>,
+    val pendingTasks: List<AiChatCurrentTask>,
     val completedRanges: List<Pair<Int, Int>>,
     val grade: Int,
     val schoolId: String?,

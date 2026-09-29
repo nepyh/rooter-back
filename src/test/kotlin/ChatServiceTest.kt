@@ -2,6 +2,7 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.chat.ChatLlmClient
 import com.github.nepyh.rooter.module.chat.ChatService
+import com.github.nepyh.rooter.module.chat.PLAN_NOT_APPLIED_REPLY
 import com.github.nepyh.rooter.module.chat.planBoardSummaryOf
 import com.github.nepyh.rooter.module.chat.dto.AiChatPlanUpdate
 import com.github.nepyh.rooter.module.chat.dto.AiChatResult
@@ -158,6 +159,70 @@ class ChatServiceTest : StringSpec({
             Triple("남은 태스크2", "18:50", false)
         )
     }
+    "AI 에 보내는 현재 태스크에 시작·끝 시각이 들어간다 (새 일정과 겹치는지 판단용)" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        seedTask(dailyPlanId, "수학", LocalTime.of(16, 10), LocalTime.of(16, 50), completed = false)
+        val llm = FakeChatLlmClient(AiChatResult(reply_message = "그 시간엔 공부가 없어서 그대로 둘게요", plan_changed = false))
+
+        ChatService(llm, schoolDataFetcher).sendMessage(userId, dailyPlanId, "저녁 7시부터 9시까지 학원이야")
+
+        llm.lastCurrentTasksJson shouldBe """[{"task_name":"수학","estimated_minutes":40,"start_time":"16:10","end_time":"16:50"}]"""
+    }
+
+    "AI 가 계획을 바꿨다고 했지만 적용할 변경이 없으면, 바뀐 줄 알지 않도록 답변을 바로잡는다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        seedTask(dailyPlanId, "수학", LocalTime.of(16, 10), LocalTime.of(16, 50), completed = false)
+        // plan_changed=true 인데 plan_update 가 없음
+        val llm = FakeChatLlmClient(AiChatResult(reply_message = "조정해 드릴게요!", plan_changed = true, plan_update = null))
+
+        val response = ChatService(llm, schoolDataFetcher).sendMessage(userId, dailyPlanId, "저녁에 학원 가")
+
+        response.planChanged shouldBe false
+        response.reply shouldBe PLAN_NOT_APPLIED_REPLY
+        // 대화 기록에도 바로잡은 답변이 남는다
+        ChatService(llm, schoolDataFetcher).getHistory(userId, dailyPlanId).last().content shouldBe PLAN_NOT_APPLIED_REPLY
+    }
+
+    "새 일정 시간이 남은 태스크와 안 겹치면, AI 가 바꾸자고 해도 계획을 그대로 두고 그렇게 답한다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        seedTask(dailyPlanId, "수학", LocalTime.of(16, 10), LocalTime.of(16, 50), completed = false)
+        seedTask(dailyPlanId, "문제 풀이", LocalTime.of(18, 0), LocalTime.of(18, 30), completed = false)
+        // 실제 LLM 이 한 것처럼: 18:00~18:30 이 19~21시와 겹친다고 착각해 태스크를 빼려 함
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "문제 풀이 시간과 겹쳐서 조정해 드릴게요",
+                plan_changed = true,
+                plan_update = AiChatPlanUpdate(tasks = listOf(AiChatTask("수학", 40)), busy_window_start = "19:00", busy_window_end = "21:00")
+            )
+        )
+
+        val response = ChatService(llm, schoolDataFetcher).sendMessage(userId, dailyPlanId, "저녁 7시부터 9시까지 학원이야")
+
+        response.planChanged shouldBe false
+        response.reply shouldBe "그 시간(19:00~21:00)에는 잡혀 있는 공부가 없어서 오늘 계획은 그대로 둘게요."
+        transaction(db) {
+            PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.map { it.taskName }.sorted()
+        } shouldBe listOf("문제 풀이", "수학")
+    }
+
+    "새 일정 시간이 남은 태스크와 겹치면 계획을 다시 배치한다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        seedTask(dailyPlanId, "수학", LocalTime.of(16, 30), LocalTime.of(17, 10), completed = false)
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "학원 시간을 피해서 옮겼어요",
+                plan_changed = true,
+                plan_update = AiChatPlanUpdate(tasks = listOf(AiChatTask("수학", 40)), busy_window_start = "16:30", busy_window_end = "18:00")
+            )
+        )
+
+        val response = ChatService(llm, schoolDataFetcher).sendMessage(userId, dailyPlanId, "4시 반부터 6시까지 학원이야")
+
+        response.planChanged shouldBe true
+        response.reply shouldBe "학원 시간을 피해서 옮겼어요"
+        response.updatedTasks!!.single().startTime shouldBe "18:00"
+    }
+
     "시험 날짜를 물으면 답할 수 있도록 플랜보드의 시험일과 D-day 를 AI 에 넘긴다" {
         val (userId, dailyPlanId) = seedDailyPlan(examDate = LocalDate.of(2026, 10, 5))
         val llm = FakeChatLlmClient(AiChatResult(reply_message = "10월 5일이에요", plan_changed = false))
