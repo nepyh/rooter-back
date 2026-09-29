@@ -19,6 +19,7 @@ import com.github.nepyh.rooter.module.quiz.dto.InsertedReviewTaskResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizAnswerSubmission
 import com.github.nepyh.rooter.module.quiz.dto.QuizChoiceResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizQuestionResponse
+import com.github.nepyh.rooter.module.quiz.dto.QuizQuestionResult
 import com.github.nepyh.rooter.module.quiz.dto.QuizResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizResultResponse
 import com.github.nepyh.rooter.module.quiz.dto.WeakAreaSummary
@@ -104,6 +105,7 @@ class QuizService(
                 val quizQuestion = DailyQuizQuestionRow.new {
                     this.dailyPlan = DailyPlanRow[dailyPlanId]
                     questionText = question.questionText
+                    explanation = question.explanation.ifBlank { null }
                 }
 
                 val choices = question.choices.mapIndexed { index, choiceText ->
@@ -189,6 +191,7 @@ class QuizService(
 
             var correctCount = 0
             val wrongQuestionTexts = mutableListOf<String>()
+            val results = mutableListOf<QuizQuestionResult>()
 
             for (answer in answers) {
                 val choiceRow = DailyQuizChoiceRow.find {
@@ -201,11 +204,24 @@ class QuizService(
                     createdAt = OffsetDateTime.now()
                 }
 
+                val question = DailyQuizQuestionRow[answer.questionId]
                 if (choiceRow.isCorrect) {
                     correctCount++
                 } else {
-                    wrongQuestionTexts.add(DailyQuizQuestionRow[answer.questionId].questionText)
+                    wrongQuestionTexts.add(question.questionText)
                 }
+                val correctChoice = DailyQuizChoiceRow.find {
+                    (DailyQuizChoiceTable.questionId eq answer.questionId) and (DailyQuizChoiceTable.isCorrect eq true)
+                }.firstOrNull()
+                results += QuizQuestionResult(
+                    questionId = answer.questionId,
+                    questionText = question.questionText,
+                    selectedChoiceId = choiceRow.id.value,
+                    correctChoiceId = correctChoice?.id?.value,
+                    correctChoiceText = correctChoice?.choiceText,
+                    isCorrect = choiceRow.isCorrect,
+                    explanation = question.explanation
+                )
             }
 
             GradedQuiz(
@@ -213,6 +229,7 @@ class QuizService(
                 reviewDate = reviewDateFor(planBoardId, quizDate),
                 correctCount = correctCount,
                 wrongQuestionTexts = wrongQuestionTexts,
+                results = results,
                 chapterNames = if (wrongQuestionTexts.isEmpty()) emptyList() else chapterNamesForPlanBoard(planBoardId),
                 scheduleContext = scheduleContextOf(userId)
             )
@@ -239,7 +256,8 @@ class QuizService(
             totalQuestions = answers.size,
             correctCount = graded.correctCount,
             weakAreas = weakAreas,
-            insertedReviewTasks = insertedReviewTasks
+            insertedReviewTasks = insertedReviewTasks,
+            results = graded.results
         )
     }
 
@@ -329,6 +347,7 @@ private data class GradedQuiz(
     val reviewDate: LocalDate,
     val correctCount: Int,
     val wrongQuestionTexts: List<String>,
+    val results: List<QuizQuestionResult>,
     val chapterNames: List<String>,
     val scheduleContext: ReviewScheduleContext
 )

@@ -116,7 +116,8 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
             summary = "퀴즈 제출 및 채점"
             description = "채점 후 오답 챕터에 대한 복습 태스크를 자동 추가. 퀴즈 다음 날(플랜보드 기간을 넘으면 퀴즈 당일)에 " +
                 "학교·수면·불가능 시간과 기존 태스크를 피해서 배치하며, insertedReviewTasks 에는 실제로 추가된 태스크만(시각 포함) 담긴다. " +
-                "약점 분석(AI)이 실패해도 채점 결과는 저장되고 weakAreas·insertedReviewTasks 만 빈 배열로 나간다"
+                "약점 분석(AI)이 실패해도 채점 결과는 저장되고 weakAreas·insertedReviewTasks 만 빈 배열로 나간다. " +
+                "results 에는 제출한 문항별 정답 여부·정답 보기·풀이 과정(explanation)이 담긴다 (풀이 기능 전에 만든 퀴즈는 explanation 이 null)"
             parameters {
                 path("dailyPlanId") {
                     description = "일일 계획 ID"
