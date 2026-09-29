@@ -40,7 +40,7 @@ private data class ChatCompletionChoice(val message: ChatMessage)
 @Serializable
 private data class ChatCompletionResponse(val choices: List<ChatCompletionChoice>)
 
-class TaskQuizLlmClient(private val appConfig: AppConfig) {
+open class TaskQuizLlmClient(private val appConfig: AppConfig) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -50,11 +50,16 @@ class TaskQuizLlmClient(private val appConfig: AppConfig) {
         }
     }
 
-    /** taskName(예: "인수분해를 이용한 이차방정식 풀이") 하나만 다루는 객관식 5문항을 만든다. */
-    suspend fun generateQuestions(taskName: String): List<GeneratedTaskQuizQuestion> {
+    /**
+     * taskName(예: "인수분해를 이용한 이차방정식 풀이") 의 내용을 묻는 객관식 5문항을 만든다.
+     * 사용자가 직접 추가한 태스크는 이름만으로 내용을 알기 어려워서, 학년과 플랜보드 학습 범위를 함께 넘긴다.
+     */
+    open suspend fun generateQuestions(taskName: String, gradeLabel: String, studyScope: String): List<GeneratedTaskQuizQuestion> {
         val prompt = PromptLoader.load(
             "prompts/task-quiz-generation.md",
             "TASK_NAME" to taskName,
+            "GRADE" to gradeLabel,
+            "STUDY_SCOPE" to studyScope,
             "COUNT" to LLM_QUESTION_COUNT.toString()
         )
 

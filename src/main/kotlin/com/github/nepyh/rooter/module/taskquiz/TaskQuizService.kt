@@ -2,8 +2,11 @@ package com.github.nepyh.rooter.module.taskquiz
 
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizAnswer
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizChoiceResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResponse
@@ -17,6 +20,8 @@ import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceRow
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceTable
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestionRow
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestionTable
+import com.github.nepyh.rooter.module.user.model.StudentProfileRow
+import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.and
@@ -38,7 +43,8 @@ class TaskQuizService(
 
     /** 스케줄러가 호출. taskName은 findDue 시점에 이미 조회해둔 값을 그대로 받는다. */
     suspend fun generateAttempt(planTaskId: Int, attemptNumber: Int, taskName: String) {
-        val generated = llmClient.generateQuestions(taskName)
+        val (gradeLabel, studyScope) = newSuspendedTransaction { quizContextOf(planTaskId) }
+        val generated = llmClient.generateQuestions(taskName, gradeLabel, studyScope)
         if (generated.isEmpty()) return // AI 생성 실패 시 이번 attempt는 건너뜀 (다음 스케줄 대상이 되진 않음)
 
         newSuspendedTransaction {
@@ -157,4 +163,25 @@ class TaskQuizService(
             .where { (PlanTaskTable.id eq planTaskId) and (PlanBoardTable.userId eq userId) }
             .firstOrNull() ?: throw TaskQuizNotFoundException()
     }
+
+    /**
+     * 퀴즈 출제에 쓸 학년 표시와 학습 범위(과목·단원). 사용자가 직접 추가한 태스크는 이름만 있어서
+     * ("영어 단어 30개 외우기" 등) 이게 없으면 AI 가 "학생이 완료한 활동은?" 같은 문제를 냈다.
+     */
+    private fun quizContextOf(planTaskId: Int): Pair<String, String> {
+        val board = PlanTaskRow.findById(planTaskId)?.dailyPlan?.planBoard
+            ?: return "중학생(학년 정보 없음)" to "지정 안 됨"
+
+        val grade = StudentProfileRow.find { StudentProfileTable.user eq board.user.id }.firstOrNull()?.grade
+        val gradeLabel = grade?.let { "중학교 ${it}학년" } ?: "중학생(학년 정보 없음)"
+
+        val studyScope = PlanSubjectRow.find { PlanSubjectTable.planBoardId eq board.id }.joinToString("\n") { subject ->
+            val chapters = orderedChaptersInRange(subject.textbook, subject.startChapter, subject.endChapter)
+                .map { it.chapterName } + listOfNotNull(subject.customRangeText?.takeIf { it.isNotBlank() })
+            "${subject.textbook.subject.name}: ${chapters.joinToString(", ")}"
+        }.ifBlank { "지정 안 됨" }
+
+        return gradeLabel to studyScope
+    }
+
 }
