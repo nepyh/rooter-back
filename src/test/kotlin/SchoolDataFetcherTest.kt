@@ -307,6 +307,33 @@ class SchoolDataFetcherTest : StringSpec({
         candidates.map { it.date } shouldBe listOf(LocalDate.of(2026, 4, 29), LocalDate.of(2026, 10, 16))
     }
 
+    "학교 안 가는 날은 학사일정의 SBTR_DD_SC_NM 이 공휴일·휴업일인 날이다 (방학·재량휴업일 포함)" {
+        var from: String? = null
+        var to: String? = null
+        val fetcher = fetcherWith { request ->
+            from = request.url.parameters["AA_FROM_YMD"]; to = request.url.parameters["AA_TO_YMD"]
+            jsonResponse(
+                """
+                {"SchoolSchedule":[{"head":[{"list_total_count":5},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[
+                    {"AA_YMD":"20260924","EVENT_NM":"추석연휴","SBTR_DD_SC_NM":"공휴일"},
+                    {"AA_YMD":"20260929","EVENT_NM":"중간고사","SBTR_DD_SC_NM":"해당없음"},
+                    {"AA_YMD":"20261009","EVENT_NM":"한글날","SBTR_DD_SC_NM":"공휴일"},
+                    {"AA_YMD":"20261119","EVENT_NM":"재량휴업일","SBTR_DD_SC_NM":"휴업일"},
+                    {"AA_YMD":"20270108","EVENT_NM":"겨울방학","SBTR_DD_SC_NM":"휴업일"}
+                ]}]}
+                """.trimIndent()
+            )
+        }
+
+        val days = fetcher.getNoSchoolDays("B107132131", LocalDate.of(2026, 9, 1), LocalDate.of(2027, 1, 31))
+
+        from shouldBe "20260901"
+        to shouldBe "20270131"
+        days shouldBe setOf(
+            LocalDate.of(2026, 9, 24), LocalDate.of(2026, 10, 9), LocalDate.of(2026, 11, 19), LocalDate.of(2027, 1, 8)
+        )
+    }
+
     "잘못된 schoolId 형식은 HTTP 호출 전에 BadRequestException 을 던진다" {
         var called = false
         val fetcher = fetcherWith {
