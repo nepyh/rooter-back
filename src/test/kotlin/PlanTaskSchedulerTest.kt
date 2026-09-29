@@ -65,26 +65,23 @@ class PlanTaskSchedulerTest : StringSpec({
         )
 
         requestedRanges shouldBe listOf("20260928" to "20261004")
-        ranges.getValue(monday) shouldContainAll listOf((8 * 60 + 30) to (15 * 60 + 10)) // 6교시 → 15:10
-        ranges.getValue(monday.plusDays(1)) shouldContainAll listOf((8 * 60 + 30) to (16 * 60 + 10)) // 7교시 → 16:10
-        ranges.getValue(monday.plusDays(2)) shouldContainAll listOf((8 * 60 + 30) to (16 * 60 + 30)) // 데이터 없음 → 기본값
+        ranges.getValue(monday) shouldContainAll listOf(0 to (15 * 60 + 10)) // 6교시 → 15:10 까지 막힘
+        ranges.getValue(monday.plusDays(1)) shouldContainAll listOf(0 to (16 * 60 + 10)) // 7교시 → 16:10
+        ranges.getValue(monday.plusDays(2)) shouldContainAll listOf(0 to (16 * 60 + 30)) // 데이터 없음 → 기본값 16:30
     }
 
     "직접 등록한 불가 시간이 있어도 취침시간·학교시간 기본값은 유지된다" {
         val ranges = buildRanges(listOf(mondayEvening))
 
         ranges.getValue(monday) shouldContainAll listOf(
-            0 to (6 * 60 + 30),
+            0 to (16 * 60 + 30),   // 평일: 자정~하교까지 통째로
             (23 * 60) to (24 * 60),
-            (7 * 60) to (8 * 60),
-            (8 * 60 + 30) to (16 * 60 + 30),
             (18 * 60) to (20 * 60)
         )
         // 등록 안 한 요일도 기본값이 그대로 들어간다
-        ranges.getValue(monday.plusDays(1)) shouldContainAll listOf(
-            0 to (6 * 60 + 30),
-            (8 * 60 + 30) to (16 * 60 + 30)
-        )
+        ranges.getValue(monday.plusDays(1)) shouldContainAll listOf(0 to (16 * 60 + 30))
+        // 주말은 취침시간만
+        ranges.getValue(monday.plusDays(5)) shouldBe listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60))
     }
 
     "직접 등록한 불가 시간이 있어도 태스크가 새벽 00:00 에 배치되지 않는다" {
@@ -102,5 +99,16 @@ class PlanTaskSchedulerTest : StringSpec({
             PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(monday.plusDays(5)))
         )
         saturdayTasks[0].startTime shouldBe LocalTime.of(6, 30)
+    }
+
+    "평일엔 짧은 태스크도 등교 전(06:30~07:00, 08:00~08:30)에 안 들어가고 하교 후에만, 주말엔 아침부터 들어간다" {
+        val ranges = buildRanges(emptyList())
+        val shortTasks = listOf("A" to 20, "B" to 30, "C" to 20)
+
+        val weekday = PlanTaskScheduler.placeTasks(shortTasks, PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(monday)))
+        weekday.map { it.startTime } shouldBe listOf(LocalTime.of(16, 30), LocalTime.of(17, 0), LocalTime.of(17, 40))
+
+        val saturday = PlanTaskScheduler.placeTasks(shortTasks, PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(monday.plusDays(5))))
+        saturday.first().startTime shouldBe LocalTime.of(6, 30)
     }
 })
