@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.taskquiz.dto
 
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -43,5 +44,7 @@ data class TaskQuizSubmitResponse(
     // true 면 10분 뒤 재시도 퀴즈가 자동으로 생성됨. attemptNumber 3까지 실패하면 재시도는 더 없고
     // 대신 taskInvalidated 가 true 로 내려가며 해당 태스크가 미완료로 확정됨
     val retryScheduled: Boolean,
-    val taskInvalidated: Boolean
+    val taskInvalidated: Boolean,
+    // retryScheduled 일 때, 재시도 퀴즈를 풀 시간만큼 뒤로 민 오늘의 남은 태스크 (앱은 이 값이나 할 일 목록 새로고침으로 반영)
+    val shiftedTasks: List<PlanTaskResponse> = emptyList()
 )
