@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.calendar
 
+import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.calendar.dto.CalendarDayResponse
 import com.github.nepyh.rooter.module.calendar.dto.CalendarEventCreateRequest
 import com.github.nepyh.rooter.module.calendar.dto.CalendarEventResponse
@@ -67,7 +68,7 @@ class CalendarService {
                     planBoardId = it.id.value,
                     title = it.title,
                     examDate = examDate.toString(),
-                    dDay = ChronoUnit.DAYS.between(LocalDate.now(), examDate).toInt()
+                    dDay = ChronoUnit.DAYS.between(todayInAppZone(), examDate).toInt()
                 )
             }
 

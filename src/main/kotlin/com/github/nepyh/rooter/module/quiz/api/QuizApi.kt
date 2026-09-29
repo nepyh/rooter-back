@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module.quiz.api
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
+import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.quiz.QuizService
 import com.github.nepyh.rooter.module.quiz.dto.QuizGenerateRequest
 import com.github.nepyh.rooter.module.quiz.dto.QuizResponse
@@ -30,14 +31,14 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
             val request = call.receive<QuizGenerateRequest>()
             val date = request.date
                 ?.let { runCatching { LocalDate.parse(it) }.getOrElse { throw QuizValidationException.InvalidDateFormatException() } }
-                ?: LocalDate.now()
+                ?: todayInAppZone()
 
             val response = quizService.generateQuiz(userId, date)
             call.respond(HttpStatusCode.Created, response)
         }.describe {
             tag("Quiz")
             summary = "일일 퀴즈 생성"
-            description = "date(yyyy-MM-dd, 생략 시 오늘)의 완료된 학습 범위를 바탕으로 퀴즈를 생성"
+            description = "date(yyyy-MM-dd, 생략 시 한국 시간 기준 오늘)의 완료된 학습 범위를 바탕으로 퀴즈를 생성"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<QuizGenerateRequest>()
