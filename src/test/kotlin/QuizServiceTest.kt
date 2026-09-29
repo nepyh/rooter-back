@@ -138,6 +138,16 @@ class QuizServiceTest : StringSpec({
         service.getQuiz(userId, dailyPlanId).questions.map { it.id } shouldBe first.questions.map { it.id }
     }
 
+    "generateQuiz: AI 가 준 풀이를 문항마다 저장하고, 제출 전 조회 응답에는 풀이를 노출하지 않는다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        QuizService(FakeQuizLlmClient(), noNiceFetcher).generateQuiz(userId, day)
+
+        transaction(db) {
+            DailyQuizQuestionTable.selectAll().where { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
+                .orderBy(DailyQuizQuestionTable.id).map { it[DailyQuizQuestionTable.explanation] }
+        } shouldBe (1..5).map { "풀이 $it" }
+    }
+
     "generateQuiz: 동시에 두 번 요청돼도 한 세트만 저장되고 둘 다 같은 퀴즈를 받는다" {
         val (userId, dailyPlanId) = seedDailyPlan()
         // 두 요청이 모두 '퀴즈 없음' 을 확인한 뒤 LLM 호출 단계에서 겹치도록 응답을 늦춘다
@@ -184,7 +194,8 @@ private class FakeQuizLlmClient(
             GeneratedQuestion(
                 questionText = "문제 $i (호출 $n)",
                 choices = listOf("A", "B", "C", "D"),
-                correctIndex = 0
+                correctIndex = 0,
+                explanation = "풀이 $i"
             )
         }
     }

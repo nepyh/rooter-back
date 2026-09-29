@@ -112,7 +112,7 @@ class QuizSubmitServiceTest : StringSpec({
         }
         val dailyPlan = DailyPlanRow.new { planBoard = board; planDate = quizDate }
         val answers = (1..2).map { i ->
-            val question = DailyQuizQuestionRow.new { this.dailyPlan = dailyPlan; questionText = "문제 $i" }
+            val question = DailyQuizQuestionRow.new { this.dailyPlan = dailyPlan; questionText = "문제 $i"; explanation = "풀이 $i" }
             val correct = DailyQuizChoiceRow.new { this.question = question; choiceText = "정답"; isCorrect = true }
             val wrong = DailyQuizChoiceRow.new { this.question = question; choiceText = "오답"; isCorrect = false }
             question.id.value to (correct.id.value to wrong.id.value)
@@ -187,6 +187,24 @@ class QuizSubmitServiceTest : StringSpec({
         result.weakAreas.size shouldBe 2
         result.insertedReviewTasks shouldBe emptyList()
         transaction(db) { PlanTaskRow.all().count { it.taskName.startsWith("복습:") } } shouldBe 0
+    }
+
+    "제출 응답 results 에 문항별 정답 여부·정답 보기·풀이가 담긴다" {
+        val quiz = seedQuiz(friday, friday.plusDays(7))
+        val (q1, c1) = quiz.answers[0]
+        val (q2, c2) = quiz.answers[1]
+        val service = QuizService(FakeWeakAreaLlmClient(emptyList()), schoolDataFetcher)
+
+        // 1번은 맞히고 2번은 틀림
+        val result = service.submitQuiz(
+            quiz.userId, quiz.dailyPlanId,
+            listOf(QuizAnswerSubmission(q1, c1.first), QuizAnswerSubmission(q2, c2.second))
+        )
+
+        result.results.map { listOf(it.questionId, it.selectedChoiceId, it.correctChoiceId, it.correctChoiceText, it.isCorrect, it.explanation) } shouldBe listOf(
+            listOf(q1, c1.first, c1.first, "정답", true, "풀이 1"),
+            listOf(q2, c2.second, c2.first, "정답", false, "풀이 2")
+        )
     }
 
     "모두 맞히면 약점 분석을 부르지 않는다" {

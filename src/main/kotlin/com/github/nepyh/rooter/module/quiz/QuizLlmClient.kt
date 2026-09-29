@@ -20,7 +20,8 @@ import kotlinx.serialization.json.Json
 data class GeneratedQuestion(
     val questionText: String,
     val choices: List<String>,
-    val correctIndex: Int
+    val correctIndex: Int,
+    val explanation: String = "" // 풀이 과정. AI 가 빠뜨려도 파싱은 되게 기본값
 )
 
 @Serializable
