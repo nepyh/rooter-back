@@ -66,7 +66,7 @@ open class QuizLlmClient(private val appConfig: AppConfig) {
             .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
     }
 
-    suspend fun analyzeWeakAreas(wrongQuestionTexts: List<String>, chapterNames: List<String>): List<WeakAreaSuggestion> {
+    open suspend fun analyzeWeakAreas(wrongQuestionTexts: List<String>, chapterNames: List<String>): List<WeakAreaSuggestion> {
         val prompt = PromptLoader.load(
             "prompts/quiz-weak-area-analysis.md",
             "CHAPTER_NAMES" to chapterNames.joinToString(", "),

@@ -49,7 +49,9 @@ data class WeakAreaSummary(
 data class InsertedReviewTaskResponse(
     val dailyPlanId: Int,
     val planDate: String,
-    val taskName: String
+    val taskName: String,
+    val startTime: String,        // "16:30"
+    val endTime: String
 )
 
 @Serializable

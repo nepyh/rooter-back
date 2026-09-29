@@ -1,6 +1,12 @@
 package com.github.nepyh.rooter.module.quiz
 
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
+import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
+import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import com.github.nepyh.rooter.module.user.model.StudentProfileRow
+import com.github.nepyh.rooter.module.user.model.StudentProfileTable
+import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
+import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
@@ -27,12 +33,10 @@ import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionTable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.OffsetDateTime
 
 private const val DEFAULT_QUESTION_COUNT = 5
@@ -45,7 +49,8 @@ private sealed interface QuizPreparation {
 }
 
 class QuizService(
-    private val llmClient: QuizLlmClient
+    private val llmClient: QuizLlmClient,
+    private val schoolDataFetcher: SchoolDataFetcher
 ) {
 
     /**
@@ -142,105 +147,168 @@ class QuizService(
         existingQuiz(dailyPlanId, dailyPlanRow[DailyPlanTable.planDate]) ?: throw QuizNotFoundException()
     }
 
+    /**
+     * 퀴즈를 채점해 저장하고, 틀린 문제가 있으면 AI 가 뽑은 약점 단원마다 복습 태스크를 계획에 추가한다.
+     *
+     * - 채점·제출 기록은 먼저 저장해 끝낸다. 약점 분석(LLM)이 실패해도 제출은 성공하고 weakAreas 만 비어서 나간다.
+     * - 복습 태스크는 퀴즈 다음 날(플랜보드 기간을 넘으면 퀴즈 당일)에, 학교·수면·불가능 시간과
+     *   그날 이미 있는 태스크를 피해서 배치한다. 빈 시간이 없어 못 넣은 제안은 insertedReviewTasks 에서 빠진다.
+     */
     suspend fun submitQuiz(
         userId: Int,
         dailyPlanId: Int,
         answers: List<QuizAnswerSubmission>
-    ): QuizResultResponse = newSuspendedTransaction {
-        // 소유자 확인용 조인 조회 (위 generateQuiz 와 같은 이유로 Table DSL 유지)
-        val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
-            .selectAll()
-            .where { (DailyPlanTable.id eq dailyPlanId) and (PlanBoardTable.userId eq userId) }
-            .firstOrNull()
-            ?: throw QuizNotFoundException()
+    ): QuizResultResponse {
+        val graded = newSuspendedTransaction {
+            // 소유자 확인용 조인 조회 (위 generateQuiz 와 같은 이유로 Table DSL 유지)
+            val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
+                .selectAll()
+                .where { (DailyPlanTable.id eq dailyPlanId) and (PlanBoardTable.userId eq userId) }
+                .firstOrNull()
+                ?: throw QuizNotFoundException()
 
-        val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
-        val quizDate = dailyPlanRow[DailyPlanTable.planDate]
+            val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
+            val quizDate = dailyPlanRow[DailyPlanTable.planDate]
 
-        val questionIds = DailyQuizQuestionRow.find { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
-            .map { it.id.value }
-            .toSet()
+            val questionIds = DailyQuizQuestionRow.find { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
+                .map { it.id.value }
+                .toSet()
 
-        if (questionIds.isEmpty()) throw QuizNotFoundException()
+            if (questionIds.isEmpty()) throw QuizNotFoundException()
 
-        // 이미 제출했는지 확인하려면 daily_quiz_attempts + daily_quiz_choices 조인이 필요해 Table DSL 유지
-        val alreadySubmitted = (DailyQuizAttemptTable innerJoin DailyQuizChoiceTable)
-            .selectAll()
-            .where { DailyQuizChoiceTable.questionId inList questionIds }
-            .any { it[DailyQuizAttemptTable.userId] == userId }
-        if (alreadySubmitted) throw QuizValidationException.AlreadySubmittedException()
+            // 이미 제출했는지 확인하려면 daily_quiz_attempts + daily_quiz_choices 조인이 필요해 Table DSL 유지
+            val alreadySubmitted = (DailyQuizAttemptTable innerJoin DailyQuizChoiceTable)
+                .selectAll()
+                .where { DailyQuizChoiceTable.questionId inList questionIds }
+                .any { it[DailyQuizAttemptTable.userId] == userId }
+            if (alreadySubmitted) throw QuizValidationException.AlreadySubmittedException()
 
-        if (answers.any { it.questionId !in questionIds }) {
-            throw QuizValidationException.InvalidAnswerException()
-        }
-
-        var correctCount = 0
-        val wrongQuestionTexts = mutableListOf<String>()
-
-        for (answer in answers) {
-            val choiceRow = DailyQuizChoiceRow.find {
-                (DailyQuizChoiceTable.id eq answer.selectedChoiceId) and (DailyQuizChoiceTable.questionId eq answer.questionId)
-            }.firstOrNull() ?: throw QuizValidationException.InvalidAnswerException()
-
-            DailyQuizAttemptRow.new {
-                this.userId = userId
-                selectedChoice = choiceRow
-                createdAt = OffsetDateTime.now()
+            if (answers.any { it.questionId !in questionIds }) {
+                throw QuizValidationException.InvalidAnswerException()
             }
 
-            if (choiceRow.isCorrect) {
-                correctCount++
-            } else {
-                wrongQuestionTexts.add(DailyQuizQuestionRow[answer.questionId].questionText)
-            }
-        }
+            var correctCount = 0
+            val wrongQuestionTexts = mutableListOf<String>()
 
-        val weakAreas = mutableListOf<WeakAreaSummary>()
-        val insertedReviewTasks = mutableListOf<InsertedReviewTaskResponse>()
+            for (answer in answers) {
+                val choiceRow = DailyQuizChoiceRow.find {
+                    (DailyQuizChoiceTable.id eq answer.selectedChoiceId) and (DailyQuizChoiceTable.questionId eq answer.questionId)
+                }.firstOrNull() ?: throw QuizValidationException.InvalidAnswerException()
 
-        if (wrongQuestionTexts.isNotEmpty()) {
-            val chapterNames = chapterNamesForPlanBoard(planBoardId)
-            val boardEndDate = PlanBoardRow[planBoardId].endDate
-
-            val suggestions = llmClient.analyzeWeakAreas(wrongQuestionTexts, chapterNames)
-
-            for (suggestion in suggestions) {
-                weakAreas.add(
-                    WeakAreaSummary(
-                        chapterName = suggestion.chapterName,
-                        reviewTaskDescription = suggestion.reviewTaskDescription
-                    )
-                )
-
-                val targetDailyPlan = findOrCreateNextDailyPlan(planBoardId, quizDate, boardEndDate) ?: continue
-                val taskName = "복습: ${suggestion.reviewTaskDescription}".take(150)
-                val startTime = lastTaskEndTime(targetDailyPlan.first.id.value) ?: LocalTime.of(9, 0)
-                val endTime = startTime.plusMinutes(REVIEW_TASK_MINUTES.toLong())
-
-                PlanTaskRow.new {
-                    this.dailyPlan = targetDailyPlan.first
-                    this.taskName = taskName
-                    this.startTime = startTime
-                    this.endTime = endTime
-                    estimatedMinutes = REVIEW_TASK_MINUTES
+                DailyQuizAttemptRow.new {
+                    this.userId = userId
+                    selectedChoice = choiceRow
+                    createdAt = OffsetDateTime.now()
                 }
 
-                insertedReviewTasks.add(
-                    InsertedReviewTaskResponse(
-                        dailyPlanId = targetDailyPlan.first.id.value,
-                        planDate = targetDailyPlan.second.toString(),
-                        taskName = taskName
-                    )
-                )
+                if (choiceRow.isCorrect) {
+                    correctCount++
+                } else {
+                    wrongQuestionTexts.add(DailyQuizQuestionRow[answer.questionId].questionText)
+                }
             }
+
+            GradedQuiz(
+                planBoardId = planBoardId,
+                reviewDate = reviewDateFor(planBoardId, quizDate),
+                correctCount = correctCount,
+                wrongQuestionTexts = wrongQuestionTexts,
+                chapterNames = if (wrongQuestionTexts.isEmpty()) emptyList() else chapterNamesForPlanBoard(planBoardId),
+                scheduleContext = scheduleContextOf(userId)
+            )
         }
 
-        QuizResultResponse(
+        val suggestions = if (graded.wrongQuestionTexts.isEmpty()) {
+            emptyList()
+        } else {
+            // 약점 분석 실패는 제출 실패로 만들지 않는다 (채점 결과는 이미 저장됨)
+            runCatching { llmClient.analyzeWeakAreas(graded.wrongQuestionTexts, graded.chapterNames) }
+                .getOrDefault(emptyList())
+        }
+
+        val weakAreas = suggestions.map {
+            WeakAreaSummary(chapterName = it.chapterName, reviewTaskDescription = it.reviewTaskDescription)
+        }
+        val insertedReviewTasks = if (suggestions.isEmpty()) {
+            emptyList()
+        } else {
+            insertReviewTasks(graded, suggestions.map { "복습: ${it.reviewTaskDescription}".take(150) })
+        }
+
+        return QuizResultResponse(
             totalQuestions = answers.size,
-            correctCount = correctCount,
+            correctCount = graded.correctCount,
             weakAreas = weakAreas,
             insertedReviewTasks = insertedReviewTasks
         )
+    }
+
+    /** 복습 태스크를 넣을 날짜 — 퀴즈 다음 날, 그날이 플랜보드 기간을 넘으면 퀴즈 당일. 트랜잭션 안에서 호출한다. */
+    private fun reviewDateFor(planBoardId: Int, quizDate: LocalDate): LocalDate {
+        val nextDate = quizDate.plusDays(1)
+        return if (nextDate.isAfter(PlanBoardRow[planBoardId].endDate)) quizDate else nextDate
+    }
+
+    private fun scheduleContextOf(userId: Int): ReviewScheduleContext {
+        val profileRow = StudentProfileRow.find { StudentProfileTable.user eq userId }.firstOrNull()
+        return ReviewScheduleContext(
+            grade = profileRow?.grade ?: 2,
+            schoolId = profileRow?.schoolId,
+            classNumber = profileRow?.classNumber,
+            customUnavailableRows = UnavailableTimeRow.find { UnavailableTimeTable.user eq userId }.map {
+                it.dayOfWeek.code.toInt() to
+                    (PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime))
+            }
+        )
+    }
+
+    private suspend fun insertReviewTasks(graded: GradedQuiz, taskNames: List<String>): List<InsertedReviewTaskResponse> {
+        val date = graded.reviewDate
+        val ctx = graded.scheduleContext
+        // NICE 시간표 조회(네트워크)가 있어 트랜잭션 밖에서 계산해둔다
+        val unavailable = PlanTaskScheduler.buildUnavailableRanges(
+            schoolDataFetcher = schoolDataFetcher,
+            startDate = date,
+            endDate = date,
+            schoolId = ctx.schoolId,
+            classNumber = ctx.classNumber,
+            grade = ctx.grade,
+            customRows = ctx.customUnavailableRows
+        )[date].orEmpty()
+
+        return newSuspendedTransaction {
+            val dailyPlan = DailyPlanRow.find {
+                (DailyPlanTable.planBoardId eq graded.planBoardId) and (DailyPlanTable.planDate eq date)
+            }.firstOrNull() ?: DailyPlanRow.new {
+                planBoard = PlanBoardRow[graded.planBoardId]
+                planDate = date
+            }
+
+            val existingTaskRanges = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlan.id }.map {
+                PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime)
+            }
+            val placed = PlanTaskScheduler.placeTasks(
+                taskNames.map { it to REVIEW_TASK_MINUTES },
+                PlanTaskScheduler.freeIntervalsFromBusyRanges(unavailable + existingTaskRanges)
+            )
+
+            placed.map { task ->
+                PlanTaskRow.new {
+                    this.dailyPlan = dailyPlan
+                    taskName = task.taskName
+                    startTime = task.startTime
+                    endTime = task.endTime
+                    estimatedMinutes = task.estimatedMinutes
+                }
+                InsertedReviewTaskResponse(
+                    dailyPlanId = dailyPlan.id.value,
+                    planDate = date.toString(),
+                    taskName = task.taskName,
+                    startTime = task.startTime.toString(),
+                    endTime = task.endTime.toString()
+                )
+            }
+        }
     }
 
     private fun chapterNamesForPlanBoard(planBoardId: Int): List<String> {
@@ -253,36 +321,21 @@ class QuizService(
                 .map { it.chapterName }
         }
     }
-
-    private fun findOrCreateNextDailyPlan(
-        planBoardId: Int,
-        afterDate: LocalDate,
-        boardEndDate: LocalDate
-    ): Pair<DailyPlanRow, LocalDate>? {
-        val existing = DailyPlanRow.find {
-            (DailyPlanTable.planBoardId eq planBoardId) and (DailyPlanTable.planDate greater afterDate)
-        }
-            .orderBy(DailyPlanTable.planDate to SortOrder.ASC)
-            .firstOrNull()
-
-        if (existing != null) {
-            return existing to existing.planDate
-        }
-
-        val nextDate = afterDate.plusDays(1)
-        if (nextDate.isAfter(boardEndDate)) return null
-
-        val newPlan = DailyPlanRow.new {
-            planBoard = PlanBoardRow[planBoardId]
-            planDate = nextDate
-        }
-
-        return newPlan to nextDate
-    }
-
-    private fun lastTaskEndTime(dailyPlanId: Int): LocalTime? =
-        PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
-            .orderBy(PlanTaskTable.endTime to SortOrder.DESC)
-            .firstOrNull()
-            ?.endTime
 }
+
+/** submitQuiz 에서 채점 트랜잭션이 끝난 뒤 복습 태스크 배치에 넘기는 값 */
+private data class GradedQuiz(
+    val planBoardId: Int,
+    val reviewDate: LocalDate,
+    val correctCount: Int,
+    val wrongQuestionTexts: List<String>,
+    val chapterNames: List<String>,
+    val scheduleContext: ReviewScheduleContext
+)
+
+private data class ReviewScheduleContext(
+    val grade: Int,
+    val schoolId: String?,
+    val classNumber: Int?,
+    val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>
+)
