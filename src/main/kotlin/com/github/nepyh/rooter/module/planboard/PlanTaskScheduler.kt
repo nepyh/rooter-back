@@ -6,9 +6,7 @@ import java.time.LocalTime
 
 private const val DAY_MINUTES = 24 * 60
 private val DEFAULT_UNAVAILABLE_RANGES = listOf(0 to (6 * 60 + 30), (23 * 60) to DAY_MINUTES) // 00:00~06:30, 23:00~24:00
-private val SCHOOL_PREP_RANGE = (7 * 60) to (8 * 60) // 07:00~08:00, 등교 준비(세면/식사/이동), 평일만
-private const val SCHOOL_START_MINUTES = 8 * 60 + 30 // 08:30 등교, 고정
-private val DEFAULT_SCHOOL_HOURS = SCHOOL_START_MINUTES to (16 * 60 + 30) // NICE 시간표를 못 가져올 때 쓰는 폴백값 (08:30~16:30)
+private const val DEFAULT_DISMISSAL_MINUTES = 16 * 60 + 30 // NICE 시간표를 못 가져올 때 쓰는 하교시각 폴백값 (16:30)
 private const val DEFAULT_BREAK_MINUTES = 10
 
 data class PlacedTask(
@@ -29,9 +27,11 @@ object PlanTaskScheduler {
      * 날짜별 학습 불가 시간대를 만든다 (plan-generation 의 여러 날짜 생성, chat 재조정의
      * 하루짜리 범위 둘 다 이 함수로 통일해서 씀 — 재조정은 startDate == endDate 로 호출).
      *
-     * 취침시간 기본값 + 평일 학교시간을 항상 채우고, 사용자가 직접 등록한 시간대(customRows)는
-     * 그 위에 더한다. 학교시간은 NICE 실시간 시간표로 그날의 마지막 교시를 조회해 하교시각을
-     * 계산한다 (실패/데이터없음 시 기존 기본값으로 폴백).
+     * 취침시간 기본값을 항상 채우고, 평일(학교 가는 날)은 **자정부터 하교 시각까지 통째로** 막는다.
+     * → 평일에는 하교 후에만, 주말에는 아침(06:30)부터 계획이 잡힌다.
+     *   (예전엔 등교 준비 07:00~08:00 · 학교 08:30~ 만 막아서 06:30~07:00, 08:00~08:30 틈에 짧은 태스크가 들어갔음)
+     * 사용자가 직접 등록한 시간대(customRows)는 그 위에 더한다. 하교시각은 NICE 실시간 시간표로 그날의
+     * 마지막 교시를 조회해 계산한다 (실패/데이터없음 시 기본값 16:30 으로 폴백).
      */
     suspend fun buildUnavailableRanges(
         schoolDataFetcher: SchoolDataFetcher,
@@ -53,10 +53,8 @@ object PlanTaskScheduler {
 
         return dates.associateWith { date ->
             val ranges = DEFAULT_UNAVAILABLE_RANGES.toMutableList()
-            if (date.dayOfWeek.value <= 5) { // 평일(월~금)만 등교 준비 + 학교시간 추가
-                ranges.add(SCHOOL_PREP_RANGE)
-                val schoolHours = dismissalMinutesByDate[date]?.let { SCHOOL_START_MINUTES to it } ?: DEFAULT_SCHOOL_HOURS
-                ranges.add(schoolHours)
+            if (date.dayOfWeek.value <= 5) { // 평일(월~금): 등교 전 시간을 포함해 하교 시각까지 전부 막는다
+                ranges.add(0 to (dismissalMinutesByDate[date] ?: DEFAULT_DISMISSAL_MINUTES))
             }
             ranges.addAll(customByWeekday[date.dayOfWeek.value].orEmpty())
             ranges
