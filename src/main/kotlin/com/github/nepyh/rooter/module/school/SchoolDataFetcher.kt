@@ -23,6 +23,9 @@ class SchoolDataFetcher(
 
     companion object {
         private val EXAM_KEYWORDS = listOf("고사", "시험")
+
+        /** 학사일정 SBTR_DD_SC_NM 중 학교를 안 가는 날. 공휴일(추석·대체공휴일 등), 휴업일(방학·재량휴업일·개교기념일·토요휴업일) */
+        private val NO_SCHOOL_DAY_TYPES = setOf("공휴일", "휴업일")
     }
 
     /**
@@ -127,6 +130,24 @@ class SchoolDataFetcher(
         return niceClient.getAllRows("SchoolSchedule", params, SchoolEventRow.serializer()).map { row ->
             SchoolEvent(date = parseNiceDate(row.date, "AA_YMD"), name = row.name)
         }
+    }
+
+    /**
+     * [from]~[to] 중 학교를 안 가는 날(공휴일·방학·재량휴업일 등)을 NICE 학사일정으로 판별한다.
+     * 계획 배치에서 이런 날은 평일이어도 주말처럼 취급하려고 쓴다.
+     */
+    suspend fun getNoSchoolDays(schoolId: String, from: LocalDate, to: LocalDate): Set<LocalDate> {
+        val (officeCode, schoolCode) = School.splitSchoolId(schoolId)
+        val params = mapOf(
+            "ATPT_OFCDC_SC_CODE" to officeCode,
+            "SD_SCHUL_CODE" to schoolCode,
+            "AA_FROM_YMD" to from.format(DateTimeFormatter.BASIC_ISO_DATE),
+            "AA_TO_YMD" to to.format(DateTimeFormatter.BASIC_ISO_DATE)
+        )
+        return niceClient.getAllRows("SchoolSchedule", params, SchoolEventRow.serializer())
+            .filter { it.dayType in NO_SCHOOL_DAY_TYPES }
+            .map { parseNiceDate(it.date, "AA_YMD") }
+            .toSet()
     }
 
     /**

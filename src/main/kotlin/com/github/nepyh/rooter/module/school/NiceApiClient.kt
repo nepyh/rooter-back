@@ -166,7 +166,8 @@ data class TimetableRow(
 @Serializable
 data class SchoolEventRow(
     @SerialName("AA_YMD") val date: String = "",
-    @SerialName("EVENT_NM") val name: String = ""
+    @SerialName("EVENT_NM") val name: String = "",
+    @SerialName("SBTR_DD_SC_NM") val dayType: String = "" // 수업공제일명: "해당없음" / "공휴일" / "휴업일"
 )
 
 @Serializable

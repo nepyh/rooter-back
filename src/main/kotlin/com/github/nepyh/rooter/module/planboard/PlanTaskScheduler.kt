@@ -29,6 +29,7 @@ object PlanTaskScheduler {
      *
      * 취침시간 기본값을 항상 채우고, 평일(학교 가는 날)은 **자정부터 하교 시각까지 통째로** 막는다.
      * → 평일에는 하교 후에만, 주말에는 아침(06:30)부터 계획이 잡힌다.
+     *   공휴일·방학·재량휴업일처럼 학교를 안 가는 날(NICE 학사일정, [SchoolDataFetcher.getNoSchoolDays])은 평일이어도 주말처럼 취급한다.
      *   (예전엔 등교 준비 07:00~08:00 · 학교 08:30~ 만 막아서 06:30~07:00, 08:00~08:30 틈에 짧은 태스크가 들어갔음)
      * 사용자가 직접 등록한 시간대(customRows)는 그 위에 더한다. 하교시각은 NICE 실시간 시간표로 그날의
      * 마지막 교시를 조회해 계산한다 (실패/데이터없음 시 기본값 16:30 으로 폴백).
@@ -50,10 +51,17 @@ object PlanTaskScheduler {
         } else {
             emptyMap()
         }
+        // 공휴일·방학·재량휴업일 등 학교 안 가는 날 (NICE 학사일정). 학교 정보가 없거나 조회 실패면 평일은 전부 등교일로 본다
+        val noSchoolDays = if (schoolId != null) {
+            runCatching { schoolDataFetcher.getNoSchoolDays(schoolId, startDate, endDate) }.getOrElse { emptySet() }
+        } else {
+            emptySet()
+        }
 
         return dates.associateWith { date ->
             val ranges = DEFAULT_UNAVAILABLE_RANGES.toMutableList()
-            if (date.dayOfWeek.value <= 5) { // 평일(월~금): 등교 전 시간을 포함해 하교 시각까지 전부 막는다
+            // 등교일(평일이면서 공휴일·방학 등이 아닌 날): 등교 전 시간을 포함해 하교 시각까지 전부 막는다
+            if (date.dayOfWeek.value <= 5 && date !in noSchoolDays) {
                 ranges.add(0 to (dismissalMinutesByDate[date] ?: DEFAULT_DISMISSAL_MINUTES))
             }
             ranges.addAll(customByWeekday[date.dayOfWeek.value].orEmpty())
