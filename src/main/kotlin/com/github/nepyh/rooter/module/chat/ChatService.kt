@@ -1,5 +1,7 @@
 package com.github.nepyh.rooter.module.chat
 
+import com.github.nepyh.rooter.common.APP_ZONE
+import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.chat.dto.AiChatCurrentTask
 import com.github.nepyh.rooter.module.chat.dto.AiChatTurn
 import com.github.nepyh.rooter.module.chat.dto.ChatMessageResponse
@@ -29,6 +31,7 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
+import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -44,7 +47,8 @@ internal const val PLAN_NOT_APPLIED_REPLY = "계획을 바꾸려고 했는데 �
 
 class ChatService(
     private val chatLlmClient: ChatLlmClient,
-    private val schoolDataFetcher: SchoolDataFetcher
+    private val schoolDataFetcher: SchoolDataFetcher,
+    private val clock: Clock = Clock.systemUTC()
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -101,6 +105,12 @@ class ChatService(
                 pendingTasks = pendingTasks.map {
                     AiChatCurrentTask(it.taskName, it.estimatedMinutes, it.startTime.toString(), it.endTime.toString())
                 },
+                pendingExisting = pendingTasks.map {
+                    ExistingPendingTask(
+                        it.id.value, it.taskName,
+                        PlanTaskScheduler.toMinutes(it.startTime), PlanTaskScheduler.toMinutes(it.endTime)
+                    )
+                },
                 completedRanges = completedTasks.map {
                     PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime)
                 },
@@ -133,7 +143,7 @@ class ChatService(
             !busyWindowOverlapsNothing
 
         // NICE 시간표 조회(네트워크 호출)가 있어 트랜잭션 밖에서 미리 계산해둔다.
-        val freeIntervals = if (shouldReplan) {
+        val replanBusyRanges = if (shouldReplan) {
             val planDate = LocalDate.parse(context.planDate)
             val busyRanges = PlanTaskScheduler.buildUnavailableRanges(
                 schoolDataFetcher = schoolDataFetcher,
@@ -152,9 +162,16 @@ class ChatService(
             } else {
                 emptyList()
             }
-            PlanTaskScheduler.freeIntervalsFromBusyRanges(busyRanges + extraBusy + context.completedRanges)
+            busyRanges + extraBusy + context.completedRanges
         } else {
             emptyList()
+        }
+        // 오늘 계획이면 옮기는 태스크를 지난 시간에 넣지 않는다 (10분 단위로 올림)
+        val earliestMinute = if (LocalDate.parse(context.planDate) == todayInAppZone(clock)) {
+            val now = LocalTime.now(clock.withZone(APP_ZONE))
+            ((now.hour * 60 + now.minute + 9) / 10) * 10
+        } else {
+            0
         }
 
         return newSuspendedTransaction {
@@ -178,44 +195,41 @@ class ChatService(
 
             var updatedTasks: List<PlanTaskResponse>? = null
             if (shouldReplan) {
-                val placed = PlanTaskScheduler.placeTasks(
-                    update!!.tasks.map { it.task_name to it.estimated_minutes },
-                    freeIntervals
+                // 안 겹치는 태스크는 제자리(id·시각 유지), 겹치는 것만 옮긴다 — rescheduleKeepingUnaffected 참고
+                val rescheduled = rescheduleKeepingUnaffected(
+                    existing = context.pendingExisting,
+                    aiTasks = update!!.tasks.map { it.task_name to it.estimated_minutes },
+                    busyRanges = replanBusyRanges,
+                    earliestMinute = earliestMinute
                 )
 
                 val dailyPlan = DailyPlanRow[dailyPlanId]
+                val keptIds = rescheduled.mapNotNull { it.existingId }.toSet()
+                // AI 가 뺐거나 자리가 없어 못 넣은 미완료 태스크만 지운다 (완료 태스크는 건드리지 않음)
                 PlanTaskRow.find { (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq false) }
+                    .filter { it.id.value !in keptIds }
                     .forEach { it.delete() }
-                val keptTasks = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.map {
-                    PlanTaskResponse(
-                        id = it.id.value,
-                        dailyPlanId = dailyPlanId,
-                        taskName = it.taskName,
-                        startTime = it.startTime.toString(),
-                        endTime = it.endTime.toString(),
-                        estimatedMinutes = it.estimatedMinutes,
-                        isCompleted = it.isCompleted
-                    )
+                rescheduled.forEach { task ->
+                    val row = task.existingId?.let { PlanTaskRow.findById(it) } ?: PlanTaskRow.new { this.dailyPlan = dailyPlan }
+                    row.taskName = task.taskName
+                    row.startTime = task.startTime
+                    row.endTime = task.endTime
+                    row.estimatedMinutes = task.estimatedMinutes
                 }
-                val newTasks = placed.map { task ->
-                    val planTask = PlanTaskRow.new {
-                        this.dailyPlan = dailyPlan
-                        taskName = task.taskName
-                        startTime = task.startTime
-                        endTime = task.endTime
-                        estimatedMinutes = task.estimatedMinutes
+
+                updatedTasks = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
+                    .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
+                    .map {
+                        PlanTaskResponse(
+                            id = it.id.value,
+                            dailyPlanId = dailyPlanId,
+                            taskName = it.taskName,
+                            startTime = it.startTime.toString(),
+                            endTime = it.endTime.toString(),
+                            estimatedMinutes = it.estimatedMinutes,
+                            isCompleted = it.isCompleted
+                        )
                     }
-                    PlanTaskResponse(
-                        id = planTask.id.value,
-                        dailyPlanId = dailyPlanId,
-                        taskName = task.taskName,
-                        startTime = task.startTime.toString(),
-                        endTime = task.endTime.toString(),
-                        estimatedMinutes = task.estimatedMinutes,
-                        isCompleted = false
-                    )
-                }
-                updatedTasks = (keptTasks + newTasks).sortedBy { it.startTime }
             }
 
             // AI 가 계획을 바꿨다고 했는데 서버가 적용하지 못한 경우(바꿀 태스크 목록 없음 등), 사용자가 바뀐 줄 알지 않도록 답변을 바로잡는다
@@ -289,6 +303,7 @@ private data class ChatContext(
     val planDate: String,
     val dayOfWeekLabel: String,
     val pendingTasks: List<AiChatCurrentTask>,
+    val pendingExisting: List<ExistingPendingTask>,
     val completedRanges: List<Pair<Int, Int>>,
     val grade: Int,
     val schoolId: String?,
