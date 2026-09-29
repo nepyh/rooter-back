@@ -44,6 +44,7 @@ open class ChatLlmClient(private val appConfig: AppConfig) {
         targetDate: String,
         currentTasksJson: String,
         chatHistoryJson: String,
+        planBoardSummary: String,
         userMessage: String
     ): AiChatResult? {
         val prompt = PromptLoader.load(
@@ -53,6 +54,7 @@ open class ChatLlmClient(private val appConfig: AppConfig) {
             "TARGET_DATE" to targetDate,
             "CURRENT_TASKS_JSON" to currentTasksJson,
             "CHAT_HISTORY_JSON" to chatHistoryJson,
+            "PLAN_BOARD" to planBoardSummary,
             "USER_MESSAGE" to userMessage
         )
 
