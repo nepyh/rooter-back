@@ -1,5 +1,7 @@
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
+import com.github.nepyh.rooter.module.planboard.GeneratedDailyPlan
+import com.github.nepyh.rooter.module.planboard.GeneratedPlan
 import com.github.nepyh.rooter.module.planboard.PlanGenerationLlmClient
 import com.github.nepyh.rooter.module.planboard.PlanGenerationService
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationRequest
@@ -12,6 +14,8 @@ import com.github.nepyh.rooter.module.planboard.PlanBoardService
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.orderedTextbookChapters
+import com.github.nepyh.rooter.module.planboard.splitIntoChunks
+import com.github.nepyh.rooter.module.planboard.topicsForChunk
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectCreateRequest
@@ -36,6 +40,9 @@ import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
+import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultTable
+import com.github.nepyh.rooter.module.user.model.StudentProfileTable
+import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.assertions.throwables.shouldThrow
@@ -82,6 +89,9 @@ class PlanBoardServiceTest : StringSpec({
         transaction(db) {
             // CASCADE 로 드랍: users 를 다른 스펙(예: CatalogServiceTest)의 테이블이 FK 로 참조하고
             // 있어도 실행 순서와 무관하게 안전하게 재생성하기 위함
+            exec("DROP TABLE IF EXISTS level_test_results CASCADE")
+            exec("DROP TABLE IF EXISTS student_profiles CASCADE")
+            exec("DROP TABLE IF EXISTS user_unavailable_times CASCADE")
             exec("DROP TABLE IF EXISTS plan_subjects CASCADE")
             exec("DROP TABLE IF EXISTS plan_tasks CASCADE")
             exec("DROP TABLE IF EXISTS daily_plans CASCADE")
@@ -90,7 +100,11 @@ class PlanBoardServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS textbooks CASCADE")
             exec("DROP TABLE IF EXISTS subjects CASCADE")
             exec("DROP TABLE IF EXISTS users CASCADE")
-            SchemaUtils.create(UserTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable)
+            SchemaUtils.create(
+                UserTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable,
+                // plan-generation 이 등급·프로필·불가 시간을 조회한다
+                LevelTestResultTable, StudentProfileTable, UnavailableTimeTable
+            )
             // DDL(rooter-ddl) 의 uq_daily_plans_board_date 와 동일한 제약 — insertIgnore 레이스 방지 검증용
             exec("ALTER TABLE daily_plans ADD CONSTRAINT uq_daily_plans_board_date UNIQUE (plan_board_id, plan_date)")
         }
@@ -99,6 +113,9 @@ class PlanBoardServiceTest : StringSpec({
     // 테스트 간 데이터 격리: 매 테스트 시작 전 전체 초기화 (FK 순서 주의)
     beforeEach {
         transaction(db) {
+            LevelTestResultTable.deleteAll()
+            StudentProfileTable.deleteAll()
+            UnavailableTimeTable.deleteAll()
             PlanTaskTable.deleteAll()
             PlanSubjectTable.deleteAll()
             DailyPlanTable.deleteAll()
@@ -447,6 +464,88 @@ class PlanBoardServiceTest : StringSpec({
                 )
             )
         }
+    }
+
+    "plan-generation: 14일을 넘으면 비슷한 길이의 구간으로 나눈다" {
+        splitIntoChunks(14) shouldBe listOf(1..14)
+        splitIntoChunks(15) shouldBe listOf(1..8, 9..15)
+        splitIntoChunks(30) shouldBe listOf(1..10, 11..20, 21..30)
+        splitIntoChunks(60).map { it.count() } shouldBe listOf(12, 12, 12, 12, 12)
+    }
+
+    "plan-generation: 단원은 구간 비율만큼 나눠 주고, 단원이 적으면 구간끼리 겹쳐 쓴다" {
+        val topics = listOf("1", "2", "3", "4", "5", "6")
+        topicsForChunk(topics, 1..10, 30) shouldBe listOf("1", "2")
+        topicsForChunk(topics, 11..20, 30) shouldBe listOf("3", "4")
+        topicsForChunk(topics, 21..30, 30) shouldBe listOf("5", "6")
+        topicsForChunk(listOf("1"), 11..20, 30) shouldBe listOf("1")
+    }
+
+    "plan-generation: 30일 계획은 3구간으로 나눠 생성하고 30일치를 모두 저장한다" {
+        val userId = seedUser("gen-chunk@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val math2 = seedChapter(math, 2)
+        val llm = FakePlanGenerationLlmClient()
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+
+        val response = service.generate(
+            userId,
+            PlanGenerationRequest(
+                title = "긴 계획",
+                subjects = listOf(PlanGenerationSubjectInput(math, math1, math2)),
+                startDate = "2026-07-01",
+                daysRemaining = 30
+            )
+        )
+
+        llm.contexts.size shouldBe 3
+        llm.contexts.all { it.contains("총 학습 기간: 10일") } shouldBe true
+        response.dailyPlans.map { it.date } shouldBe (0L until 30L).map { LocalDate.of(2026, 7, 1).plusDays(it).toString() }
+        transaction(db) { DailyPlanRow.find { DailyPlanTable.planBoardId eq response.planBoardId }.count() } shouldBe 30L
+    }
+
+    "plan-generation: 일수가 모자라게 오면 한 번 더 요청해서 채운다" {
+        val userId = seedUser("gen-retry@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient(shortResponses = 1)
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+
+        val response = service.generate(
+            userId,
+            PlanGenerationRequest(
+                title = "재시도",
+                subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)),
+                startDate = "2026-07-01",
+                daysRemaining = 7
+            )
+        )
+
+        llm.contexts.size shouldBe 2
+        response.dailyPlans.size shouldBe 7
+    }
+
+    "plan-generation: 다시 요청해도 모자라면 일부만 저장하지 않고 GenerationFailedException" {
+        val userId = seedUser("gen-short@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient(shortResponses = Int.MAX_VALUE)
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+
+        shouldThrow<PlanBoardValidationException.GenerationFailedException> {
+            service.generate(
+                userId,
+                PlanGenerationRequest(
+                    title = "실패",
+                    subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)),
+                    startDate = "2026-07-01",
+                    daysRemaining = 7
+                )
+            )
+        }
+        llm.contexts.size shouldBe 2
+        transaction(db) { PlanBoardRow.find { PlanBoardTable.userId eq userId }.count() } shouldBe 0L
     }
 
     "addSubject: 정상 등록되면 subjectName/textbookTitle 이 채워진다" {
@@ -805,6 +904,24 @@ class PlanBoardServiceTest : StringSpec({
         planTaskService.completeTask(userId, taskId, true).dailyPlanId shouldBe dailyPlanId
     }
 })
+
+// context 의 "총 학습 기간: N일" 만큼 계획을 돌려준다. shortResponses 번째까지는 절반만 돌려준다.
+private class FakePlanGenerationLlmClient(private var shortResponses: Int = 0) : PlanGenerationLlmClient(dummyAppConfig()) {
+    val contexts = java.util.Collections.synchronizedList(mutableListOf<String>())
+
+    override suspend fun generatePlan(context: String): GeneratedPlan {
+        contexts += context
+        val days = Regex("총 학습 기간: (\\d+)일").find(context)!!.groupValues[1].toInt()
+        val returned = synchronized(this) { if (shortResponses > 0) { shortResponses--; days / 2 } else days }
+        return GeneratedPlan(
+            daily_plans = (1..returned).map { GeneratedDailyPlan(day = it, topics = listOf("주제"), goal = "목표") },
+            tips = listOf("팁")
+        )
+    }
+}
+
+private fun noNiceSchoolDataFetcher() =
+    SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") })))
 
 private fun dummyAppConfig() = AppConfig(
     environment = EnvironmentMode.DEV,
