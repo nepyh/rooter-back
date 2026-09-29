@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.school.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.school.dto.SchoolExamScheduleResponse
 import com.github.nepyh.rooter.module.school.dto.SchoolSearchResponse
@@ -12,7 +13,6 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.get
 import io.ktor.server.routing.openapi.describe
 import io.ktor.utils.io.ExperimentalKtorApi
-import java.time.LocalDate
 
 private const val MAX_RESULTS = 20
 
@@ -75,7 +75,7 @@ fun SchoolApi(schoolDataFetcher: SchoolDataFetcher) = ApiRoute("school") {
         }
         // 학년도는 3월에 시작 — 1~2월이면 아직 전년도 학년도
         val year = call.request.queryParameters["year"]?.toIntOrNull()
-            ?: LocalDate.now().let { if (it.monthValue >= 3) it.year else it.year - 1 }
+            ?: todayInAppZone().let { if (it.monthValue >= 3) it.year else it.year - 1 }
 
         val candidates = schoolDataFetcher.getExamScheduleCandidates(schoolId, year)
         call.respond(

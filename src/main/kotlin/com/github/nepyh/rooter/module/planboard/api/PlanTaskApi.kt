@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module.planboard.api
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
+import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCompleteRequest
@@ -37,7 +38,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                 runCatching { LocalDate.parse(dateParam) }
                     .getOrElse { throw PlanTaskValidationException.InvalidDateParamException() }
             } else {
-                LocalDate.now()
+                todayInAppZone()
             }
 
             val dailyPlan = planTaskService.getDailyPlan(call.userId(), date)
@@ -45,7 +46,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("PlanTask")
             summary = "일일 태스크 목록 조회"
-            description = "date 파라미터(yyyy-MM-dd)로 지정한 날짜의 태스크를 조회, 생략 시 오늘 날짜. 본인 플랜보드 기준. 여러 플랜보드의 태스크를 합쳐서 주므로 응답 최상위 dailyPlanId 는 null — 피드백·챗봇 호출에는 각 태스크의 dailyPlanId 를 사용"
+            description = "date 파라미터(yyyy-MM-dd)로 지정한 날짜의 태스크를 조회, 생략 시 오늘 날짜(한국 시간 기준). 본인 플랜보드 기준. 여러 플랜보드의 태스크를 합쳐서 주므로 응답 최상위 dailyPlanId 는 null — 피드백·챗봇 호출에는 각 태스크의 dailyPlanId 를 사용"
             parameters {
                 query("date") {
                     description = "조회할 날짜 (yyyy-MM-dd)"
@@ -78,7 +79,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                 runCatching { LocalDate.parse(dateParam) }
                     .getOrElse { throw PlanTaskValidationException.InvalidDateParamException() }
             } else {
-                LocalDate.now()
+                todayInAppZone()
             }
 
             val weeklyPlan = planTaskService.getWeeklyPlan(call.userId(), date)
@@ -86,7 +87,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("PlanTask")
             summary = "할 일 탭 - 주간 과제 리스트 조회"
-            description = "date가 속한 주(월~일)의 요일별 태스크 목록을 조회, date 생략 시 오늘이 속한 주. 본인 플랜보드 기준(모든 보드 대상). 여러 플랜보드의 태스크를 합쳐서 주므로 응답 최상위 dailyPlanId 는 null — 피드백·챗봇 호출에는 각 태스크의 dailyPlanId 를 사용"
+            description = "date가 속한 주(월~일)의 요일별 태스크 목록을 조회, date 생략 시 오늘(한국 시간 기준)이 속한 주. 본인 플랜보드 기준(모든 보드 대상). 여러 플랜보드의 태스크를 합쳐서 주므로 응답 최상위 dailyPlanId 는 null — 피드백·챗봇 호출에는 각 태스크의 dailyPlanId 를 사용"
             parameters {
                 query("date") {
                     description = "기준 날짜 (yyyy-MM-dd), 이 날짜가 속한 주(월~일)를 반환"

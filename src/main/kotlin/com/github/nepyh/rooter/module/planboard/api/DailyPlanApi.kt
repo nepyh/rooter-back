@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module.planboard.api
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
+import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
@@ -31,7 +32,7 @@ fun DailyPlanApi(planTaskService: PlanTaskService) = ApiRoute("plan-boards") {
                 runCatching { LocalDate.parse(dateParam) }
                     .getOrElse { throw PlanTaskValidationException.InvalidDateParamException() }
             } else {
-                LocalDate.now()
+                todayInAppZone()
             }
 
             val plan = planTaskService.getBoardDailyPlan(call.userId(), boardId, date)

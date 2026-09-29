@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.planboard
 
+import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultRow
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultTable
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationDailyResponse
@@ -61,7 +62,7 @@ class PlanGenerationService(
 
         val startDate = request.startDate
             ?.let { runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() } }
-            ?: LocalDate.now()
+            ?: todayInAppZone()
         val examDate = request.examDate
             ?.let { runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() } }
 
