@@ -39,6 +39,14 @@ class PlanTaskSchedulerTest : StringSpec({
         val requestedRanges = mutableListOf<Pair<String?, String?>>()
         val timetableFetcher = SchoolDataFetcher(
             NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { request ->
+                // 학사일정(쉬는 날 조회)은 이번 주 쉬는 날 없음
+                if (request.url.encodedPath.endsWith("SchoolSchedule")) {
+                    return@MockEngine respond(
+                        content = """{"RESULT":{"CODE":"INFO-200","MESSAGE":"해당하는 데이터가 없습니다."}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                }
                 requestedRanges += request.url.parameters["TI_FROM_YMD"] to request.url.parameters["TI_TO_YMD"]
                 // 월요일 6교시, 화요일 7교시 (수~금은 시간표 없음 → 기본 하교 16:30)
                 respond(
@@ -110,5 +118,44 @@ class PlanTaskSchedulerTest : StringSpec({
 
         val saturday = PlanTaskScheduler.placeTasks(shortTasks, PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(monday.plusDays(5))))
         saturday.first().startTime shouldBe LocalTime.of(6, 30)
+    }
+
+    "공휴일·방학처럼 학교 안 가는 날은 평일이어도 주말처럼 아침부터 계획이 잡힌다" {
+        val holidayMonday = LocalDate.of(2026, 10, 5) // 대체공휴일
+        val fetcher = SchoolDataFetcher(
+            NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { request ->
+                val body = if (request.url.encodedPath.endsWith("SchoolSchedule")) {
+                    """
+                    {"SchoolSchedule":[{"head":[{"list_total_count":3},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[
+                        {"AA_YMD":"20261005","EVENT_NM":"대체공휴일","SBTR_DD_SC_NM":"공휴일"},
+                        {"AA_YMD":"20261007","EVENT_NM":"중간고사","SBTR_DD_SC_NM":"해당없음"},
+                        {"AA_YMD":"20261009","EVENT_NM":"한글날","SBTR_DD_SC_NM":"공휴일"}
+                    ]}]}
+                    """.trimIndent()
+                } else {
+                    """{"RESULT":{"CODE":"INFO-200","MESSAGE":"해당하는 데이터가 없습니다."}}"""
+                }
+                respond(content = body, status = HttpStatusCode.OK, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+            }))
+        )
+
+        val ranges = PlanTaskScheduler.buildUnavailableRanges(
+            schoolDataFetcher = fetcher,
+            startDate = holidayMonday,
+            endDate = holidayMonday.plusDays(6),
+            schoolId = "B107132131",
+            classNumber = 1,
+            grade = 1,
+            customRows = emptyList()
+        )
+
+        val sleepOnly = listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60))
+        ranges.getValue(holidayMonday) shouldBe sleepOnly                                  // 대체공휴일 → 주말처럼
+        ranges.getValue(LocalDate.of(2026, 10, 9)) shouldBe sleepOnly                     // 한글날(금)
+        ranges.getValue(LocalDate.of(2026, 10, 6)) shouldContainAll listOf(0 to (16 * 60 + 30)) // 평일 등교일은 그대로
+        ranges.getValue(LocalDate.of(2026, 10, 7)) shouldContainAll listOf(0 to (16 * 60 + 30)) // 행사 있어도 등교일
+
+        val holidayTasks = PlanTaskScheduler.placeTasks(listOf("A" to 30), PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(holidayMonday)))
+        holidayTasks.single().startTime shouldBe LocalTime.of(6, 30)
     }
 })
