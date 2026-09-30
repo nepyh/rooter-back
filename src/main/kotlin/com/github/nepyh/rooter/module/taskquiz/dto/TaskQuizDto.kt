@@ -13,7 +13,9 @@ data class TaskQuizChoiceResponse(
 data class TaskQuizQuestionResponse(
     val id: Int,
     val questionText: String,
-    val choices: List<TaskQuizChoiceResponse>
+    val choices: List<TaskQuizChoiceResponse>,
+    // 이미 답한 문제면 고른 보기 id, 아직이면 null — 앱을 껐다 켜도 이어서 풀 수 있게
+    val selectedChoiceId: Int? = null
 )
 
 @Serializable
@@ -24,14 +26,29 @@ data class TaskQuizResponse(
 )
 
 @Serializable
-data class TaskQuizAnswer(
-    val questionId: Int,
+data class TaskQuizAnswerRequest(
     val selectedChoiceId: Int
 )
 
+/** 문제 하나를 풀 때마다 즉시 돌려주는 채점 결과. 한 번 답하면 같은 문제엔 다시 호출할 수 없음 */
 @Serializable
-data class TaskQuizSubmitRequest(
-    val answers: List<TaskQuizAnswer>
+data class TaskQuizAnswerResponse(
+    val questionId: Int,
+    val isCorrect: Boolean,
+    val correctChoiceId: Int,
+    val reason: String? // 틀렸을 때 고른 보기가 왜 틀렸는지 한두 문장. 맞으면 null
+)
+
+/** 제출 시점에 DB 에 저장된 답으로 채점한 문항별 결과 */
+@Serializable
+data class TaskQuizQuestionResult(
+    val questionId: Int,
+    val questionText: String,
+    val selectedChoiceId: Int,
+    val correctChoiceId: Int,
+    val correctChoiceText: String,
+    val isCorrect: Boolean,
+    val explanation: String
 )
 
 @Serializable
@@ -45,6 +62,7 @@ data class TaskQuizSubmitResponse(
     // 대신 taskInvalidated 가 true 로 내려가며 해당 태스크가 미완료로 확정됨
     val retryScheduled: Boolean,
     val taskInvalidated: Boolean,
+    val results: List<TaskQuizQuestionResult>,
     // retryScheduled 일 때, 재시도 퀴즈를 풀 시간만큼 뒤로 민 오늘의 남은 태스크 (앱은 이 값이나 할 일 목록 새로고침으로 반영)
     val shiftedTasks: List<PlanTaskResponse> = emptyList()
 )

@@ -9,7 +9,6 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.taskquiz.ShiftableTask
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizLlmClient
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
-import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizAnswer
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptRow
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceRow
@@ -136,11 +135,16 @@ class TaskQuizShiftTest : StringSpec({
         Seeded(user.id.value, quizTask, otherIds, answers)
     }
 
-    fun allWrong(s: Seeded) = s.answers.map { (q, c) -> TaskQuizAnswer(q, c.second) }
+    val service = TaskQuizService(NoLlm, at1705)
+
+    /** 문제마다 답을 저장한 뒤 제출한다. correct=false 면 전부 오답 */
+    fun answerAllAndSubmit(s: Seeded, correct: Boolean) = run {
+        s.answers.forEach { (q, c) -> service.answerQuestion(s.userId, s.quizTaskId, q, if (correct) c.first else c.second) }
+        service.submitQuiz(s.userId, s.quizTaskId)
+    }
     fun timesOf(ids: Collection<Int>) = transaction(db) {
         ids.associateWith { id -> PlanTaskRow[id].let { "${it.startTime}~${it.endTime}" } }
     }
-    val service = TaskQuizService(NoLlm, at1705)
 
     "불합격이라 재시도가 잡히면 오늘 아직 시작 안 한 미완료 태스크만 15분 뒤로 민다" {
         val s = seed(
@@ -153,7 +157,7 @@ class TaskQuizShiftTest : StringSpec({
             )
         )
 
-        val response = service.submitQuiz(s.userId, s.quizTaskId, allWrong(s))
+        val response = answerAllAndSubmit(s, correct = false)
 
         response.retryScheduled shouldBe true
         // "다음 공부" 는 17:25 로 밀리면 "진행 중"(~17:30)과 겹쳐서 그 뒤로
@@ -171,14 +175,14 @@ class TaskQuizShiftTest : StringSpec({
     "밀 때 학원 같은 불가능 시간은 건너뛴다" {
         val s = seed(1, listOf(Triple("다음 공부", "17:40~18:10", false)), academy = "18:00" to "20:00")
 
-        val response = service.submitQuiz(s.userId, s.quizTaskId, allWrong(s))
+        val response = answerAllAndSubmit(s, correct = false)
 
         response.shiftedTasks.single().let { "${it.startTime}~${it.endTime}" } shouldBe "20:00~20:30"
     }
 
     "3번째에서도 떨어지면 더 재시도가 없으니 밀지 않는다" {
         val last = seed(3, listOf(Triple("다음 공부", "17:10~17:50", false)))
-        val lastResponse = service.submitQuiz(last.userId, last.quizTaskId, allWrong(last))
+        val lastResponse = answerAllAndSubmit(last, correct = false)
         lastResponse.taskInvalidated shouldBe true
         lastResponse.shiftedTasks shouldBe emptyList()
         timesOf(last.otherTaskIds.values).values.single() shouldBe "17:10~17:50"
@@ -186,7 +190,7 @@ class TaskQuizShiftTest : StringSpec({
 
     "통과하면 밀지 않는다" {
         val s = seed(1, listOf(Triple("다음 공부", "17:10~17:50", false)))
-        val response = service.submitQuiz(s.userId, s.quizTaskId, s.answers.map { (q, c) -> TaskQuizAnswer(q, c.first) })
+        val response = answerAllAndSubmit(s, correct = true)
         response.passed shouldBe true
         response.shiftedTasks shouldBe emptyList()
     }

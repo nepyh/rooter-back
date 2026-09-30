@@ -22,7 +22,8 @@ data class GeneratedTaskQuizQuestion(
     val question_text: String,
     val choices: List<String>,
     val correct_index: Int,
-    val explanation: String
+    val explanation: String, // 다 푼 뒤 보여줄 자세한 풀이
+    val choice_reasons: List<String> = emptyList() // choices 와 같은 순서, 그 보기를 골랐을 때 바로 보여줄 틀린 이유 (정답 자리는 "")
 )
 
 @Serializable

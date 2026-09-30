@@ -9,6 +9,8 @@ import org.jetbrains.exposed.v1.dao.IntEntityClass
 object TaskQuizQuestionTable : IntIdTable("task_quiz_questions") {
     val attemptId = reference("attempt_id", TaskQuizAttemptTable)
     val questionText = text("question_text")
+    // 학생이 고른 보기. task_quiz_choices 와 순환 참조라 FK는 나중에 (ChapterTable.parentId 와 같은 이유)
+    val selectedChoiceId = integer("selected_choice_id").nullable()
 }
 
 class TaskQuizQuestionRow(id: EntityID<Int>) : IntEntity(id) {
@@ -16,4 +18,5 @@ class TaskQuizQuestionRow(id: EntityID<Int>) : IntEntity(id) {
 
     var attempt by TaskQuizAttemptRow referencedOn TaskQuizQuestionTable.attemptId
     var questionText by TaskQuizQuestionTable.questionText
+    var selectedChoiceId by TaskQuizQuestionTable.selectedChoiceId
 }
