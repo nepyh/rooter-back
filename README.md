@@ -59,6 +59,11 @@ class UserRow(id: EntityID<Int>) : IntEntity(id) {
 - 정적 액세스 키(`AWS_ACCESS_KEY_ID` 등)는 어느 환경에서도 `.env`/태스크 정의에 넣지 않습니다 — 기본 체인에서 env 가 최우선이라 다른 인증 경로가 조용히 무시됩니다
 - s3 는 설정이 대체로 복잡함. [여기](https://app.notion.com/p/aws-s3-3957e62f83ed80608cd8e2abab084758?source=copy_link)참고
 
+환경변수 배선
+- 외부 주입 값은 `.env.*.example` → `docker-compose.*.yml` → `*.conf` → `AppConfig.kt` 4단계를 거칩니다. 한 단계라도 빠지면 컨테이너에서 값이 비어 있거나 기동 자체가 실패합니다
+- `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 은 `*.conf` 에서 **필수 치환**(`${VAR}`)입니다. 컨테이너에 값이 아예 없으면 기동하지 않고(빈 문자열은 통과), 그래서 두 compose 모두 `${VAR}` 형태로 항상 넘깁니다
+- `GOOGLE_CLIENT_ID` / `APPLE_CLIENT_ID` 는 선택 치환(`${?VAR}`)이라 없어도 기동하지만, 컨테이너로 전달되지 않으면 소셜 로그인이 꺼진 상태로 돕니다
+
 ## running a production container
 
 1. `.env.prod.example` 파일을 참고하여 `.env` 파일을 작성하거나 환경 변수를 설정합니다
@@ -104,7 +109,7 @@ ROLESANYWHERE_ROLE_ARN=arn:aws:iam::<계정>:role/<역할명>
 ```
 
 ## running a development container
-1. `.env.dev.example` 복사하여 `.env` 로 이름만 바꿉니다
+1. `.env.dev.example` 복사하여 `.env` 로 이름만 바꿉니다 (예제에 로컬 기동용 기본값이 들어 있어 값 수정 없이 바로 뜹니다)
 
 2. `docker compose -f ./docker-compose.dev.yml up -d --build` 또는 \
    `podman-compose -f ./docker-compose.dev.yml up -d --build` 를 실행합니다
@@ -153,7 +158,7 @@ roles-anywhere-helper (인증서 + ARN 3종, 가짜 EC2 IMDS :9911)
 ## running application using gradle (local jvm)
 애플리케이션을 컨테이너가 아닌, 로컬에서 바로 실행하는 방식입니다
 
-1. `.env.dev.example` 복사하여 `.env` 로 이름만 바꿉니다
+1. `.env.dev.example` 복사하여 `.env` 로 이름만 바꿉니다 (예제에 로컬 기동용 기본값이 들어 있어 값 수정 없이 바로 뜹니다)
 
 2. `docker compose -f ./docker-compose.dev.yml up -d --build db` 또는 \
    `podman-compose -f ./docker-compose.dev.yml up -d --build db` 를 실행합니다
@@ -199,7 +204,7 @@ AWS_PROFILE=rooter-s3-dev ./gradlew run --args="-config=dev-s3.conf"
 
 `.github/workflows/deploy.yml` 이 `main` 브랜치 push 시 이미지를 ECR 에 올리고 ECS 서비스를 갱신합니다.
 
-1. ECS **태스크 정의**에 `AWS_REGION` / `AWS_BUCKET` 환경변수를 넣습니다 (`prod.conf` 의 치환값)
+1. ECS **태스크 정의**에 `AWS_REGION` / `AWS_BUCKET` / `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 환경변수를 넣습니다 (`prod.conf` 의 치환값 — LLM 3종이 없으면 컨테이너가 기동하지 않음)
 2. **태스크 역할(task role)** 에 버킷 접근 권한을 부여합니다
    - `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` → `arn:aws:s3:::<버킷>/*`
    - `s3:ListBucket` → `arn:aws:s3:::<버킷>`

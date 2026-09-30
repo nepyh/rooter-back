@@ -19,6 +19,16 @@ services:
 
       - NICE_API_KEY=${NICE_API_KEY}
 
+      # LLM(퀴즈·계획 생성) — prod.conf 가 필수 치환으로 참조해서, 값이 아예 없으면
+      # 컨테이너가 기동하지 않음. 빈 값이어도 치환은 성공하므로 ${VAR} 형태로 항상 넘긴다
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
+
+      # 소셜 로그인 클라이언트 ID — 미주입이면 .env 에 값을 채워도 컨테이너로는 안 넘어감
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - APPLE_CLIENT_ID=${APPLE_CLIENT_ID}
+
       - AWS_REGION=${AWS_REGION}
       - AWS_BUCKET=${AWS_BUCKET}
       # IAM Roles Anywhere — AWS 외부 배포용. 이미지에 임베드된 helper 를
