@@ -154,6 +154,7 @@ class TaskQuizServiceTest : StringSpec({
 
         response.isCorrect shouldBe true
         response.correctChoiceId shouldBe correctChoiceId
+        response.reason shouldBe null
         transaction(db) { TaskQuizQuestionRow[firstQuestion.id].selectedChoiceId } shouldBe correctChoiceId
     }
 
@@ -169,6 +170,7 @@ class TaskQuizServiceTest : StringSpec({
 
         response.isCorrect shouldBe false
         response.correctChoiceId shouldBe firstQuestion.choices[0].id
+        response.reason shouldBe "B 가 틀린 이유" // 고른 오답 보기의 짧은 이유
     }
 
     "answerQuestion: 이미 답한 문제에 다시 답하면 AlreadyAnsweredException — 정답을 본 뒤 답 변경을 막는다" {
@@ -239,9 +241,52 @@ class TaskQuizServiceTest : StringSpec({
             service.submitQuiz(userId, taskId)
         }
     }
+    "submitQuiz: results 의 explanation 은 짧은 이유가 아니라 정답 보기의 자세한 풀이다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val userId = lastUserId
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+        service.generateAttempt(taskId, 1, "수학 문제집 풀기")
+        val questions = service.getCurrentQuiz(userId, taskId).questions
+        questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choices[1].id) } // 전부 오답
+
+        val response = service.submitQuiz(userId, taskId)
+
+        response.correctCount shouldBe 0
+        response.results.map { it.explanation } shouldBe (1..5).map { "자세한 풀이 $it" }
+    }
+
+    "getCurrentQuiz: 이미 답한 문제는 selectedChoiceId 가 채워져 앱을 다시 켜도 이어서 풀 수 있다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val userId = lastUserId
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+        service.generateAttempt(taskId, 1, "수학 문제집 풀기")
+        val first = service.getCurrentQuiz(userId, taskId).questions.first()
+        service.answerQuestion(userId, taskId, first.id, first.choices[2].id)
+
+        val questions = service.getCurrentQuiz(userId, taskId).questions
+
+        questions.first().selectedChoiceId shouldBe first.choices[2].id
+        questions.drop(1).map { it.selectedChoiceId } shouldBe List(4) { null }
+    }
+
+    "generateAttempt: 정답 번호가 보기 범위를 벗어난 문제는 저장하지 않는다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val llm = FakeTaskQuizLlmClient(
+            (1..5).map { GeneratedTaskQuizQuestion("문제 $it", listOf("A", "B", "C", "D"), if (it == 3) 4 else 0, "풀이") }
+        )
+
+        TaskQuizService(llm).generateAttempt(taskId, 1, "수학 문제집 풀기")
+
+        transaction(db) { TaskQuizQuestionTable.selectAll().count() } shouldBe 4L
+        transaction(db) { TaskQuizAttemptTable.selectAll().single()[TaskQuizAttemptTable.totalCount] } shouldBe 4
+    }
 })
 
-private class FakeTaskQuizLlmClient : TaskQuizLlmClient(dummyAppConfig()) {
+private class FakeTaskQuizLlmClient(
+    private val questions: List<GeneratedTaskQuizQuestion> = (1..5).map {
+        GeneratedTaskQuizQuestion("문제 $it", listOf("A", "B", "C", "D"), 0, "자세한 풀이 $it", listOf("", "B 가 틀린 이유", "C 가 틀린 이유", "D 가 틀린 이유"))
+    }
+) : TaskQuizLlmClient(dummyAppConfig()) {
     var lastTaskName: String? = null
     var lastGradeLabel: String? = null
     var lastStudyScope: String? = null
@@ -250,7 +295,7 @@ private class FakeTaskQuizLlmClient : TaskQuizLlmClient(dummyAppConfig()) {
         lastTaskName = taskName
         lastGradeLabel = gradeLabel
         lastStudyScope = studyScope
-        return (1..5).map { GeneratedTaskQuizQuestion("문제 $it", listOf("A", "B", "C", "D"), 0, "해설") }
+        return questions
     }
 }
 
