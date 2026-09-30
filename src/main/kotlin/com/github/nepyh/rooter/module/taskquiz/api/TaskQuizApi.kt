@@ -33,7 +33,7 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("TaskQuiz")
             summary = "태스크 완료 확인 퀴즈 조회"
-            description = "태스크 종료 시각이 지나면 완료 처리 여부와 상관없이 자동 생성되는 퀴즈(5문항)를 조회. 가장 최근 시도(최초 또는 재시도)를 반환"
+            description = "태스크 종료 시각이 지나면 완료 처리 여부와 상관없이 자동 생성되는 퀴즈(5문항)를 조회. 가장 최근 시도(최초 또는 재시도)를 반환. 이미 답한 문제는 selectedChoiceId 가 채워져 있어 앱을 다시 켜도 이어서 풀 수 있음"
             responses {
                 HttpStatusCode.OK {
                     description = "조회 성공"
@@ -69,7 +69,8 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("TaskQuiz")
             summary = "퀴즈 문제 하나 답변 (즉시 채점)"
-            description = "문제를 풀 때마다(앱에서 '다음'을 누를 때) 호출. 답을 서버에 저장하고 정답 여부·정답·풀이를 바로 돌려줌. " +
+            description = "문제를 풀 때마다(앱에서 '다음'을 누를 때) 호출. 답을 서버에 저장하고 정답 여부·정답을 바로 돌려줌. " +
+                "틀리면 reason 에 고른 보기가 왜 틀렸는지 한두 문장이 들어감(맞으면 null). 자세한 풀이는 제출 응답의 results[].explanation 에 있음. " +
                 "한 번 답한 문제는 다시 답할 수 없음 — 정답을 본 뒤 답을 바꿔치기하는 것을 막기 위함. " +
                 "최종 채점(POST .../quiz/submit)은 여기서 저장된 답만 보고, 앱이 별도로 보내는 답은 받지 않음"
             parameters {

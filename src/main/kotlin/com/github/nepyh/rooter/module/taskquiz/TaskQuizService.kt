@@ -33,7 +33,9 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.update
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.Clock
@@ -53,7 +55,9 @@ class TaskQuizService(
     /** 스케줄러가 호출. taskName은 findDue 시점에 이미 조회해둔 값을 그대로 받는다. */
     suspend fun generateAttempt(planTaskId: Int, attemptNumber: Int, taskName: String) {
         val (gradeLabel, studyScope) = newSuspendedTransaction { quizContextOf(planTaskId) }
+        // 정답 번호가 보기 범위를 벗어난 문제는 채점할 수 없으니 버린다
         val generated = llmClient.generateQuestions(taskName, gradeLabel, studyScope)
+            .filter { it.choices.size >= 2 && it.correct_index in it.choices.indices }
         if (generated.isEmpty()) return // AI 생성 실패 시 이번 attempt는 건너뜀 (다음 스케줄 대상이 되진 않음)
 
         newSuspendedTransaction {
@@ -75,7 +79,13 @@ class TaskQuizService(
                         this.question = quizQuestion
                         this.choiceText = choiceText
                         isCorrect = index == question.correct_index
-                        explanation = question.explanation
+                        // 정답 보기에는 자세한 풀이를, 오답 보기에는 그 보기를 골랐을 때 바로 보여줄 짧은 이유를 둔다.
+                        // 짧은 이유가 없으면 풀이로 대신한다
+                        explanation = if (isCorrect) {
+                            question.explanation
+                        } else {
+                            question.choice_reasons.getOrNull(index)?.takeIf { it.isNotBlank() } ?: question.explanation
+                        }
                     }
                 }
             }
@@ -87,15 +97,19 @@ class TaskQuizService(
 
         val latestAttempt = latestAttemptOrThrow(planTaskId)
 
+        // 답을 저장(UPDATE)하면 PostgreSQL 의 행 순서가 바뀌므로, 문제·보기 순서는 id 로 고정한다
         val questions = TaskQuizQuestionRow.find { TaskQuizQuestionTable.attemptId eq latestAttempt.id }
+            .orderBy(TaskQuizQuestionTable.id to SortOrder.ASC)
             .map { question ->
                 val choices = TaskQuizChoiceRow.find { TaskQuizChoiceTable.questionId eq question.id }
+                    .orderBy(TaskQuizChoiceTable.id to SortOrder.ASC)
                     .map { TaskQuizChoiceResponse(id = it.id.value, choiceText = it.choiceText) }
 
                 TaskQuizQuestionResponse(
                     id = question.id.value,
                     questionText = question.questionText,
-                    choices = choices
+                    choices = choices,
+                    selectedChoiceId = question.selectedChoiceId
                 )
             }
 
@@ -129,17 +143,21 @@ class TaskQuizService(
         val choices = TaskQuizChoiceRow.find { TaskQuizChoiceTable.questionId eq question.id }.toList()
         val selectedChoice = choices.find { it.id.value == selectedChoiceId }
             ?: throw TaskQuizValidationException.InvalidAnswerException()
-        // correct_index 가 범위를 벗어나 정답 보기가 없는 문제가 드물게 생길 수 있음(생성 단계 결함, 별도 이슈).
-        // 그런 경우까지 여기서 크래시내지 않도록 마지막 보기로 대체한다.
+        // 생성 단계에서 정답 번호를 검증하기 전에 만든 퀴즈는 정답 보기가 없을 수 있어, 크래시내지 않도록 마지막 보기로 대체한다.
         val correctChoice = choices.find { it.isCorrect } ?: choices.last()
 
-        question.selectedChoiceId = selectedChoiceId
+        // "다음"을 연달아 눌러 요청 두 개가 동시에 들어와도 먼저 저장된 답만 남도록, 아직 비어 있을 때만 저장한다
+        val saved = TaskQuizQuestionTable.update({
+            (TaskQuizQuestionTable.id eq question.id) and TaskQuizQuestionTable.selectedChoiceId.isNull()
+        }) { it[TaskQuizQuestionTable.selectedChoiceId] = selectedChoiceId }
+        if (saved == 0) throw TaskQuizValidationException.AlreadyAnsweredException()
 
         TaskQuizAnswerResponse(
             questionId = question.id.value,
             isCorrect = selectedChoice.isCorrect,
             correctChoiceId = correctChoice.id.value,
-            explanation = correctChoice.explanation
+            // 오답 보기에는 그 보기가 왜 틀렸는지 짧은 이유가 들어 있다. 자세한 풀이는 제출 응답의 results 에서 준다
+            reason = if (selectedChoice.isCorrect) null else selectedChoice.explanation
         )
     }
 
@@ -152,7 +170,9 @@ class TaskQuizService(
             throw TaskQuizValidationException.AlreadySubmittedException()
         }
 
-        val questions = TaskQuizQuestionRow.find { TaskQuizQuestionTable.attemptId eq attempt.id }.toList()
+        val questions = TaskQuizQuestionRow.find { TaskQuizQuestionTable.attemptId eq attempt.id }
+            .orderBy(TaskQuizQuestionTable.id to SortOrder.ASC)
+            .toList()
         if (questions.any { it.selectedChoiceId == null }) {
             throw TaskQuizValidationException.IncompleteAnswersException()
         }
@@ -180,8 +200,14 @@ class TaskQuizService(
         val correctCount = results.count { it.isCorrect }
         val passed = correctCount >= PASS_THRESHOLD
 
-        attempt.correctCount = correctCount
-        attempt.passed = passed
+        // 제출을 연달아 보내도 한 번만 채점·완료·계획 밀기가 일어나도록, 아직 채점 전일 때만 결과를 저장한다
+        val graded = TaskQuizAttemptTable.update({
+            (TaskQuizAttemptTable.id eq attempt.id) and TaskQuizAttemptTable.passed.isNull()
+        }) {
+            it[TaskQuizAttemptTable.correctCount] = correctCount
+            it[TaskQuizAttemptTable.passed] = passed
+        }
+        if (graded == 0) throw TaskQuizValidationException.AlreadySubmittedException()
 
         var retryScheduled = false
         var taskInvalidated = false

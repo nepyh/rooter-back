@@ -13,7 +13,9 @@ data class TaskQuizChoiceResponse(
 data class TaskQuizQuestionResponse(
     val id: Int,
     val questionText: String,
-    val choices: List<TaskQuizChoiceResponse>
+    val choices: List<TaskQuizChoiceResponse>,
+    // 이미 답한 문제면 고른 보기 id, 아직이면 null — 앱을 껐다 켜도 이어서 풀 수 있게
+    val selectedChoiceId: Int? = null
 )
 
 @Serializable
@@ -34,7 +36,7 @@ data class TaskQuizAnswerResponse(
     val questionId: Int,
     val isCorrect: Boolean,
     val correctChoiceId: Int,
-    val explanation: String
+    val reason: String? // 틀렸을 때 고른 보기가 왜 틀렸는지 한두 문장. 맞으면 null
 )
 
 /** 제출 시점에 DB 에 저장된 답으로 채점한 문항별 결과 */
