@@ -14,7 +14,8 @@ data class TextbookResponse(
     val subjectId: Int,
     val publisherId: Int?,
     val title: String,
-    val aiStatus: String
+    val aiStatus: String,
+    val coverImageUrl: String?
 )
 
 @Serializable
@@ -42,6 +43,7 @@ data class TextbookDetailResponse(
     val publisherId: Int?,
     val title: String,
     val aiStatus: String,
+    val coverImageUrl: String?,
     val chapters: List<ChapterTreeResponse>
 )
 
@@ -50,5 +52,6 @@ data class RecommendedTextbookResponse(
     val subjectId: Int,
     val subjectName: String,
     val textbookId: Int,
-    val textbookTitle: String
+    val textbookTitle: String,
+    val coverImageUrl: String?
 )

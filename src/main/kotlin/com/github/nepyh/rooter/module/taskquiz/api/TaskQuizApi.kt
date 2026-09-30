@@ -125,7 +125,7 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
             description = "요청 본문 없음 — 채점은 항상 POST .../quiz/questions/{questionId}/answer 로 저장해 둔 답만 본다. " +
                 "4개 이상 정답(통과)이면 해당 태스크가 자동으로 완료 처리됨(passed=true). " +
                 "4개 미만이면 10분 뒤 새 문제로 재시도가 자동 생성되고(retryScheduled=true), " +
-                "최초 1회 + 재시도 2회 모두 실패하면(attemptNumber=3에서 불합격) 해당 태스크가 미완료로 확정됨(taskInvalidated=true)"
+                "최초 1회 + 재시도 2회 모두 실패하면(attemptNumber=3에서 불합격) 해당 태스크가 미완료로 확정됨(taskInvalidated=true). 재시도가 잡히면(retryScheduled=true) 오늘 남은(아직 시작 안 한) 태스크를 15분 뒤로 밀고 shiftedTasks 로 돌려줌 (학원 등 불가능 시간은 건너뛰고, 23시를 넘어도 그날 안에 둠)"
             responses {
                 HttpStatusCode.OK {
                     description = "채점 성공"

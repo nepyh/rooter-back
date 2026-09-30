@@ -5,6 +5,8 @@ import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
+import com.github.nepyh.rooter.module.storage.FileStorage
+import com.github.nepyh.rooter.module.storage.UploadableFile
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UserRow
@@ -17,6 +19,7 @@ import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.io.InputStream
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.time.OffsetDateTime
@@ -63,7 +66,7 @@ class CatalogServiceTest : StringSpec({
         }
     }
 
-    val catalogService = CatalogService()
+    val catalogService = CatalogService(FakeFileStorage())
 
     fun seedUser(email: String): Int = transaction(db) {
         UserRow.new {
@@ -87,10 +90,11 @@ class CatalogServiceTest : StringSpec({
         SubjectRow.new { this.name = name }.id.value
     }
 
-    fun seedTextbook(subjectId: Int, title: String): Int = transaction(db) {
+    fun seedTextbook(subjectId: Int, title: String, coverImageKey: String? = null): Int = transaction(db) {
         TextbookRow.new {
             subject = SubjectRow[subjectId]
             this.title = title
+            this.coverImageKey = coverImageKey
         }.id.value
     }
 
@@ -134,7 +138,8 @@ class CatalogServiceTest : StringSpec({
                 subjectId = subjectId,
                 subjectName = "수학",
                 textbookId = textbookId,
-                textbookTitle = "중학수학 2-1 (천재교육)"
+                textbookTitle = "중학수학 2-1 (천재교육)",
+                coverImageUrl = null
             )
         )
     }
@@ -162,7 +167,63 @@ class CatalogServiceTest : StringSpec({
 
         result.shouldBeEmpty()
     }
+
+    "getTextbooksBySubject: 표지 이미지 키가 있으면 파일 스토리지 URL 로 내려간다" {
+        val subjectId = seedSubject("수학")
+        seedTextbook(subjectId, "중학수학 2-1", coverImageKey = "textbook-covers/cover-1.png")
+
+        val result = catalogService.getTextbooksBySubject(subjectId)
+
+        result.size shouldBe 1
+        result.first().coverImageUrl shouldBe "https://fake-storage.test/textbook-covers/cover-1.png"
+    }
+
+    "getTextbooksBySubject: 표지 이미지 키가 없으면 coverImageUrl 은 null 이다" {
+        val subjectId = seedSubject("영어")
+        seedTextbook(subjectId, "중학영어 2")
+
+        val result = catalogService.getTextbooksBySubject(subjectId)
+
+        result.size shouldBe 1
+        result.first().coverImageUrl shouldBe null
+    }
+
+    "getTextbookDetail: 표지 이미지 키가 있으면 coverImageUrl 이 채워진다" {
+        val subjectId = seedSubject("국어")
+        val textbookId = seedTextbook(subjectId, "중학국어 2", coverImageKey = "textbook-covers/cover-2.png")
+
+        val result = catalogService.getTextbookDetail(textbookId)
+
+        result?.coverImageUrl shouldBe "https://fake-storage.test/textbook-covers/cover-2.png"
+    }
+
+    "getRecommendedTextbooks: 추천 교과서에도 표지 이미지 URL 이 채워진다" {
+        val userId = seedUser("cover@test.com")
+        seedProfile(userId, schoolId = "C107181084", grade = 2)
+        val subjectId = seedSubject("과학")
+        val textbookId = seedTextbook(subjectId, "중학과학 2", coverImageKey = "textbook-covers/cover-3.png")
+        seedAdoption(schoolId = "C107181084", grade = 2, subjectId = subjectId, textbookId = textbookId)
+
+        val result = catalogService.getRecommendedTextbooks(userId)
+
+        result.size shouldBe 1
+        result.first().coverImageUrl shouldBe "https://fake-storage.test/textbook-covers/cover-3.png"
+    }
 })
+
+/** 표지 이미지 URL 매핑 확인용 — 디스크/네트워크 없이 키를 URL 로만 바꾼다. */
+private class FakeFileStorage : FileStorage {
+    override suspend fun upload(file: UploadableFile, directory: String): String = error("사용되지 않아야 함")
+
+    override suspend fun <T> readFile(
+        fileKey: String,
+        block: suspend (InputStream, String?, Long?) -> T
+    ): T? = error("사용되지 않아야 함")
+
+    override suspend fun getUrl(fileKey: String): String? = "https://fake-storage.test/$fileKey"
+
+    override suspend fun delete(fileKey: String): Boolean = error("사용되지 않아야 함")
+}
 
 private fun ensureTestDatabase(url: String, user: String, password: String) {
     val dbName = url.substringAfterLast("/")

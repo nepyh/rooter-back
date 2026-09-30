@@ -12,7 +12,7 @@ import org.koin.dsl.module
 fun PlanBoardModule(appConfig: AppConfig) = module {
     single { PlanBoardService() }
     single { PlanTaskService() }
-    single { CatalogService() }
+    single { CatalogService(get()) }
     single { PlanGenerationLlmClient(appConfig) }
     single { PlanGenerationService(get(), get()) }
 
