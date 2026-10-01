@@ -9,6 +9,11 @@ private val DEFAULT_UNAVAILABLE_RANGES = listOf(0 to (6 * 60 + 30), (23 * 60) to
 private const val DEFAULT_DISMISSAL_MINUTES = 16 * 60 + 30 // NICE 시간표를 못 가져올 때 쓰는 하교시각 폴백값 (16:30)
 private const val DEFAULT_BREAK_MINUTES = 10
 
+/** 학습 불가 시간의 종류 — 바쁜 시간 조회 API 가 그대로 내려준다 */
+enum class UnavailableType { SLEEP, SCHOOL, UNAVAILABLE }
+
+data class TypedRange(val type: UnavailableType, val start: Int, val end: Int)
+
 data class PlacedTask(
     val taskName: String,
     val estimatedMinutes: Int,
@@ -42,7 +47,20 @@ object PlanTaskScheduler {
         classNumber: Int?,
         grade: Int,
         customRows: List<Pair<Int, Pair<Int, Int>>>
-    ): Map<LocalDate, List<Pair<Int, Int>>> {
+    ): Map<LocalDate, List<Pair<Int, Int>>> =
+        buildTypedUnavailableRanges(schoolDataFetcher, startDate, endDate, schoolId, classNumber, grade, customRows)
+            .mapValues { (_, ranges) -> ranges.map { it.start to it.end } }
+
+    /** [buildUnavailableRanges] 와 같은 계산이지만 각 시간이 수면·등교·사용자 등록 중 무엇인지 함께 돌려준다. */
+    suspend fun buildTypedUnavailableRanges(
+        schoolDataFetcher: SchoolDataFetcher,
+        startDate: LocalDate,
+        endDate: LocalDate,
+        schoolId: String?,
+        classNumber: Int?,
+        grade: Int,
+        customRows: List<Pair<Int, Pair<Int, Int>>>
+    ): Map<LocalDate, List<TypedRange>> {
         val dates = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
         val customByWeekday = customRows.groupBy({ it.first }, { it.second })
 
@@ -59,12 +77,12 @@ object PlanTaskScheduler {
         }
 
         return dates.associateWith { date ->
-            val ranges = DEFAULT_UNAVAILABLE_RANGES.toMutableList()
+            val ranges = DEFAULT_UNAVAILABLE_RANGES.map { (start, end) -> TypedRange(UnavailableType.SLEEP, start, end) }.toMutableList()
             // 등교일(평일이면서 공휴일·방학 등이 아닌 날): 등교 전 시간을 포함해 하교 시각까지 전부 막는다
             if (date.dayOfWeek.value <= 5 && date !in noSchoolDays) {
-                ranges.add(0 to (dismissalMinutesByDate[date] ?: DEFAULT_DISMISSAL_MINUTES))
+                ranges.add(TypedRange(UnavailableType.SCHOOL, 0, dismissalMinutesByDate[date] ?: DEFAULT_DISMISSAL_MINUTES))
             }
-            ranges.addAll(customByWeekday[date.dayOfWeek.value].orEmpty())
+            ranges.addAll(customByWeekday[date.dayOfWeek.value].orEmpty().map { (start, end) -> TypedRange(UnavailableType.UNAVAILABLE, start, end) })
             ranges
         }
     }
