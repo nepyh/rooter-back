@@ -29,7 +29,8 @@ fun PlanGenerationApi(planGenerationService: PlanGenerationService) = ApiRoute("
             tag("PlanGeneration")
             summary = "AI 학습 계획 생성"
             description = "사용자가 직접 지정한 교과서/단원 범위(subjects)를 바탕으로 AI가 시험일까지의 일일 학습 계획을 생성. " +
-                "plan_board, plan_subjects, daily_plans, plan_tasks 를 한 번에 생성. 문서 업로드 없이 이미 DB에 있는 교과서/단원 데이터만 사용"
+                "plan_board, plan_subjects, daily_plans, plan_tasks 를 한 번에 생성. 문서 업로드 없이 이미 DB에 있는 교과서/단원 데이터만 사용. " +
+                "할일 시간은 수면·등교·불가능 시간과 사용자의 기존 할일(다른 플랜보드 포함, 앞뒤 10분 쉬는 시간)을 피해서 잡음"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<PlanGenerationRequest>()

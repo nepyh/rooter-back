@@ -36,6 +36,9 @@ import kotlinx.coroutines.sync.withPermit
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -49,7 +52,8 @@ private data class PlanContext(
     val grade: Int,
     val schoolId: String?,
     val classNumber: Int?,
-    val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>
+    val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>,
+    val existingTaskRanges: Map<LocalDate, List<Pair<Int, Int>>>
 )
 
 class PlanGenerationService(
@@ -97,27 +101,44 @@ class PlanGenerationService(
                         (PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime))
                 }
 
+            // 이미 있는 할일(다른 플랜보드 것 포함)과 겹치지 않게 배치하려고 기간 안의 할일 시간을 날짜별로 모은다
+            val existingTaskRanges = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+                .select(DailyPlanTable.planDate, PlanTaskTable.startTime, PlanTaskTable.endTime)
+                .where {
+                    (PlanBoardTable.userId eq userId) and
+                        (DailyPlanTable.planDate greaterEq startDate) and
+                        (DailyPlanTable.planDate lessEq endDate)
+                }
+                .groupBy(
+                    { it[DailyPlanTable.planDate] },
+                    { PlanTaskScheduler.toMinutes(it[PlanTaskTable.startTime]) to PlanTaskScheduler.toMinutes(it[PlanTaskTable.endTime]) }
+                )
+
             PlanContext(
                 resolvedSubjects = resolved.map { it.second },
                 levelTiers = tiers,
                 grade = profileRow?.grade ?: 2,
                 schoolId = profileRow?.schoolId,
                 classNumber = profileRow?.classNumber,
-                customUnavailableRows = customRows
+                customUnavailableRows = customRows,
+                existingTaskRanges = existingTaskRanges
             )
         }
         val resolvedSubjects = planContext.resolvedSubjects
         val levelTiers = planContext.levelTiers
         val grade = planContext.grade
 
-        val unavailableRanges = PlanTaskScheduler.buildUnavailableRanges(
-            schoolDataFetcher = schoolDataFetcher,
-            startDate = startDate,
-            endDate = endDate,
-            schoolId = planContext.schoolId,
-            classNumber = planContext.classNumber,
-            grade = planContext.grade,
-            customRows = planContext.customUnavailableRows
+        val unavailableRanges = PlanTaskScheduler.withExistingTasks(
+            PlanTaskScheduler.buildUnavailableRanges(
+                schoolDataFetcher = schoolDataFetcher,
+                startDate = startDate,
+                endDate = endDate,
+                schoolId = planContext.schoolId,
+                classNumber = planContext.classNumber,
+                grade = planContext.grade,
+                customRows = planContext.customUnavailableRows
+            ),
+            planContext.existingTaskRanges
         )
 
         val chunks = splitIntoChunks(totalDays)
