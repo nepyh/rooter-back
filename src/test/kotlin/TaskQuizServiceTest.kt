@@ -155,6 +155,7 @@ class TaskQuizServiceTest : StringSpec({
         response.isCorrect shouldBe true
         response.correctChoiceId shouldBe correctChoiceId
         response.reason shouldBe null
+        response.explanation shouldBe "자세한 풀이 1" // 맞아도 자세한 풀이는 준다
         transaction(db) { TaskQuizQuestionRow[firstQuestion.id].selectedChoiceId } shouldBe correctChoiceId
     }
 
@@ -171,6 +172,7 @@ class TaskQuizServiceTest : StringSpec({
         response.isCorrect shouldBe false
         response.correctChoiceId shouldBe firstQuestion.choices[0].id
         response.reason shouldBe "B 가 틀린 이유" // 고른 오답 보기의 짧은 이유
+        response.explanation shouldBe "자세한 풀이 1" // 정답 보기의 자세한 풀이
     }
 
     "answerQuestion: 이미 답한 문제에 다시 답하면 AlreadyAnsweredException — 정답을 본 뒤 답 변경을 막는다" {

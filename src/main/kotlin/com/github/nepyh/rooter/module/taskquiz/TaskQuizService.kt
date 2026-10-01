@@ -156,8 +156,9 @@ class TaskQuizService(
             questionId = question.id.value,
             isCorrect = selectedChoice.isCorrect,
             correctChoiceId = correctChoice.id.value,
-            // 오답 보기에는 그 보기가 왜 틀렸는지 짧은 이유가 들어 있다. 자세한 풀이는 제출 응답의 results 에서 준다
-            reason = if (selectedChoice.isCorrect) null else selectedChoice.explanation
+            // 오답 보기에는 그 보기가 왜 틀렸는지 짧은 이유가, 정답 보기에는 자세한 풀이가 들어 있다
+            reason = if (selectedChoice.isCorrect) null else selectedChoice.explanation,
+            explanation = correctChoice.explanation
         )
     }
 
