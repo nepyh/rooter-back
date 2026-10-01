@@ -11,6 +11,7 @@ import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
+import com.github.nepyh.rooter.module.planboard.BusyTimeService
 import com.github.nepyh.rooter.module.planboard.PlanBoardService
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
@@ -22,6 +23,7 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanBoardUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
+import com.github.nepyh.rooter.module.planboard.exception.BusyTimeValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
@@ -43,6 +45,8 @@ import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
+import com.github.nepyh.rooter.module.user.model.DayOfWeek
+import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
@@ -59,6 +63,7 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
 
 /**
@@ -547,6 +552,53 @@ class PlanBoardServiceTest : StringSpec({
         }
         llm.contexts.size shouldBe 2
         transaction(db) { PlanBoardRow.find { PlanBoardTable.userId eq userId }.count() } shouldBe 0L
+    }
+
+    "busy-times: 등교일은 하교 전·취침·등록한 불가능 시간을, 주말은 취침·기존 할일만 막고 나머지를 빈 시간으로 준다" {
+        val userId = seedUser("busy@test.com")
+        val otherUserId = seedUser("busy-other@test.com")
+        transaction(db) {
+            UnavailableTimeRow.new {
+                user = UserRow[userId]; dayOfWeek = DayOfWeek.FRIDAY
+                startTime = LocalTime.of(18, 0); endTime = LocalTime.of(20, 0)
+            }
+        }
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(boardId, planDate = "2026-07-04", taskName = "영어 단어", startTime = "10:00", endTime = "11:00", estimatedMinutes = 60))
+        planTaskService.createTask(otherUserId, taskRequest(seedBoard(otherUserId), planDate = "2026-07-04", startTime = "12:00", endTime = "13:00", estimatedMinutes = 60))
+
+        // 2026-07-03 금요일(학교 정보 없음 → 평일은 등교일, 하교 16:30), 07-04 토요일
+        val response = BusyTimeService(noNiceSchoolDataFetcher()).getBusyTimes(userId, LocalDate.of(2026, 7, 3), LocalDate.of(2026, 7, 4))
+
+        val (friday, saturday) = response.days
+        friday.isSchoolDay shouldBe true
+        friday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf(
+            "SLEEP 00:00~06:30", "SCHOOL 00:00~16:30", "UNAVAILABLE 18:00~20:00", "SLEEP 23:00~24:00"
+        )
+        friday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:30~18:00", "20:00~23:00")
+
+        saturday.isSchoolDay shouldBe false
+        saturday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf(
+            "SLEEP 00:00~06:30", "TASK 10:00~11:00", "SLEEP 23:00~24:00"
+        )
+        saturday.busyTimes[1].let {
+            it.taskName shouldBe "영어 단어"
+            it.planBoardId shouldBe boardId
+        }
+        saturday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("06:30~10:00", "11:00~23:00")
+    }
+
+    "busy-times: endDate 가 startDate 보다 빠르거나 31일을 넘으면 InvalidDateRangeException" {
+        val userId = seedUser("busy-range@test.com")
+        val service = BusyTimeService(noNiceSchoolDataFetcher())
+
+        shouldThrow<BusyTimeValidationException.InvalidDateRangeException> {
+            service.getBusyTimes(userId, LocalDate.of(2026, 7, 2), LocalDate.of(2026, 7, 1))
+        }
+        shouldThrow<BusyTimeValidationException.InvalidDateRangeException> {
+            service.getBusyTimes(userId, LocalDate.of(2026, 7, 1), LocalDate.of(2026, 8, 1))
+        }
+        service.getBusyTimes(userId, LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31)).days.size shouldBe 31
     }
 
     "plan-generation: 다른 플랜보드에 이미 있는 할일과 겹치지 않게, 쉬는 시간 10분을 두고 배치한다" {

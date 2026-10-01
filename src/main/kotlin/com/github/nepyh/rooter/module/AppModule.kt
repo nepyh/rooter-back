@@ -18,6 +18,7 @@ import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundExcep
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanSubjectNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
+import com.github.nepyh.rooter.module.planboard.exception.BusyTimeValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.quiz.QuizModule
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
@@ -125,6 +126,9 @@ fun Application.configureAppModule() {
             call.respondError(HttpStatusCode.Forbidden, "FORBIDDEN", cause.message)
         }
         exception<PlanTaskValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<BusyTimeValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<PlanTaskNotFoundException> { call, cause ->
