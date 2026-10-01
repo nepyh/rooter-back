@@ -3,11 +3,14 @@ import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.chat.ChatLlmClient
 import com.github.nepyh.rooter.module.chat.ChatService
 import com.github.nepyh.rooter.module.chat.PLAN_NOT_APPLIED_REPLY
-import com.github.nepyh.rooter.module.chat.planBoardSummaryOf
+import com.github.nepyh.rooter.module.chat.POSTPONE_NOTHING_REPLY
 import com.github.nepyh.rooter.module.chat.dto.AiChatPlanUpdate
+import com.github.nepyh.rooter.module.chat.dto.AiChatPostpone
 import com.github.nepyh.rooter.module.chat.dto.AiChatResult
 import com.github.nepyh.rooter.module.chat.dto.AiChatTask
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
+import com.github.nepyh.rooter.module.chat.planBoardSummaryOf
+import com.github.nepyh.rooter.module.chat.postponeBlockedReply
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
@@ -96,7 +99,7 @@ class ChatServiceTest : StringSpec({
     // 계획 날짜(tuesday)가 '오늘' 이 아닌 시계 — 현재 시각 제한 없이 재배치 결과를 고정하기 위함
     val otherDayClock: Clock = Clock.fixed(Instant.parse("2026-09-01T00:00:00Z"), ZoneOffset.UTC)
 
-    fun seedDailyPlan(examDate: LocalDate? = null): Pair<Int, Int> = transaction(db) {
+    fun seedDailyPlan(examDate: LocalDate? = null, boardEnd: LocalDate = tuesday): Pair<Int, Int> = transaction(db) {
         val user = UserRow.new {
             email = "chat@test.com"
             username = "tester"
@@ -107,7 +110,7 @@ class ChatServiceTest : StringSpec({
             this.user = user
             title = "테스트 보드"
             startDate = tuesday
-            endDate = tuesday
+            endDate = boardEnd
             this.examDate = examDate
             createdAt = OffsetDateTime.now()
         }
@@ -118,8 +121,12 @@ class ChatServiceTest : StringSpec({
         user.id.value to dailyPlan.id.value
     }
 
-    fun seedTask(dailyPlanId: Int, name: String, start: LocalTime, end: LocalTime, completed: Boolean): Int = transaction(db) {
+    fun seedTask(
+        dailyPlanId: Int, name: String, start: LocalTime, end: LocalTime, completed: Boolean,
+        postponedFrom: LocalDate? = null
+    ): Int = transaction(db) {
         PlanTaskRow.new {
+            postponedFromDate = postponedFrom
             dailyPlan = DailyPlanRow[dailyPlanId]
             taskName = name
             startTime = start
@@ -289,6 +296,81 @@ class ChatServiceTest : StringSpec({
         llm.lastPlanBoardSummary!!.lines().last() shouldBe "시험일: 등록되지 않음"
     }
 
+    fun postponeLlm(names: List<String>, toDate: String? = null, reply: String = "미룰게요") = FakeChatLlmClient(
+        AiChatResult(reply_message = reply, plan_changed = true, postpone = AiChatPostpone(task_names = names, to_date = toDate))
+    )
+
+    "미루기: 오늘 할일을 다음 날로 옮기고, 그날 기존 할일을 쉬는 시간 두고 피해서 배치하고, 원래 날짜를 남긴다" {
+        val wednesday = tuesday.plusDays(1)
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        val conceptId = seedTask(dailyPlanId, "개념 정리", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false)
+        val problemId = seedTask(dailyPlanId, "문제 풀이", LocalTime.of(18, 10), LocalTime.of(19, 0), completed = false)
+        // 수요일(등교일, 학교 정보 없음 → 16:30 하교)에 이미 있는 할일 16:30~17:00
+        val wednesdayPlanId = transaction(db) {
+            DailyPlanRow.new { planBoard = DailyPlanRow[dailyPlanId].planBoard; planDate = wednesday }.id.value
+        }
+        seedTask(wednesdayPlanId, "영어 단어", LocalTime.of(16, 30), LocalTime.of(17, 0), completed = false)
+        val llm = postponeLlm(listOf("개념 정리", "문제 풀이"))
+
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "오늘 거 내일로 미뤄줘")
+
+        response.planChanged shouldBe true
+        response.updatedTasks shouldBe emptyList()
+        response.movedTasks!!.map { "${it.taskName} ${it.startTime}~${it.endTime}" } shouldBe listOf(
+            "개념 정리 17:10~18:10", "문제 풀이 18:20~19:10"
+        )
+        response.movedTasks!!.map { it.dailyPlanId }.toSet() shouldBe setOf(wednesdayPlanId)
+        response.reply shouldBe "'개념 정리', '문제 풀이' 할일을 9월 30일(수) 17:10~18:10, 18:20~19:10로 미뤘어요."
+        transaction(db) {
+            listOf(conceptId, problemId).map { PlanTaskRow[it].postponedFromDate } shouldBe listOf(tuesday, tuesday)
+        }
+        llm.lastToday shouldBe "2026-09-01 (화요일)"
+    }
+
+    "미루기: 어제에서 미뤄져 온 할일은 이틀 연속 미루지 못하고, 다른 할일만 옮긴다" {
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        val postponedId = seedTask(dailyPlanId, "개념 정리", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false, postponedFrom = tuesday.minusDays(1))
+        seedTask(dailyPlanId, "문제 풀이", LocalTime.of(18, 10), LocalTime.of(19, 0), completed = false)
+        val llm = postponeLlm(listOf("개념 정리", "문제 풀이"))
+
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "다 내일로 미뤄줘")
+
+        response.movedTasks!!.map { it.taskName } shouldBe listOf("문제 풀이")
+        response.updatedTasks!!.map { it.taskName } shouldBe listOf("개념 정리")
+        response.reply shouldBe "'문제 풀이' 할일을 9월 30일(수) 16:30~17:20로 미뤘어요. '개념 정리'은(는) 어제 미룬 할일이라 이틀 연속으로는 미룰 수 없어요."
+        transaction(db) { PlanTaskRow[postponedId].dailyPlan.id.value } shouldBe dailyPlanId
+        // AI 에도 미룰 수 없는 할일이라고 알려준다
+        llm.lastCurrentTasksJson!!.contains("\"can_postpone\":false") shouldBe true
+    }
+
+    "미루기: AI 가 미룰 수 없는 할일을 알아서 빼고 답변에서만 언급하면, 그 이유도 답변에 붙인다" {
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        seedTask(dailyPlanId, "영어 단어", LocalTime.of(17, 0), LocalTime.of(17, 40), completed = false, postponedFrom = tuesday.minusDays(1))
+        seedTask(dailyPlanId, "수학 개념", LocalTime.of(18, 0), LocalTime.of(19, 0), completed = false)
+        val llm = postponeLlm(listOf("수학 개념"), reply = "'수학 개념'은 내일로 미룰게요. '영어 단어'는 어제 미룬 거라 오늘 해야 해요.")
+
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "오늘 거 다 내일로")
+
+        response.reply shouldBe "'수학 개념' 할일을 9월 30일(수) 16:30~17:30로 미뤘어요. '영어 단어'은(는) 어제 미룬 할일이라 이틀 연속으로는 미룰 수 없어요."
+    }
+
+    "미루기: 미룰 수 있는 할일이 하나도 없거나, 기간 밖·과거 날짜거나, 이름이 안 맞으면 옮기지 않고 이유를 답한다" {
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(3))
+        seedTask(dailyPlanId, "어제 미룬 것", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false, postponedFrom = tuesday.minusDays(1))
+        seedTask(dailyPlanId, "문제 풀이", LocalTime.of(18, 10), LocalTime.of(19, 0), completed = false)
+        suspend fun send(llm: FakeChatLlmClient) = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "미뤄줘")
+
+        send(postponeLlm(listOf("어제 미룬 것"))).let {
+            it.planChanged shouldBe false
+            it.reply shouldBe postponeBlockedReply(listOf("어제 미룬 것"))
+        }
+        send(postponeLlm(listOf("문제 풀이"), toDate = "2026-10-10")).reply shouldBe
+            "플랜보드 기간이 10월 2일(금)까지라서 10월 10일(토)로는 미룰 수 없어요."
+        send(postponeLlm(listOf("문제 풀이"), toDate = "2026-09-29")).reply shouldBe "할일은 9월 30일(수) 이후 날짜로만 미룰 수 있어요."
+        send(postponeLlm(listOf("없는 할일"))).reply shouldBe POSTPONE_NOTHING_REPLY
+        transaction(db) { PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.count() } shouldBe 2L
+    }
+
     "planBoardSummaryOf: 시험 당일과 지난 시험일을 구분한다" {
         val day = LocalDate.of(2026, 10, 5)
         planBoardSummaryOf("보드", day, day, day, day).lines().last() shouldBe "시험일: 2026-10-05 (D-day(오늘))"
@@ -300,16 +382,19 @@ class ChatServiceTest : StringSpec({
 private class FakeChatLlmClient(private val result: AiChatResult?) : ChatLlmClient(dummyAppConfig()) {
     var lastCurrentTasksJson: String? = null
     var lastPlanBoardSummary: String? = null
+    var lastToday: String? = null
 
     override suspend fun adjustPlan(
         grade: Int,
         studyStyleSummary: String,
         targetDate: String,
+        today: String,
         currentTasksJson: String,
         chatHistoryJson: String,
         planBoardSummary: String,
         userMessage: String
     ): AiChatResult? {
+        lastToday = today
         lastCurrentTasksJson = currentTasksJson
         lastPlanBoardSummary = planBoardSummary
         return result
