@@ -2,6 +2,7 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.planboard.GeneratedDailyPlan
 import com.github.nepyh.rooter.module.planboard.GeneratedPlan
+import com.github.nepyh.rooter.module.planboard.GeneratedPlanTask
 import com.github.nepyh.rooter.module.planboard.PlanGenerationLlmClient
 import com.github.nepyh.rooter.module.planboard.PlanGenerationService
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationRequest
@@ -600,6 +601,30 @@ class PlanBoardServiceTest : StringSpec({
         service.getBusyTimes(userId, LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31)).days.size shouldBe 31
     }
 
+    "plan-generation: 다른 플랜보드에 이미 있는 할일과 겹치지 않게, 쉬는 시간 10분을 두고 배치한다" {
+        val userId = seedUser("gen-other-board@test.com")
+        val otherUserId = seedUser("gen-other-user@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val saturday = LocalDate.of(2026, 7, 4) // 주말이라 06:30 부터 빈 시간
+        // 같은 유저의 다른 보드: 06:30~07:30 / 다른 유저: 07:40~09:00 (영향 없어야 함)
+        planTaskService.createTask(userId, taskRequest(seedBoard(userId), planDate = "2026-07-04", startTime = "06:30", endTime = "07:30", estimatedMinutes = 60))
+        planTaskService.createTask(otherUserId, taskRequest(seedBoard(otherUserId), planDate = "2026-07-04", startTime = "07:40", endTime = "09:00", estimatedMinutes = 80))
+        val llm = FakePlanGenerationLlmClient(tasks = listOf(GeneratedPlanTask("수학 개념", 60), GeneratedPlanTask("수학 문제", 30)))
+
+        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(
+                title = "새 보드",
+                subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)),
+                startDate = saturday.toString(),
+                daysRemaining = 1
+            )
+        )
+
+        response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("07:40~08:40", "08:50~09:20")
+    }
+
     "addSubject: 정상 등록되면 subjectName/textbookTitle 이 채워진다" {
         val userId = seedUser("subject-ok@test.com")
         val boardId = seedBoard(userId)
@@ -958,7 +983,10 @@ class PlanBoardServiceTest : StringSpec({
 })
 
 // context 의 "총 학습 기간: N일" 만큼 계획을 돌려준다. shortResponses 번째까지는 절반만 돌려준다.
-private class FakePlanGenerationLlmClient(private var shortResponses: Int = 0) : PlanGenerationLlmClient(dummyAppConfig()) {
+private class FakePlanGenerationLlmClient(
+    private var shortResponses: Int = 0,
+    private val tasks: List<GeneratedPlanTask> = emptyList()
+) : PlanGenerationLlmClient(dummyAppConfig()) {
     val contexts = java.util.Collections.synchronizedList(mutableListOf<String>())
 
     override suspend fun generatePlan(context: String): GeneratedPlan {
@@ -966,7 +994,7 @@ private class FakePlanGenerationLlmClient(private var shortResponses: Int = 0) :
         val days = Regex("총 학습 기간: (\\d+)일").find(context)!!.groupValues[1].toInt()
         val returned = synchronized(this) { if (shortResponses > 0) { shortResponses--; days / 2 } else days }
         return GeneratedPlan(
-            daily_plans = (1..returned).map { GeneratedDailyPlan(day = it, topics = listOf("주제"), goal = "목표") },
+            daily_plans = (1..returned).map { GeneratedDailyPlan(day = it, topics = listOf("주제"), goal = "목표", tasks = tasks) },
             tips = listOf("팁")
         )
     }

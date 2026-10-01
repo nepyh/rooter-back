@@ -87,6 +87,20 @@ object PlanTaskScheduler {
         }
     }
 
+    /**
+     * 날짜별 막힌 시간에 사용자의 기존 할일(다른 플랜보드 포함)을 더한다.
+     * 새 할일끼리처럼 기존 할일 앞뒤에도 쉬는 시간을 두려고 [DEFAULT_BREAK_MINUTES] 만큼 넓혀서 막는다.
+     */
+    fun withExistingTasks(
+        unavailableRanges: Map<LocalDate, List<Pair<Int, Int>>>,
+        existingTaskRanges: Map<LocalDate, List<Pair<Int, Int>>>
+    ): Map<LocalDate, List<Pair<Int, Int>>> =
+        unavailableRanges.mapValues { (date, ranges) ->
+            ranges + existingTaskRanges[date].orEmpty().map { (start, end) ->
+                (start - DEFAULT_BREAK_MINUTES).coerceAtLeast(0) to (end + DEFAULT_BREAK_MINUTES).coerceAtMost(DAY_MINUTES)
+            }
+        }
+
     /** NICE 시간표에서 날짜별 마지막 교시를 찾아 하교시각(분)으로 변환한다. 학기가 바뀌는 기간이면 학기별로 나눠 조회한다. */
     private suspend fun fetchDismissalMinutesByDate(
         schoolDataFetcher: SchoolDataFetcher,

@@ -36,7 +36,8 @@ data class TaskQuizAnswerResponse(
     val questionId: Int,
     val isCorrect: Boolean,
     val correctChoiceId: Int,
-    val reason: String? // 틀렸을 때 고른 보기가 왜 틀렸는지 한두 문장. 맞으면 null
+    val reason: String?, // 틀렸을 때 고른 보기가 왜 틀렸는지 한두 문장. 맞으면 null
+    val explanation: String // 이 문제의 자세한 풀이 (제출 응답 results[].explanation 과 같은 값)
 )
 
 /** 제출 시점에 DB 에 저장된 답으로 채점한 문항별 결과 */
