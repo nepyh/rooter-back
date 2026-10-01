@@ -8,6 +8,8 @@ import com.github.nepyh.rooter.module.planboard.dto.TextbookDetailResponse
 import com.github.nepyh.rooter.module.planboard.dto.TextbookResponse
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
+import com.github.nepyh.rooter.module.planboard.model.PublisherRow
+import com.github.nepyh.rooter.module.planboard.model.PublisherTable
 import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionRow
 import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
@@ -35,8 +37,9 @@ class CatalogService(private val fileStorage: FileStorage) {
     }
 
     suspend fun getTextbooksBySubject(subjectId: Int): List<TextbookResponse> {
-        val textbooks = newSuspendedTransaction {
-            TextbookRow.find { TextbookTable.subjectId eq subjectId }.toList()
+        val (textbooks, publisherNames) = newSuspendedTransaction {
+            val rows = TextbookRow.find { TextbookTable.subjectId eq subjectId }.toList()
+            rows to publisherNamesOf(rows.mapNotNull { it.publisherId })
         }
 
         return textbooks.map {
@@ -44,6 +47,7 @@ class CatalogService(private val fileStorage: FileStorage) {
                 id = it.id.value,
                 subjectId = subjectId,
                 publisherId = it.publisherId,
+                publisherName = it.publisherId?.let(publisherNames::get),
                 title = it.title,
                 aiStatus = it.aiStatus,
                 coverImageUrl = resolveCoverImageUrl(it.coverImageKey)
@@ -87,8 +91,10 @@ class CatalogService(private val fileStorage: FileStorage) {
 
             val subjectNames = SubjectRow.find { SubjectTable.id inList adoptions.map { it.subjectId } }
                 .associate { it.id.value to it.name }
-            val textbooks = TextbookRow.find { TextbookTable.id inList adoptions.map { it.textbookId } }
-                .associate { it.id.value to (it.title to it.coverImageKey) }
+            val textbookRows = TextbookRow.find { TextbookTable.id inList adoptions.map { it.textbookId } }.toList()
+            val textbooks = textbookRows.associate { it.id.value to (it.title to it.coverImageKey) }
+            val publisherNames = publisherNamesOf(textbookRows.mapNotNull { it.publisherId })
+            val publisherIdByTextbook = textbookRows.associate { it.id.value to it.publisherId }
 
             adoptions.mapNotNull { adoption ->
                 val subjectId = adoption.subjectId.value
@@ -100,6 +106,7 @@ class CatalogService(private val fileStorage: FileStorage) {
                     subjectName = subjectName,
                     textbookId = textbookId,
                     textbookTitle = textbookTitle,
+                    publisherName = publisherIdByTextbook[textbookId]?.let(publisherNames::get),
                     coverImageUrl = null // 아래에서 채운다
                 ) to coverImageKey
             }
@@ -123,6 +130,7 @@ class CatalogService(private val fileStorage: FileStorage) {
                 subjectId = textbook.subject.id.value,
                 subjectName = textbook.subject.name,
                 publisherId = textbook.publisherId,
+                publisherName = textbook.publisherId?.let { PublisherRow.findById(it)?.name },
                 title = textbook.title,
                 aiStatus = textbook.aiStatus,
                 coverImageUrl = null, // 아래에서 채운다
@@ -133,6 +141,11 @@ class CatalogService(private val fileStorage: FileStorage) {
         val (detail, coverImageKey) = found ?: return null
         return detail.copy(coverImageUrl = resolveCoverImageUrl(coverImageKey))
     }
+
+    /** 출판사 id 목록 → 이름. textbooks.publisher_id 는 Exposed 에서 FK 없이 정수로만 두고 있어 따로 한 번에 읽는다. 트랜잭션 안에서 부른다. */
+    private fun publisherNamesOf(publisherIds: List<Int>): Map<Int, String> =
+        if (publisherIds.isEmpty()) emptyMap()
+        else PublisherRow.find { PublisherTable.id inList publisherIds.distinct() }.associate { it.id.value to it.name }
 
     /** 표지 이미지 키를 파일 스토리지 URL 로 바꾼다 — 외부 호출(S3 presign 등)이라 DB 트랜잭션 밖에서 부른다. */
     private suspend fun resolveCoverImageUrl(coverImageKey: String?): String? =
