@@ -5,6 +5,7 @@ import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
 import org.jetbrains.exposed.v1.dao.IntEntity
 import org.jetbrains.exposed.v1.dao.IntEntityClass
+import org.jetbrains.exposed.v1.javatime.date
 import org.jetbrains.exposed.v1.javatime.time
 
 object PlanTaskTable : IntIdTable("plan_tasks") {
@@ -15,6 +16,8 @@ object PlanTaskTable : IntIdTable("plan_tasks") {
     val endTime = time("end_time")
     val estimatedMinutes = integer("estimated_minutes")
     val isCompleted = bool("is_completed").default(false)
+    // 챗봇으로 다른 날로 미뤘을 때 원래 날짜. null = 미룬 적 없음 (rooter-ddl #25)
+    val postponedFromDate = date("postponed_from_date").nullable()
 }
 
 class PlanTaskRow(id: EntityID<Int>) : IntEntity(id) {
@@ -26,4 +29,5 @@ class PlanTaskRow(id: EntityID<Int>) : IntEntity(id) {
     var endTime by PlanTaskTable.endTime
     var estimatedMinutes by PlanTaskTable.estimatedMinutes
     var isCompleted by PlanTaskTable.isCompleted
+    var postponedFromDate by PlanTaskTable.postponedFromDate
 }
