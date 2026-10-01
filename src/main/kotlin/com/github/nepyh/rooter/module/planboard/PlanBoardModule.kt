@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.planboard
 
 import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.module.planboard.api.BusyTimeApi
 import com.github.nepyh.rooter.module.planboard.api.CatalogApi
 import com.github.nepyh.rooter.module.planboard.api.DailyPlanApi
 import com.github.nepyh.rooter.module.planboard.api.PlanBoardApi
@@ -15,10 +16,12 @@ fun PlanBoardModule(appConfig: AppConfig) = module {
     single { CatalogService(get()) }
     single { PlanGenerationLlmClient(appConfig) }
     single { PlanGenerationService(get(), get()) }
+    single { BusyTimeService(get()) }
 
     single(named("planBoardApi")) { PlanBoardApi(get()) }
     single(named("planTaskApi")) { PlanTaskApi(get()) }
     single(named("catalogApi")) { CatalogApi(get()) }
     single(named("dailyPlanApi")) { DailyPlanApi(get()) }
     single(named("planGenerationApi")) { PlanGenerationApi(get()) }
+    single(named("busyTimeApi")) { BusyTimeApi(get()) }
 }
