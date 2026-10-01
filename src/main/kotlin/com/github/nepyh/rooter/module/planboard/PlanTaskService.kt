@@ -159,6 +159,10 @@ class PlanTaskService {
             throw PlanTaskNotFoundException()
         }
 
+        // 완료는 완료 확인 퀴즈를 통과해야만 된다 (퀴즈 통과 시 TaskQuizService 가 직접 완료 처리).
+        // 여기서 바로 완료시키면 퀴즈 없이 완료되는 길이 생기므로 막고, 완료 취소(false)만 허용한다
+        if (isCompleted && !task.isCompleted) throw PlanTaskValidationException.QuizRequiredException()
+
         task.isCompleted = isCompleted
         task.toResponse()
     }
