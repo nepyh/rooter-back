@@ -10,12 +10,15 @@ import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.guessTaskSubject
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
+import com.github.nepyh.rooter.module.planboard.planBoardSubjects
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizAnswerResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizChoiceResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResult
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizResponse
+import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizSubjectResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizSubmitResponse
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizNotFoundException
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizValidationException
@@ -113,10 +116,15 @@ class TaskQuizService(
                 )
             }
 
+        val task = PlanTaskRow[planTaskId]
+        val subjects = planBoardSubjects(task.dailyPlan.planBoard.id.value)
+
         TaskQuizResponse(
             planTaskId = planTaskId,
             attemptNumber = latestAttempt.attemptNumber,
-            questions = questions
+            questions = questions,
+            subject = guessTaskSubject(task.taskName, subjects)?.let { (id, name) -> TaskQuizSubjectResponse(id, name) },
+            subjects = subjects.map { (id, name) -> TaskQuizSubjectResponse(id, name) }
         )
     }
 
