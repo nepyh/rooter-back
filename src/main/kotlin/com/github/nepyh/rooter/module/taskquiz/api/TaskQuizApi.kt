@@ -70,7 +70,8 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
             tag("TaskQuiz")
             summary = "퀴즈 문제 하나 답변 (즉시 채점)"
             description = "문제를 풀 때마다(앱에서 '다음'을 누를 때) 호출. 답을 서버에 저장하고 정답 여부·정답을 바로 돌려줌. " +
-                "틀리면 reason 에 고른 보기가 왜 틀렸는지 한두 문장이 들어감(맞으면 null). 자세한 풀이는 제출 응답의 results[].explanation 에 있음. " +
+                "틀리면 reason 에 고른 보기가 왜 틀렸는지 한두 문장이 들어감(맞으면 null). explanation 에는 맞든 틀리든 이 문제의 자세한 풀이가 들어감 " +
+                "(제출 응답 results[].explanation 과 같은 값). " +
                 "한 번 답한 문제는 다시 답할 수 없음 — 정답을 본 뒤 답을 바꿔치기하는 것을 막기 위함. " +
                 "최종 채점(POST .../quiz/submit)은 여기서 저장된 답만 보고, 앱이 별도로 보내는 답은 받지 않음"
             parameters {
