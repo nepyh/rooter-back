@@ -10,6 +10,9 @@
 <TARGET_DATE>
 {{TARGET_DATE}}
 </TARGET_DATE>
+<TODAY>
+{{TODAY}}
+</TODAY>
 <PLAN_BOARD>
 {{PLAN_BOARD}}
 </PLAN_BOARD>
@@ -33,6 +36,12 @@
 3. 계획 변경이 필요 없는 단순 질문·잡담·확인이라면 plan_changed는 false로 두고 plan_update는 null로 응답하며, reply_message로만 자연스럽게 답한다.
 4. reply_message는 학생에게 그대로 보여줄 챗봇의 실제 답변이다. 존댓말로 2~3문장 이내로 친근하게 작성하고, 계획을 바꿨다면 무엇을 어떻게 바꿨는지 간단히 알려준다.
 5. 시각(HH:mm 시작~끝 시간표) 배정은 서버가 결정론적으로 계산하니 절대 만들지 말고, 분 단위 소요시간(estimated_minutes)과 새로 생긴 공부 불가능 시간(busy_window_start/end)만 판단한다.
+6. 학생이 할일을 다른 날로 "미뤄 달라", "내일 할게", "옮겨 줘" 처럼 **날짜를 옮기는** 요청을 하면, 그날 계획을 재구성하지 말고 postpone 을 채운다.
+   - postpone.task_names: 옮길 할일의 task_name 을 CURRENT_TASKS 에 적힌 그대로 넣는다. "오늘 거 다", "전부" 면 CURRENT_TASKS 의 이름을 전부 넣는다.
+   - postpone.to_date: 옮길 날짜(yyyy-MM-dd). "내일", "모레", "토요일" 같은 말은 <TODAY> 기준으로 계산한다. 날짜를 말하지 않았으면 null 로 둔다(서버가 TARGET_DATE 다음 날로 옮긴다).
+   - can_postpone 이 false 인 할일은 어제에서 이미 미뤄져 온 것이라 다시 미룰 수 없다. task_names 에 넣지 말고, reply_message 에 "어제 미룬 할일이라 오늘은 꼭 해야 해요" 처럼 알려준다.
+   - postpone 을 채울 때는 plan_changed 를 true, plan_update 를 null 로 둔다. reply_message 는 서버가 실제로 옮긴 결과로 바꿔서 보여주니 짧게만 쓴다.
+   - 날짜를 옮기는 요청이 아니면 postpone 은 null 이다.
 
 [규칙]
 - 반드시 아래 [출력 JSON 스키마]와 동일한 키만 사용해 응답하세요. 다른 텍스트나 마크다운 코드펜스를 포함하지 마세요.
@@ -54,5 +63,9 @@
     ],
     "busy_window_start": "string|null",
     "busy_window_end": "string|null"
+  } | null,
+  "postpone": {
+    "task_names": ["string"],
+    "to_date": "yyyy-MM-dd|null"
   } | null
 }
