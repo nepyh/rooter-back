@@ -2,6 +2,10 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
+import com.github.nepyh.rooter.module.planboard.model.TextbookRow
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
+import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
@@ -170,6 +174,26 @@ class QuizServiceTest : StringSpec({
             service.generateQuiz(userId, day)
         }
         storedQuestionCount(dailyPlanId) shouldBe 0L
+    }
+
+    "generateQuiz: 응답 subjects 에 플랜보드 학습 범위 과목이 한 번씩 등록 순서대로 들어간다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        transaction(db) {
+            val board = DailyPlanRow[dailyPlanId].planBoard
+            fun range(subjectName: String) {
+                val subject = SubjectRow.find { SubjectTable.name eq subjectName }.firstOrNull() ?: SubjectRow.new { name = subjectName }
+                val textbook = TextbookRow.new { this.subject = subject; title = "$subjectName 교과서" }
+                val chapter = ChapterRow.new { this.textbook = textbook; chapterName = "$subjectName 1단원"; chapterOrder = 1 }
+                PlanSubjectRow.new { planBoard = board; this.textbook = textbook; startChapter = chapter; endChapter = chapter }
+            }
+            range("수학"); range("과학"); range("수학") // 같은 과목 교과서가 두 권이어도 한 번만
+        }
+
+        val quiz = QuizService(FakeQuizLlmClient(), noNiceFetcher).generateQuiz(userId, day)
+
+        quiz.subjects.map { it.subjectName } shouldBe listOf("수학", "과학")
+        // 이미 만든 퀴즈를 다시 받을 때도 같은 값
+        QuizService(FakeQuizLlmClient(), noNiceFetcher).generateQuiz(userId, day).subjects shouldBe quiz.subjects
     }
 
     "generateQuiz: 해당 날짜에 계획이 없으면 NoPlanForDateException" {
