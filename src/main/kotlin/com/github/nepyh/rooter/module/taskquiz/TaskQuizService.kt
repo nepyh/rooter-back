@@ -108,7 +108,22 @@ class TaskQuizService(
     }
 
     /**
-     * 완료 버튼을 누르면 부른다. 풀 수 있는 퀴즈를 바로 돌려준다 — 퀴즈를 통과해야 태스크가 완료된다.
+     * 완료 버튼(PATCH /plan-tasks/{taskId}/complete, isCompleted=true)에서 부른다.
+     * 이미 퀴즈를 통과한 태스크면(통과 뒤 완료를 취소했다가 다시 누른 경우) 바로 완료 처리하고 null, 아니면 풀 퀴즈를 돌려준다.
+     */
+    suspend fun completeWithQuiz(userId: Int, planTaskId: Int): TaskQuizResponse? {
+        val passed = newSuspendedTransaction {
+            requireOwnedTask(userId, planTaskId)
+            val latest = TaskQuizAttemptRow.find { TaskQuizAttemptTable.planTaskId eq planTaskId }
+                .orderBy(TaskQuizAttemptTable.attemptNumber to SortOrder.DESC)
+                .firstOrNull()
+            (latest?.passed == true).also { if (it) PlanTaskRow[planTaskId].isCompleted = true }
+        }
+        return if (passed) null else startQuiz(userId, planTaskId)
+    }
+
+    /**
+     * 풀 수 있는 퀴즈를 바로 돌려준다 — 퀴즈를 통과해야 태스크가 완료된다.
      * - 아직 퀴즈가 없으면 1차를 지금 만든다 (종료 시각을 기다리지 않음)
      * - 풀고 있는(미제출) 퀴즈가 있으면 그걸 그대로 돌려준다
      * - 직전 차수에서 떨어졌으면 재시도 대기(RETRY_DELAY_MINUTES)가 지난 뒤에만 다음 차수를 만든다

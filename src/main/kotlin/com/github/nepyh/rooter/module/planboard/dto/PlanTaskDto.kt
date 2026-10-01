@@ -1,6 +1,23 @@
 package com.github.nepyh.rooter.module.planboard.dto
 
+import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizResponse
 import kotlinx.serialization.Serializable
+
+/**
+ * 완료 버튼(PATCH /plan-tasks/{taskId}/complete) 응답. PlanTaskResponse 와 같은 필드에 quiz 가 더해진다.
+ * 완료는 퀴즈를 통과해야 되므로, isCompleted=true 로 보내면 보통 isCompleted 는 그대로 false 이고 풀 quiz 가 온다.
+ */
+@Serializable
+data class PlanTaskCompleteResponse(
+    val id: Int,
+    val dailyPlanId: Int,
+    val taskName: String,
+    val startTime: String,
+    val endTime: String,
+    val estimatedMinutes: Int,
+    val isCompleted: Boolean,
+    val quiz: TaskQuizResponse? = null // 풀어야 할 완료 확인 퀴즈. 완료 취소이거나 이미 완료(통과)된 태스크면 null
+)
 
 @Serializable
 data class PlanTaskResponse(

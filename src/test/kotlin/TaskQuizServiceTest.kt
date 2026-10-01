@@ -232,6 +232,21 @@ class TaskQuizServiceTest : StringSpec({
         transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe true
     }
 
+    "completeWithQuiz: 통과 뒤 완료를 취소했다가 다시 누르면 퀴즈 없이 바로 완료, 아직이면 풀 퀴즈를 준다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val userId = lastUserId
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+
+        val quiz = service.completeWithQuiz(userId, taskId)!!
+        quiz.questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choices[0].id) }
+        service.submitQuiz(userId, taskId).passed shouldBe true
+        transaction(db) { PlanTaskRow[taskId].isCompleted = false } // 완료 취소
+
+        service.completeWithQuiz(userId, taskId) shouldBe null
+        transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe true
+        attemptCount(taskId) shouldBe 1L
+    }
+
     "startQuiz: AI 가 퀴즈를 못 만들면 GenerationFailedException 이고 아무것도 저장하지 않는다" {
         val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
         val service = TaskQuizService(FakeTaskQuizLlmClient(emptyList()))

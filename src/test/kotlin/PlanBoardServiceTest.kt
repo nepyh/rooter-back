@@ -978,20 +978,9 @@ class PlanBoardServiceTest : StringSpec({
         val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
 
         planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).dailyPlanId shouldBe dailyPlanId
-        planTaskService.completeTask(userId, taskId, false).dailyPlanId shouldBe dailyPlanId
+        planTaskService.completeTask(userId, taskId, true).dailyPlanId shouldBe dailyPlanId
     }
 
-    "completeTask: 미완료 태스크를 퀴즈 없이 완료하려 하면 QuizRequiredException, 완료 취소는 된다" {
-        val userId = seedUser("complete-quiz@test.com")
-        val boardId = seedBoard(userId)
-        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
-        val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
-
-        shouldThrow<PlanTaskValidationException.QuizRequiredException> {
-            planTaskService.completeTask(userId, taskId, true)
-        }
-        planTaskService.completeTask(userId, taskId, false).isCompleted shouldBe false
-    }
 })
 
 // context 의 "총 학습 기간: N일" 만큼 계획을 돌려준다. shortResponses 번째까지는 절반만 돌려준다.

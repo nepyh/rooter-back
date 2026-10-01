@@ -19,7 +19,7 @@ fun PlanBoardModule(appConfig: AppConfig) = module {
     single { BusyTimeService(get()) }
 
     single(named("planBoardApi")) { PlanBoardApi(get()) }
-    single(named("planTaskApi")) { PlanTaskApi(get()) }
+    single(named("planTaskApi")) { PlanTaskApi(get(), get()) }
     single(named("catalogApi")) { CatalogApi(get()) }
     single(named("dailyPlanApi")) { DailyPlanApi(get()) }
     single(named("planGenerationApi")) { PlanGenerationApi(get()) }

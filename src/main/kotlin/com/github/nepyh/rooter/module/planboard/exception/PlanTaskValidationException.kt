@@ -37,11 +37,6 @@ sealed class PlanTaskValidationException(
         "PLAN_DATE_OUT_OF_RANGE",
         "계획 날짜가 플랜보드 기간을 벗어났습니다."
     )
-    class QuizRequiredException : PlanTaskValidationException(
-        HttpStatusCode.BadRequest,
-        "TASK_QUIZ_REQUIRED",
-        "태스크는 완료 확인 퀴즈를 통과해야 완료됩니다. 퀴즈를 시작해주세요. (POST /plan-tasks/{taskId}/quiz/start)"
-    )
     class InvalidDateParamException : PlanTaskValidationException(
         HttpStatusCode.BadRequest,
         "INVALID_DATE_PARAM",

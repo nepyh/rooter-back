@@ -6,12 +6,15 @@ import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCompleteRequest
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCompleteResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.WeeklyPlanResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
+import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
+import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.openapi.jsonSchema
@@ -30,7 +33,7 @@ import io.ktor.utils.io.ExperimentalKtorApi
 import java.time.LocalDate
 
 @OptIn(ExperimentalKtorApi::class)
-fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
+fun PlanTaskApi(planTaskService: PlanTaskService, taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
     authenticate("auth-jwt") {
         get("") {
             val dateParam = call.request.queryParameters["date"]
@@ -154,14 +157,23 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
             val taskId = call.parameters["taskId"]?.toIntOrNull()
                 ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
             val request = call.receive<PlanTaskCompleteRequest>()
+            val userId = call.userId()
 
-            val response = planTaskService.completeTask(call.userId(), taskId, request.isCompleted)
-            call.respond(HttpStatusCode.OK, response)
+            // 완료는 퀴즈를 통과해야 된다 — true 면 바로 완료하지 않고 풀 퀴즈를 만들어(또는 풀던 퀴즈를) 함께 돌려준다
+            val quiz = if (request.isCompleted && !planTaskService.getOwnedTask(userId, taskId).isCompleted) {
+                taskQuizService.completeWithQuiz(userId, taskId)
+            } else {
+                if (!request.isCompleted) planTaskService.completeTask(userId, taskId, false)
+                null
+            }
+            call.respond(HttpStatusCode.OK, planTaskService.getOwnedTask(userId, taskId).withQuiz(quiz))
         }.describe {
             tag("PlanTask")
-            summary = "태스크 완료 취소"
-            description = "완료는 완료 확인 퀴즈를 통과해야만 됨 — 완료 버튼은 POST /plan-tasks/{taskId}/quiz/start 를 호출할 것. " +
-                "여기에 미완료 태스크를 isCompleted=true 로 보내면 400 TASK_QUIZ_REQUIRED. isCompleted=false 로 완료 취소는 가능. 본인 플랜보드 소유 태스크만 가능"
+            summary = "태스크 완료 버튼 (완료 확인 퀴즈 시작) / 완료 취소"
+            description = "isCompleted=true(완료 버튼): 바로 완료되지 않고, 응답 quiz 에 풀 완료 확인 퀴즈가 옴 — 퀴즈를 통과하면 태스크가 완료됨. " +
+                "퀴즈가 없으면 종료 시각을 기다리지 않고 지금 만들고(AI 생성이라 몇 초), 풀던 퀴즈가 있으면 그걸 줌. " +
+                "직전 차수 불합격이면 10분 뒤부터 다음 차수(최초 1회 + 재시도 2회). 이미 퀴즈를 통과한 태스크면 바로 완료되고 quiz 는 null. " +
+                "isCompleted=false: 완료 취소 (quiz 는 null). 본인 플랜보드 소유 태스크만 가능"
             parameters {
                 path("taskId") {
                     description = "태스크 ID"
@@ -178,17 +190,21 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                 HttpStatusCode.OK {
                     description = "처리 성공"
                     ContentType.Application.Json {
-                        schema = jsonSchema<PlanTaskResponse>()
+                        schema = jsonSchema<PlanTaskCompleteResponse>()
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 퀴즈 없이 완료하려 함 (code=TASK_QUIZ_REQUIRED)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 3번 모두 불합격해 더 풀 수 없음 (code=TASK_QUIZ_NO_MORE_ATTEMPTS), " +
+                        "재시도 대기 중 (code=TASK_QUIZ_RETRY_NOT_READY, message 에 남은 분)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
                     description = "존재하지 않거나 본인 소유가 아닌 태스크"
+                }
+                HttpStatusCode.BadGateway {
+                    description = "AI 퀴즈 생성 실패 (code=TASK_QUIZ_GENERATION_FAILED) — 잠시 후 다시 누르면 됨"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -282,3 +298,14 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
 
 private fun ApplicationCall.userId(): Int =
     principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+
+private fun PlanTaskResponse.withQuiz(quiz: TaskQuizResponse?) = PlanTaskCompleteResponse(
+    id = id,
+    dailyPlanId = dailyPlanId,
+    taskName = taskName,
+    startTime = startTime,
+    endTime = endTime,
+    estimatedMinutes = estimatedMinutes,
+    isCompleted = isCompleted,
+    quiz = quiz
+)

@@ -33,7 +33,7 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("TaskQuiz")
             summary = "태스크 완료 확인 퀴즈 조회"
-            description = "완료 버튼(POST .../quiz/start)을 눌렀거나 태스크 종료 시각이 지나 만들어진 퀴즈(5문항)를 조회. 가장 최근 시도(최초 또는 재시도)를 반환. 이미 답한 문제는 selectedChoiceId 가 채워져 있어 앱을 다시 켜도 이어서 풀 수 있음"
+            description = "완료 버튼(PATCH /plan-tasks/{taskId}/complete)을 눌렀거나 태스크 종료 시각이 지나 만들어진 퀴즈(5문항)를 조회. 가장 최근 시도(최초 또는 재시도)를 반환. 이미 답한 문제는 selectedChoiceId 가 채워져 있어 앱을 다시 켜도 이어서 풀 수 있음"
             responses {
                 HttpStatusCode.OK {
                     description = "조회 성공"
@@ -49,45 +49,6 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
                 }
                 HttpStatusCode.NotFound {
                     description = "아직 생성되지 않았거나 본인 소유가 아닌 태스크 (code=TASK_QUIZ_NOT_FOUND)"
-                }
-                HttpStatusCode.InternalServerError {
-                    description = "서버 오류"
-                }
-            }
-        }
-
-        post("{taskId}/quiz/start") {
-            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-            val taskId = call.parameters["taskId"]?.toIntOrNull()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
-
-            call.respond(HttpStatusCode.OK, taskQuizService.startQuiz(userId, taskId))
-        }.describe {
-            tag("TaskQuiz")
-            summary = "완료 버튼 — 태스크 완료 확인 퀴즈 바로 시작"
-            description = "앱의 완료 버튼에서 호출. 풀 수 있는 퀴즈를 바로 돌려줌 (응답은 GET .../quiz 와 같음). 퀴즈를 통과해야 태스크가 완료됨. " +
-                "아직 퀴즈가 없으면 종료 시각을 기다리지 않고 지금 1차 퀴즈를 만들고(AI 생성이라 몇 초 걸림), 풀고 있는 퀴즈가 있으면 그대로 돌려줌. " +
-                "직전 차수에서 떨어졌으면 10분 대기 후에만 다음 차수를 만듦 (최초 1회 + 재시도 2회). " +
-                "완료 버튼을 누르지 않아도 종료 시각이 지나면 퀴즈는 기존처럼 자동으로 만들어짐"
-            responses {
-                HttpStatusCode.OK {
-                    description = "풀 퀴즈"
-                    ContentType.Application.Json {
-                        schema = jsonSchema<TaskQuizResponse>()
-                    }
-                }
-                HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 이미 퀴즈를 통과함 (code=TASK_QUIZ_ALREADY_PASSED), " +
-                        "3번 모두 불합격 (code=TASK_QUIZ_NO_MORE_ATTEMPTS), 재시도 대기 중 (code=TASK_QUIZ_RETRY_NOT_READY, message 에 남은 분)"
-                }
-                HttpStatusCode.Unauthorized {
-                    description = "인증되지 않음"
-                }
-                HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 태스크 (code=TASK_QUIZ_NOT_FOUND)"
-                }
-                HttpStatusCode.BadGateway {
-                    description = "AI 퀴즈 생성 실패 (code=TASK_QUIZ_GENERATION_FAILED) — 잠시 후 다시 호출"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
