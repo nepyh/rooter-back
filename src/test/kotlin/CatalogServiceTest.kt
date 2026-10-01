@@ -1,6 +1,8 @@
 import com.github.nepyh.rooter.module.planboard.CatalogService
 import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionRow
 import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionTable
+import com.github.nepyh.rooter.module.planboard.model.PublisherRow
+import com.github.nepyh.rooter.module.planboard.model.PublisherTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
@@ -50,9 +52,10 @@ class CatalogServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS school_textbook_adoptions CASCADE")
             exec("DROP TABLE IF EXISTS textbooks CASCADE")
             exec("DROP TABLE IF EXISTS subjects CASCADE")
+            exec("DROP TABLE IF EXISTS publishers CASCADE")
             exec("DROP TABLE IF EXISTS student_profiles CASCADE")
             exec("DROP TABLE IF EXISTS users CASCADE")
-            SchemaUtils.create(UserTable, StudentProfileTable, SubjectTable, TextbookTable, SchoolTextbookAdoptionTable)
+            SchemaUtils.create(UserTable, StudentProfileTable, SubjectTable, PublisherTable, TextbookTable, SchoolTextbookAdoptionTable)
         }
     }
 
@@ -61,6 +64,7 @@ class CatalogServiceTest : StringSpec({
             SchoolTextbookAdoptionTable.deleteAll()
             TextbookTable.deleteAll()
             SubjectTable.deleteAll()
+            PublisherTable.deleteAll()
             StudentProfileTable.deleteAll()
             UserTable.deleteAll()
         }
@@ -90,12 +94,17 @@ class CatalogServiceTest : StringSpec({
         SubjectRow.new { this.name = name }.id.value
     }
 
-    fun seedTextbook(subjectId: Int, title: String, coverImageKey: String? = null): Int = transaction(db) {
+    fun seedTextbook(subjectId: Int, title: String, coverImageKey: String? = null, publisherId: Int? = null): Int = transaction(db) {
         TextbookRow.new {
             subject = SubjectRow[subjectId]
             this.title = title
             this.coverImageKey = coverImageKey
+            this.publisherId = publisherId
         }.id.value
+    }
+
+    fun seedPublisher(name: String): Int = transaction(db) {
+        PublisherRow.new { this.name = name }.id.value
     }
 
     fun seedAdoption(schoolId: String, grade: Int, subjectId: Int, textbookId: Int) = transaction(db) {
@@ -139,6 +148,7 @@ class CatalogServiceTest : StringSpec({
                 subjectName = "수학",
                 textbookId = textbookId,
                 textbookTitle = "중학수학 2-1 (천재교육)",
+                publisherName = null,
                 coverImageUrl = null
             )
         )
@@ -208,6 +218,21 @@ class CatalogServiceTest : StringSpec({
 
         result.size shouldBe 1
         result.first().coverImageUrl shouldBe "https://fake-storage.test/textbook-covers/cover-3.png"
+    }
+
+    "출판사 이름: 목록·상세·추천 응답에 publisherName 이 채워지고, 출판사가 없으면 null 이다" {
+        val userId = seedUser("publisher@test.com")
+        seedProfile(userId, schoolId = "C107181084", grade = 1)
+        val subjectId = seedSubject("과학")
+        val miraen = seedPublisher("미래엔")
+        val withPublisher = seedTextbook(subjectId, "1학년 과학 (미래엔)", publisherId = miraen)
+        val withoutPublisher = seedTextbook(subjectId, "출판사 없는 교과서")
+        seedAdoption(schoolId = "C107181084", grade = 1, subjectId = subjectId, textbookId = withPublisher)
+
+        catalogService.getTextbooksBySubject(subjectId).associate { it.id to it.publisherName } shouldBe
+            mapOf(withPublisher to "미래엔", withoutPublisher to null)
+        catalogService.getTextbookDetail(withPublisher)?.publisherName shouldBe "미래엔"
+        catalogService.getRecommendedTextbooks(userId).single().publisherName shouldBe "미래엔"
     }
 })
 
