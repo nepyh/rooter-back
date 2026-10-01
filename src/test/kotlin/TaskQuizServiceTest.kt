@@ -1,5 +1,6 @@
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
+import com.github.nepyh.rooter.module.planboard.guessTaskSubject
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
@@ -140,6 +141,38 @@ class TaskQuizServiceTest : StringSpec({
         llm.lastGradeLabel shouldBe "중학생(학년 정보 없음)"
         llm.lastStudyScope shouldBe "지정 안 됨"
         transaction(db) { TaskQuizAttemptTable.selectAll().count() } shouldBe 1L
+    }
+
+    "getCurrentQuiz: 플랜보드 학습 범위 과목(subjects)과 태스크 이름으로 추정한 과목(subject)을 함께 준다" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = true)
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+        service.generateAttempt(taskId, 1, "과학 문제집 30쪽 풀기")
+
+        val quiz = service.getCurrentQuiz(lastUserId, taskId)
+
+        quiz.subjects.map { it.subjectName } shouldBe listOf("과학")
+        quiz.subject?.subjectName shouldBe "과학"
+    }
+
+    "getCurrentQuiz: 학습 범위가 없는 보드의 태스크면 subject 는 null, subjects 는 빈 목록" {
+        val taskId = seedTask("영어 단어 30개 외우기", grade = null, withScope = false)
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+        service.generateAttempt(taskId, 1, "영어 단어 30개 외우기")
+
+        val quiz = service.getCurrentQuiz(lastUserId, taskId)
+
+        quiz.subject shouldBe null
+        quiz.subjects shouldBe emptyList()
+    }
+
+    "guessTaskSubject: 이름에 과목명이 하나면 그 과목, 없으면 보드 과목이 하나일 때만 그 과목, 애매하면 null" {
+        val math = 1 to "수학"
+        val science = 2 to "과학"
+        guessTaskSubject("수학 개념 정리", listOf(math, science)) shouldBe math
+        guessTaskSubject("문제집 30쪽", listOf(science)) shouldBe science
+        guessTaskSubject("문제집 30쪽", listOf(math, science)) shouldBe null
+        guessTaskSubject("수학·과학 복습", listOf(math, science)) shouldBe null
+        guessTaskSubject("아무거나", emptyList()) shouldBe null
     }
 
     "answerQuestion: 정답을 고르면 isCorrect=true 를 돌려주고 DB 에 저장한다" {

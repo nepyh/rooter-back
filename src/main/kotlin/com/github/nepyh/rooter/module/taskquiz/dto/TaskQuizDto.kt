@@ -19,10 +19,19 @@ data class TaskQuizQuestionResponse(
 )
 
 @Serializable
+data class TaskQuizSubjectResponse(
+    val subjectId: Int,
+    val subjectName: String
+)
+
+@Serializable
 data class TaskQuizResponse(
     val planTaskId: Int,
     val attemptNumber: Int,
-    val questions: List<TaskQuizQuestionResponse>
+    val questions: List<TaskQuizQuestionResponse>,
+    // 이 태스크의 과목 (추정). 태스크 이름에 과목명이 하나만 있으면 그 과목, 아니면 플랜보드 과목이 하나뿐일 때 그 과목, 그 외엔 null
+    val subject: TaskQuizSubjectResponse? = null,
+    val subjects: List<TaskQuizSubjectResponse> = emptyList() // 플랜보드 학습 범위 과목 (퀴즈는 이 범위에서 출제)
 )
 
 @Serializable

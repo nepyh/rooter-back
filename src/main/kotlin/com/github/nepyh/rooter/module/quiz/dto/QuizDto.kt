@@ -22,10 +22,17 @@ data class QuizQuestionResponse(
 )
 
 @Serializable
+data class QuizSubjectResponse(
+    val subjectId: Int,
+    val subjectName: String
+)
+
+@Serializable
 data class QuizResponse(
     val dailyPlanId: Int,
     val quizDate: String,
-    val questions: List<QuizQuestionResponse>
+    val questions: List<QuizQuestionResponse>,
+    val subjects: List<QuizSubjectResponse> = emptyList() // 이 일일 계획이 속한 플랜보드의 학습 범위 과목 (퀴즈는 이 범위에서 출제)
 )
 
 @Serializable

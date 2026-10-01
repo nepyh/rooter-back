@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.quiz
 
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
+import com.github.nepyh.rooter.module.planboard.planBoardSubjects
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
@@ -22,6 +23,7 @@ import com.github.nepyh.rooter.module.quiz.dto.QuizQuestionResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizQuestionResult
 import com.github.nepyh.rooter.module.quiz.dto.QuizResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizResultResponse
+import com.github.nepyh.rooter.module.quiz.dto.QuizSubjectResponse
 import com.github.nepyh.rooter.module.quiz.dto.WeakAreaSummary
 import com.github.nepyh.rooter.module.quiz.exception.QuizNotFoundException
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
@@ -120,7 +122,7 @@ class QuizService(
                 QuizQuestionResponse(id = quizQuestion.id.value, questionText = question.questionText, choices = choices)
             }
 
-            QuizResponse(dailyPlanId = dailyPlanId, quizDate = date.toString(), questions = questions)
+            QuizResponse(dailyPlanId = dailyPlanId, quizDate = date.toString(), questions = questions, subjects = subjectsOf(dailyPlanId))
         }
     }
 
@@ -135,8 +137,17 @@ class QuizService(
 
                 QuizQuestionResponse(id = question.id.value, questionText = question.questionText, choices = choices)
             }
-        return if (questions.isEmpty()) null else QuizResponse(dailyPlanId = dailyPlanId, quizDate = quizDate.toString(), questions = questions)
+        return if (questions.isEmpty()) {
+            null
+        } else {
+            QuizResponse(dailyPlanId = dailyPlanId, quizDate = quizDate.toString(), questions = questions, subjects = subjectsOf(dailyPlanId))
+        }
     }
+
+    /** 일일 계획이 속한 플랜보드의 학습 범위 과목. 트랜잭션 안에서 호출한다. */
+    private fun subjectsOf(dailyPlanId: Int): List<QuizSubjectResponse> =
+        planBoardSubjects(DailyPlanRow[dailyPlanId].planBoard.id.value)
+            .map { (id, name) -> QuizSubjectResponse(subjectId = id, subjectName = name) }
 
     suspend fun getQuiz(userId: Int, dailyPlanId: Int): QuizResponse = newSuspendedTransaction {
         // 소유자 확인용 조인 조회 (위 generateQuiz 와 같은 이유로 Table DSL 유지)
