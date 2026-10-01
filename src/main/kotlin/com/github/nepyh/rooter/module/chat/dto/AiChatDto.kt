@@ -19,7 +19,8 @@ data class AiChatCurrentTask(
     val task_name: String,
     val estimated_minutes: Int,
     val start_time: String, // "HH:mm"
-    val end_time: String
+    val end_time: String,
+    val can_postpone: Boolean = true // 바로 전날에서 미뤄져 온 할일이면 false (이틀 연속 미루기 금지)
 )
 
 @Serializable
@@ -30,10 +31,17 @@ data class AiChatPlanUpdate(
 )
 
 @Serializable
+data class AiChatPostpone(
+    val task_names: List<String> = emptyList(), // CURRENT_TASKS 의 task_name 그대로
+    val to_date: String? = null // "yyyy-MM-dd". null 이면 TARGET_DATE 다음 날
+)
+
+@Serializable
 data class AiChatResult(
     val reply_message: String,
     val plan_changed: Boolean = false,
-    val plan_update: AiChatPlanUpdate? = null
+    val plan_update: AiChatPlanUpdate? = null,
+    val postpone: AiChatPostpone? = null // 할일을 다른 날로 미뤄달라는 요청일 때만
 )
 
 /** 프롬프트에 <CHAT_HISTORY_JSON> 으로 그대로 실어 보내기 위한 대화 턴 wire 포맷. */

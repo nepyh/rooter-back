@@ -11,13 +11,10 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationTaskResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
-import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
-import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
-import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
@@ -36,9 +33,6 @@ import kotlinx.coroutines.sync.withPermit
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.core.greaterEq
-import org.jetbrains.exposed.v1.core.lessEq
-import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -102,17 +96,7 @@ class PlanGenerationService(
                 }
 
             // 이미 있는 할일(다른 플랜보드 것 포함)과 겹치지 않게 배치하려고 기간 안의 할일 시간을 날짜별로 모은다
-            val existingTaskRanges = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
-                .select(DailyPlanTable.planDate, PlanTaskTable.startTime, PlanTaskTable.endTime)
-                .where {
-                    (PlanBoardTable.userId eq userId) and
-                        (DailyPlanTable.planDate greaterEq startDate) and
-                        (DailyPlanTable.planDate lessEq endDate)
-                }
-                .groupBy(
-                    { it[DailyPlanTable.planDate] },
-                    { PlanTaskScheduler.toMinutes(it[PlanTaskTable.startTime]) to PlanTaskScheduler.toMinutes(it[PlanTaskTable.endTime]) }
-                )
+            val existingTaskRanges = userTaskRanges(userId, startDate, endDate)
 
             PlanContext(
                 resolvedSubjects = resolved.map { it.second },
