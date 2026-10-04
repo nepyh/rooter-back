@@ -18,6 +18,7 @@ import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.taskquiz.GeneratedTaskQuizQuestion
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizLlmClient
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
+import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizNotFoundException
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizValidationException
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceTable
@@ -30,6 +31,10 @@ import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
@@ -37,6 +42,8 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
+import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -173,6 +180,83 @@ class TaskQuizServiceTest : StringSpec({
         guessTaskSubject("문제집 30쪽", listOf(math, science)) shouldBe null
         guessTaskSubject("수학·과학 복습", listOf(math, science)) shouldBe null
         guessTaskSubject("아무거나", emptyList()) shouldBe null
+    }
+
+    fun attemptCount(taskId: Int): Long = transaction(db) {
+        TaskQuizAttemptTable.selectAll().where { TaskQuizAttemptTable.planTaskId eq taskId }.count()
+    }
+
+    suspend fun failAll(service: TaskQuizService, userId: Int, taskId: Int) {
+        service.getCurrentQuiz(userId, taskId).questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choices[1].id) }
+        service.submitQuiz(userId, taskId)
+    }
+
+    "openQuiz: 퀴즈가 없으면 종료 시각 전이어도 바로 1차 퀴즈를 만들고, 다시 열어도 같은 퀴즈를 준다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val userId = lastUserId
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+
+        val first = service.openQuiz(userId, taskId)
+        val second = service.openQuiz(userId, taskId)
+
+        first.attemptNumber shouldBe 1
+        first.questions.size shouldBe 5
+        second.questions.map { it.id } shouldBe first.questions.map { it.id }
+        attemptCount(taskId) shouldBe 1L
+    }
+
+    "openQuiz: 떨어진 뒤 10분 전엔 그 차수를 그대로 주고, 10분이 지나면 다음 차수를 바로 만든다. 3번 다 떨어지면 더 만들지 않는다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val userId = lastUserId
+        val now = TaskQuizService(FakeTaskQuizLlmClient())
+        val later = { minutes: Long -> TaskQuizService(FakeTaskQuizLlmClient(), Clock.offset(Clock.systemUTC(), Duration.ofMinutes(minutes))) }
+
+        now.openQuiz(userId, taskId)
+        failAll(now, userId, taskId)
+        now.openQuiz(userId, taskId).attemptNumber shouldBe 1 // 대기 중 — 예전처럼 최근 차수
+        later(11).openQuiz(userId, taskId).attemptNumber shouldBe 2
+        failAll(now, userId, taskId)
+        later(11).openQuiz(userId, taskId).attemptNumber shouldBe 3
+        failAll(now, userId, taskId)
+        later(60).openQuiz(userId, taskId).attemptNumber shouldBe 3
+        attemptCount(taskId) shouldBe 3L
+    }
+
+    "openQuiz: 통과한 태스크면 새로 만들지 않고 통과한 차수를 준다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val userId = lastUserId
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+        service.openQuiz(userId, taskId).questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choices[0].id) }
+        service.submitQuiz(userId, taskId).passed shouldBe true
+
+        service.openQuiz(userId, taskId).attemptNumber shouldBe 1
+        attemptCount(taskId) shouldBe 1L
+    }
+
+    "openQuiz: AI 가 퀴즈를 못 만들면 GenerationFailedException 이고 아무것도 저장하지 않는다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val service = TaskQuizService(FakeTaskQuizLlmClient(emptyList()))
+
+        shouldThrow<TaskQuizValidationException.GenerationFailedException> { service.openQuiz(lastUserId, taskId) }
+        attemptCount(taskId) shouldBe 0L
+    }
+
+    "openQuiz: 다른 사람 태스크면 TaskQuizNotFoundException 이고 퀴즈를 만들지 않는다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+
+        shouldThrow<TaskQuizNotFoundException> { service.openQuiz(lastUserId + 999, taskId) }
+        attemptCount(taskId) shouldBe 0L
+    }
+
+    "generateAttempt: 스케줄러와 퀴즈 열기가 같은 차수를 겹쳐 만들려 해도 한 번만 저장된다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+
+        coroutineScope {
+            (1..3).map { async { service.generateAttempt(taskId, 1, "수학 문제집 풀기") } }.awaitAll()
+        } shouldBe listOf(true, true, true)
+        attemptCount(taskId) shouldBe 1L
     }
 
     "answerQuestion: 정답을 고르면 isCorrect=true 를 돌려주고 DB 에 저장한다" {
