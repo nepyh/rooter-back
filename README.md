@@ -204,6 +204,20 @@ AWS_PROFILE=rooter-s3-dev ./gradlew run --args="-config=dev-s3.conf"
 
 `.github/workflows/deploy.yml` 이 `main` 브랜치 push 시 이미지를 ECR 에 올리고 ECS 서비스를 갱신합니다.
 
+### 서버 두 개 (prod / dev)
+
+| | prod | dev |
+| --- | --- | --- |
+| 배포 브랜치 | `main` (`deploy.yml`) | `develop` (`deploy-dev.yml`, Actions 에서 수동 실행도 가능) |
+| ECS 서비스 / 태스크 정의 패밀리 | `rooter-7ca8` / `default-rooter-7ca8` | `rooter-dev` / `default-rooter-dev` |
+| URL | `https://ro-897fe1b87ce043b3968caf53c5ef0699.ecs.ap-northeast-2.on.aws` | `https://ro-52fd3c201d4a4d4bad0ff4cbeb322e84.ecs.ap-northeast-2.on.aws` |
+| 설정 | `prod.conf` (Swagger 꺼짐, S3) | `dev.conf` (Swagger 켜짐 `/api/swagger`, 컨테이너 로컬 파일 저장 — 재배포하면 업로드 파일은 사라짐) |
+| DB | RDS `rooter-db` 의 `postgres` | 같은 RDS 의 `rooter_dev` (운영 데이터와 분리, 교과서·단원 등 마스터 데이터만 복사해 둠) |
+| 로그 | CloudWatch `/ecs/rooter` | CloudWatch `/ecs/rooter-dev` (30일 보관) |
+
+- CPU/메모리·네트워크·역할은 둘이 같습니다. JWT 시크릿은 서로 달라서 한쪽 토큰은 다른 쪽에서 쓸 수 없습니다.
+- **DDL 을 바꾸면 dev DB(`rooter_dev`)에도 같은 ALTER 를 실행**해야 합니다. 먼저 dev 에서 확인하고 운영에 반영하면 안전합니다.
+
 1. ECS **태스크 정의**에 `AWS_REGION` / `AWS_BUCKET` / `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 환경변수를 넣습니다 (`prod.conf` 의 치환값 — LLM 3종이 없으면 컨테이너가 기동하지 않음)
 2. **태스크 역할(task role)** 에 버킷 접근 권한을 부여합니다
    - `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` → `arn:aws:s3:::<버킷>/*`
