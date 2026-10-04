@@ -56,14 +56,24 @@ class TaskQuizService(
 ) {
 
     /** 스케줄러가 호출. taskName은 findDue 시점에 이미 조회해둔 값을 그대로 받는다. */
-    suspend fun generateAttempt(planTaskId: Int, attemptNumber: Int, taskName: String) {
+    /**
+     * attemptNumber 차수 퀴즈를 만든다. 만들었거나 이미 있으면 true, AI 생성 실패면 false.
+     * 스케줄러(종료 시각)와 퀴즈 열기([openQuiz])가 동시에 부를 수 있어, 저장할 때 태스크 행을 잠그고 같은 차수가 있으면 만들지 않는다.
+     */
+    suspend fun generateAttempt(planTaskId: Int, attemptNumber: Int, taskName: String): Boolean {
         val (gradeLabel, studyScope) = newSuspendedTransaction { quizContextOf(planTaskId) }
         // 정답 번호가 보기 범위를 벗어난 문제는 채점할 수 없으니 버린다
         val generated = llmClient.generateQuestions(taskName, gradeLabel, studyScope)
             .filter { it.choices.size >= 2 && it.correct_index in it.choices.indices }
-        if (generated.isEmpty()) return // AI 생성 실패 시 이번 attempt는 건너뜀 (다음 스케줄 대상이 되진 않음)
+        if (generated.isEmpty()) return false // AI 생성 실패 시 이번 attempt는 건너뜀 (다음 스케줄 대상이 되진 않음)
 
         newSuspendedTransaction {
+            PlanTaskTable.selectAll().where { PlanTaskTable.id eq planTaskId }.forUpdate().single()
+            val exists = !TaskQuizAttemptRow.find {
+                (TaskQuizAttemptTable.planTaskId eq planTaskId) and (TaskQuizAttemptTable.attemptNumber eq attemptNumber)
+            }.empty()
+            if (exists) return@newSuspendedTransaction
+
             val attempt = TaskQuizAttemptRow.new {
                 this.planTaskId = EntityID(planTaskId, PlanTaskTable)
                 this.attemptNumber = attemptNumber
@@ -93,6 +103,36 @@ class TaskQuizService(
                 }
             }
         }
+        return true
+    }
+
+    /**
+     * 퀴즈 열기 (GET /plan-tasks/{taskId}/quiz). 앱은 완료 버튼을 누르면 이걸 부른다.
+     * 종료 시각을 기다리지 않고 풀 퀴즈를 돌려준다 — 퀴즈를 통과해야 태스크가 완료된다.
+     * - 아직 퀴즈가 없으면 1차를 지금 만든다 (예전엔 종료 시각 전이면 404 였음)
+     * - 직전 차수에서 떨어졌고 재시도 대기(RETRY_DELAY_MINUTES)가 지났으면 스케줄러를 기다리지 않고 다음 차수를 만든다
+     * - 그 외(풀던 퀴즈, 대기 중, 통과, 3회 소진)는 예전처럼 가장 최근 차수를 그대로 돌려준다
+     */
+    suspend fun openQuiz(userId: Int, planTaskId: Int): TaskQuizResponse {
+        val (taskName, latest) = newSuspendedTransaction {
+            requireOwnedTask(userId, planTaskId)
+            val latest = TaskQuizAttemptRow.find { TaskQuizAttemptTable.planTaskId eq planTaskId }
+                .orderBy(TaskQuizAttemptTable.attemptNumber to SortOrder.DESC)
+                .firstOrNull()
+                ?.let { Triple(it.attemptNumber, it.passed, it.createdAt) }
+            PlanTaskRow[planTaskId].taskName to latest
+        }
+
+        val nextAttempt = when {
+            latest == null -> 1
+            latest.second == false && latest.first < MAX_ATTEMPTS &&
+                !latest.third.plusMinutes(RETRY_DELAY_MINUTES).isAfter(OffsetDateTime.now(clock)) -> latest.first + 1
+            else -> null
+        }
+        if (nextAttempt != null && !generateAttempt(planTaskId, nextAttempt, taskName)) {
+            throw TaskQuizValidationException.GenerationFailedException()
+        }
+        return getCurrentQuiz(userId, planTaskId)
     }
 
     fun getCurrentQuiz(userId: Int, planTaskId: Int): TaskQuizResponse = transaction {
