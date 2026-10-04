@@ -29,6 +29,51 @@ curl http://localhost:8080/api/health
 ./gradlew test
 ```
 
+## 환경변수 배선 — 외부 주입 값은 4단계를 전부 거칩니다
+
+자격증명·API 키·엔드포인트처럼 외부에서 주입하는 값은 아래 4단계를 전부 거칩니다.
+한 단계라도 빠지면 **로컬에서는 되는데 컨테이너에서는 안 되는** 상태가 됩니다.
+
+```
+.env.dev.example / .env.prod.example      값 정의 (시크릿은 placeholder)
+      ↓
+docker-compose.dev.yml / docker-compose.prod.yml   app environment: 로 전달
+      ↓
+src/main/resources/dev.conf / prod.conf / dev-s3.conf   HOCON 치환으로 참조
+      ↓
+common/config/AppConfig.kt                property(...) 로 읽어 Koin module 에 전달
+```
+
+**`.env` 는 compose 파일 안의 `${VAR}` 보간에만 쓰입니다.** 컨테이너에 들어가는 값은
+`environment:` 에 적어둔 것뿐이라, 예제에만 값을 채우고 compose 를 빼먹으면 컨테이너만 값이 빈 채로 돕니다.
+
+누락했을 때의 증상은 conf 의 치환 표기에 따라 갈립니다.
+
+| conf 표기 | 누락 시 |
+| --- | --- |
+| `${VAR}` (필수) | 컨테이너가 **기동하지 않습니다.** `ConfigException$UnresolvedSubstitution` 로 즉사하고, 값이 빈 문자열이어도 치환은 성공합니다 — 그래서 compose 에서는 `${VAR}` 형태로 항상 넘겨 기동을 보장합니다 |
+| `${?VAR}` (선택) | 기동은 되고 **조용히 빈 값**이 됩니다. 기능만 꺼진 상태라 알아채기 어렵습니다 (소셜 로그인 클라이언트 ID 가 이 경우) |
+
+### 새 환경변수를 추가할 때
+
+1. `src/main/resources/dev.conf` · `prod.conf` (스토리지 관련이면 `dev-s3.conf` 도) 에 치환 추가
+2. `.env.dev.example` · `.env.prod.example` 에 키·설명 추가 — **시크릿은 실제 값이 아니라 placeholder**.
+   dev 예제는 값을 고치지 않고 복사만 해서 기동되도록 기본값을 유지합니다 (`swagger` / `health` 확인용)
+3. `docker-compose.dev.yml` · `docker-compose.prod.yml` 의 app `environment:` 에 전달 추가
+   — `.env` 에 값이 있든 없든 항상 넘어가도록 `${VAR}` 형태로 씁니다
+4. `AppConfig.kt` 의 `fromApplicationConfig()` 에 매핑 추가
+5. README 의 배선 안내와 ECS 태스크 정의 항목(프러덕션 주입 경로)까지 확인
+
+**가장 자주 빠뜨리는 건 3번입니다.** 로컬 JVM 실행은 루트 `.env` 를 그대로 프로세스 env 로 읽어서
+배선이 끊긴 걸 못 느끼고, 컨테이너로 띄울 때만 드러납니다. (`LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL`
+3종이 이렇게 빠져 있었습니다 — #215)
+
+```bash
+# conf 가 요구하는 변수와 예제에 정의된 키를 맞춰보기
+grep -oE '\$\{[A-Z][A-Z0-9_]*\}' src/main/resources/dev.conf | sort -u
+grep -oE '^[A-Z][A-Z0-9_]*' .env.dev.example | sort -u
+```
+
 ## 용어 — module 과 unit
 
 - **module ≈ domain.** 하나의 서비스 단위입니다. `domain` 이 아니라 `module` 이라 부르는 이유는
@@ -89,6 +134,10 @@ class PlanBoardRow(id: EntityID<Int>) : IntEntity(id) {
 
 예외는 `sealed class` 로 만들고 `status`·`code`·메시지를 예외 자신이 들고 있게 합니다.
 그리고 `AppModule.kt` 의 `StatusPages` 에 매핑합니다. **API 핸들러 안에서 try-catch 하지 않습니다.**
+
+한 `code` 가 여러 사유를 덮을 수 있습니다. 그때는 사유를 `message` 에만 나열하고 `code` 는 그대로 둡니다.
+(예: `INVALID_SUBJECT_RANGE` = 존재하지 않는 교과서·단원 / 요청한 교과서의 단원이 아님 / 시작 단원이 끝 단원보다 뒤)
+프론트가 사유별로 다르게 분기해야 하는 상황이면 `message` 를 파싱하지 말고 **새 `code` 를 추가**합니다.
 
 ```kotlin
 sealed class PlanBoardValidationException(

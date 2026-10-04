@@ -6,10 +6,13 @@ import java.time.LocalTime
 
 private const val DAY_MINUTES = 24 * 60
 private val DEFAULT_UNAVAILABLE_RANGES = listOf(0 to (6 * 60 + 30), (23 * 60) to DAY_MINUTES) // 00:00~06:30, 23:00~24:00
-private val SCHOOL_PREP_RANGE = (7 * 60) to (8 * 60) // 07:00~08:00, 등교 준비(세면/식사/이동), 평일만
-private const val SCHOOL_START_MINUTES = 8 * 60 + 30 // 08:30 등교, 고정
-private val DEFAULT_SCHOOL_HOURS = SCHOOL_START_MINUTES to (16 * 60 + 30) // NICE 시간표를 못 가져올 때 쓰는 폴백값 (08:30~16:30)
+private const val DEFAULT_DISMISSAL_MINUTES = 16 * 60 + 30 // NICE 시간표를 못 가져올 때 쓰는 하교시각 폴백값 (16:30)
 private const val DEFAULT_BREAK_MINUTES = 10
+
+/** 학습 불가 시간의 종류 — 바쁜 시간 조회 API 가 그대로 내려준다 */
+enum class UnavailableType { SLEEP, SCHOOL, UNAVAILABLE }
+
+data class TypedRange(val type: UnavailableType, val start: Int, val end: Int)
 
 data class PlacedTask(
     val taskName: String,
@@ -29,9 +32,12 @@ object PlanTaskScheduler {
      * 날짜별 학습 불가 시간대를 만든다 (plan-generation 의 여러 날짜 생성, chat 재조정의
      * 하루짜리 범위 둘 다 이 함수로 통일해서 씀 — 재조정은 startDate == endDate 로 호출).
      *
-     * 사용자가 직접 등록한 시간대(customRows)가 있으면 그것만 쓰고(기존 동작 유지),
-     * 없으면 취침시간 기본값 + 평일 학교시간을 채우는데, 학교시간은 NICE 실시간 시간표로
-     * 그날의 마지막 교시를 조회해 하교시각을 계산한다 (실패/데이터없음 시 기존 기본값으로 폴백).
+     * 취침시간 기본값을 항상 채우고, 평일(학교 가는 날)은 **자정부터 하교 시각까지 통째로** 막는다.
+     * → 평일에는 하교 후에만, 주말에는 아침(06:30)부터 계획이 잡힌다.
+     *   공휴일·방학·재량휴업일처럼 학교를 안 가는 날(NICE 학사일정, [SchoolDataFetcher.getNoSchoolDays])은 평일이어도 주말처럼 취급한다.
+     *   (예전엔 등교 준비 07:00~08:00 · 학교 08:30~ 만 막아서 06:30~07:00, 08:00~08:30 틈에 짧은 태스크가 들어갔음)
+     * 사용자가 직접 등록한 시간대(customRows)는 그 위에 더한다. 하교시각은 NICE 실시간 시간표로 그날의
+     * 마지막 교시를 조회해 계산한다 (실패/데이터없음 시 기본값 16:30 으로 폴백).
      */
     suspend fun buildUnavailableRanges(
         schoolDataFetcher: SchoolDataFetcher,
@@ -41,30 +47,59 @@ object PlanTaskScheduler {
         classNumber: Int?,
         grade: Int,
         customRows: List<Pair<Int, Pair<Int, Int>>>
-    ): Map<LocalDate, List<Pair<Int, Int>>> {
-        val dates = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
+    ): Map<LocalDate, List<Pair<Int, Int>>> =
+        buildTypedUnavailableRanges(schoolDataFetcher, startDate, endDate, schoolId, classNumber, grade, customRows)
+            .mapValues { (_, ranges) -> ranges.map { it.start to it.end } }
 
-        if (customRows.isNotEmpty()) {
-            val byWeekday = customRows.groupBy({ it.first }, { it.second })
-            return dates.associateWith { date -> byWeekday[date.dayOfWeek.value].orEmpty() }
-        }
+    /** [buildUnavailableRanges] 와 같은 계산이지만 각 시간이 수면·등교·사용자 등록 중 무엇인지 함께 돌려준다. */
+    suspend fun buildTypedUnavailableRanges(
+        schoolDataFetcher: SchoolDataFetcher,
+        startDate: LocalDate,
+        endDate: LocalDate,
+        schoolId: String?,
+        classNumber: Int?,
+        grade: Int,
+        customRows: List<Pair<Int, Pair<Int, Int>>>
+    ): Map<LocalDate, List<TypedRange>> {
+        val dates = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
+        val customByWeekday = customRows.groupBy({ it.first }, { it.second })
 
         val dismissalMinutesByDate = if (schoolId != null) {
             runCatching { fetchDismissalMinutesByDate(schoolDataFetcher, schoolId, classNumber, grade, startDate, endDate) }.getOrElse { emptyMap() }
         } else {
             emptyMap()
         }
+        // 공휴일·방학·재량휴업일 등 학교 안 가는 날 (NICE 학사일정). 학교 정보가 없거나 조회 실패면 평일은 전부 등교일로 본다
+        val noSchoolDays = if (schoolId != null) {
+            runCatching { schoolDataFetcher.getNoSchoolDays(schoolId, startDate, endDate) }.getOrElse { emptySet() }
+        } else {
+            emptySet()
+        }
 
         return dates.associateWith { date ->
-            val ranges = DEFAULT_UNAVAILABLE_RANGES.toMutableList()
-            if (date.dayOfWeek.value <= 5) { // 평일(월~금)만 등교 준비 + 학교시간 추가
-                ranges.add(SCHOOL_PREP_RANGE)
-                val schoolHours = dismissalMinutesByDate[date]?.let { SCHOOL_START_MINUTES to it } ?: DEFAULT_SCHOOL_HOURS
-                ranges.add(schoolHours)
+            val ranges = DEFAULT_UNAVAILABLE_RANGES.map { (start, end) -> TypedRange(UnavailableType.SLEEP, start, end) }.toMutableList()
+            // 등교일(평일이면서 공휴일·방학 등이 아닌 날): 등교 전 시간을 포함해 하교 시각까지 전부 막는다
+            if (date.dayOfWeek.value <= 5 && date !in noSchoolDays) {
+                ranges.add(TypedRange(UnavailableType.SCHOOL, 0, dismissalMinutesByDate[date] ?: DEFAULT_DISMISSAL_MINUTES))
             }
+            ranges.addAll(customByWeekday[date.dayOfWeek.value].orEmpty().map { (start, end) -> TypedRange(UnavailableType.UNAVAILABLE, start, end) })
             ranges
         }
     }
+
+    /**
+     * 날짜별 막힌 시간에 사용자의 기존 할일(다른 플랜보드 포함)을 더한다.
+     * 새 할일끼리처럼 기존 할일 앞뒤에도 쉬는 시간을 두려고 [DEFAULT_BREAK_MINUTES] 만큼 넓혀서 막는다.
+     */
+    fun withExistingTasks(
+        unavailableRanges: Map<LocalDate, List<Pair<Int, Int>>>,
+        existingTaskRanges: Map<LocalDate, List<Pair<Int, Int>>>
+    ): Map<LocalDate, List<Pair<Int, Int>>> =
+        unavailableRanges.mapValues { (date, ranges) ->
+            ranges + existingTaskRanges[date].orEmpty().map { (start, end) ->
+                (start - DEFAULT_BREAK_MINUTES).coerceAtLeast(0) to (end + DEFAULT_BREAK_MINUTES).coerceAtMost(DAY_MINUTES)
+            }
+        }
 
     /** NICE 시간표에서 날짜별 마지막 교시를 찾아 하교시각(분)으로 변환한다. 학기가 바뀌는 기간이면 학기별로 나눠 조회한다. */
     private suspend fun fetchDismissalMinutesByDate(
@@ -76,14 +111,15 @@ object PlanTaskScheduler {
         endDate: LocalDate
     ): Map<LocalDate, Int> {
         val className = classNumber?.toString()
-        val semesters = generateSequence(startDate) { it.plusDays(1) }
+        // 학기별로 계획 기간에 해당하는 날짜 범위만 조회한다 (학기 전체를 받으면 수백~수천 건)
+        val datesBySemester = generateSequence(startDate) { it.plusDays(1) }
             .takeWhile { !it.isAfter(endDate) }
-            .map { academicYearAndSemester(it) }
-            .distinct()
+            .groupBy { academicYearAndSemester(it) }
 
         val lastPeriodByDate = mutableMapOf<LocalDate, Int>()
-        for ((year, semester) in semesters) {
-            schoolDataFetcher.getTimetable(schoolId, year, semester, grade, className).forEach { entry ->
+        for ((yearAndSemester, dates) in datesBySemester) {
+            val (year, semester) = yearAndSemester
+            schoolDataFetcher.getTimetable(schoolId, year, semester, grade, className, from = dates.first(), to = dates.last()).forEach { entry ->
                 if (entry.period > (lastPeriodByDate[entry.date] ?: 0)) {
                     lastPeriodByDate[entry.date] = entry.period
                 }

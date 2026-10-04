@@ -1,10 +1,14 @@
 import com.github.nepyh.rooter.module.planboard.CatalogService
 import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionRow
 import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionTable
+import com.github.nepyh.rooter.module.planboard.model.PublisherRow
+import com.github.nepyh.rooter.module.planboard.model.PublisherTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
+import com.github.nepyh.rooter.module.storage.FileStorage
+import com.github.nepyh.rooter.module.storage.UploadableFile
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UserRow
@@ -17,6 +21,7 @@ import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.io.InputStream
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.time.OffsetDateTime
@@ -47,9 +52,10 @@ class CatalogServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS school_textbook_adoptions CASCADE")
             exec("DROP TABLE IF EXISTS textbooks CASCADE")
             exec("DROP TABLE IF EXISTS subjects CASCADE")
+            exec("DROP TABLE IF EXISTS publishers CASCADE")
             exec("DROP TABLE IF EXISTS student_profiles CASCADE")
             exec("DROP TABLE IF EXISTS users CASCADE")
-            SchemaUtils.create(UserTable, StudentProfileTable, SubjectTable, TextbookTable, SchoolTextbookAdoptionTable)
+            SchemaUtils.create(UserTable, StudentProfileTable, SubjectTable, PublisherTable, TextbookTable, SchoolTextbookAdoptionTable)
         }
     }
 
@@ -58,12 +64,13 @@ class CatalogServiceTest : StringSpec({
             SchoolTextbookAdoptionTable.deleteAll()
             TextbookTable.deleteAll()
             SubjectTable.deleteAll()
+            PublisherTable.deleteAll()
             StudentProfileTable.deleteAll()
             UserTable.deleteAll()
         }
     }
 
-    val catalogService = CatalogService()
+    val catalogService = CatalogService(FakeFileStorage())
 
     fun seedUser(email: String): Int = transaction(db) {
         UserRow.new {
@@ -87,11 +94,17 @@ class CatalogServiceTest : StringSpec({
         SubjectRow.new { this.name = name }.id.value
     }
 
-    fun seedTextbook(subjectId: Int, title: String): Int = transaction(db) {
+    fun seedTextbook(subjectId: Int, title: String, coverImageKey: String? = null, publisherId: Int? = null): Int = transaction(db) {
         TextbookRow.new {
             subject = SubjectRow[subjectId]
             this.title = title
+            this.coverImageKey = coverImageKey
+            this.publisherId = publisherId
         }.id.value
+    }
+
+    fun seedPublisher(name: String): Int = transaction(db) {
+        PublisherRow.new { this.name = name }.id.value
     }
 
     fun seedAdoption(schoolId: String, grade: Int, subjectId: Int, textbookId: Int) = transaction(db) {
@@ -134,7 +147,9 @@ class CatalogServiceTest : StringSpec({
                 subjectId = subjectId,
                 subjectName = "수학",
                 textbookId = textbookId,
-                textbookTitle = "중학수학 2-1 (천재교육)"
+                textbookTitle = "중학수학 2-1 (천재교육)",
+                publisherName = null,
+                coverImageUrl = null
             )
         )
     }
@@ -162,7 +177,78 @@ class CatalogServiceTest : StringSpec({
 
         result.shouldBeEmpty()
     }
+
+    "getTextbooksBySubject: 표지 이미지 키가 있으면 파일 스토리지 URL 로 내려간다" {
+        val subjectId = seedSubject("수학")
+        seedTextbook(subjectId, "중학수학 2-1", coverImageKey = "textbook-covers/cover-1.png")
+
+        val result = catalogService.getTextbooksBySubject(subjectId)
+
+        result.size shouldBe 1
+        result.first().coverImageUrl shouldBe "https://fake-storage.test/textbook-covers/cover-1.png"
+    }
+
+    "getTextbooksBySubject: 표지 이미지 키가 없으면 coverImageUrl 은 null 이다" {
+        val subjectId = seedSubject("영어")
+        seedTextbook(subjectId, "중학영어 2")
+
+        val result = catalogService.getTextbooksBySubject(subjectId)
+
+        result.size shouldBe 1
+        result.first().coverImageUrl shouldBe null
+    }
+
+    "getTextbookDetail: 표지 이미지 키가 있으면 coverImageUrl 이 채워진다" {
+        val subjectId = seedSubject("국어")
+        val textbookId = seedTextbook(subjectId, "중학국어 2", coverImageKey = "textbook-covers/cover-2.png")
+
+        val result = catalogService.getTextbookDetail(textbookId)
+
+        result?.coverImageUrl shouldBe "https://fake-storage.test/textbook-covers/cover-2.png"
+    }
+
+    "getRecommendedTextbooks: 추천 교과서에도 표지 이미지 URL 이 채워진다" {
+        val userId = seedUser("cover@test.com")
+        seedProfile(userId, schoolId = "C107181084", grade = 2)
+        val subjectId = seedSubject("과학")
+        val textbookId = seedTextbook(subjectId, "중학과학 2", coverImageKey = "textbook-covers/cover-3.png")
+        seedAdoption(schoolId = "C107181084", grade = 2, subjectId = subjectId, textbookId = textbookId)
+
+        val result = catalogService.getRecommendedTextbooks(userId)
+
+        result.size shouldBe 1
+        result.first().coverImageUrl shouldBe "https://fake-storage.test/textbook-covers/cover-3.png"
+    }
+
+    "출판사 이름: 목록·상세·추천 응답에 publisherName 이 채워지고, 출판사가 없으면 null 이다" {
+        val userId = seedUser("publisher@test.com")
+        seedProfile(userId, schoolId = "C107181084", grade = 1)
+        val subjectId = seedSubject("과학")
+        val miraen = seedPublisher("미래엔")
+        val withPublisher = seedTextbook(subjectId, "1학년 과학 (미래엔)", publisherId = miraen)
+        val withoutPublisher = seedTextbook(subjectId, "출판사 없는 교과서")
+        seedAdoption(schoolId = "C107181084", grade = 1, subjectId = subjectId, textbookId = withPublisher)
+
+        catalogService.getTextbooksBySubject(subjectId).associate { it.id to it.publisherName } shouldBe
+            mapOf(withPublisher to "미래엔", withoutPublisher to null)
+        catalogService.getTextbookDetail(withPublisher)?.publisherName shouldBe "미래엔"
+        catalogService.getRecommendedTextbooks(userId).single().publisherName shouldBe "미래엔"
+    }
 })
+
+/** 표지 이미지 URL 매핑 확인용 — 디스크/네트워크 없이 키를 URL 로만 바꾼다. */
+private class FakeFileStorage : FileStorage {
+    override suspend fun upload(file: UploadableFile, directory: String): String = error("사용되지 않아야 함")
+
+    override suspend fun <T> readFile(
+        fileKey: String,
+        block: suspend (InputStream, String?, Long?) -> T
+    ): T? = error("사용되지 않아야 함")
+
+    override suspend fun getUrl(fileKey: String): String? = "https://fake-storage.test/$fileKey"
+
+    override suspend fun delete(fileKey: String): Boolean = error("사용되지 않아야 함")
+}
 
 private fun ensureTestDatabase(url: String, user: String, password: String) {
     val dbName = url.substringAfterLast("/")

@@ -22,10 +22,17 @@ data class QuizQuestionResponse(
 )
 
 @Serializable
+data class QuizSubjectResponse(
+    val subjectId: Int,
+    val subjectName: String
+)
+
+@Serializable
 data class QuizResponse(
     val dailyPlanId: Int,
     val quizDate: String,
-    val questions: List<QuizQuestionResponse>
+    val questions: List<QuizQuestionResponse>,
+    val subjects: List<QuizSubjectResponse> = emptyList() // 이 일일 계획이 속한 플랜보드의 학습 범위 과목 (퀴즈는 이 범위에서 출제)
 )
 
 @Serializable
@@ -49,7 +56,9 @@ data class WeakAreaSummary(
 data class InsertedReviewTaskResponse(
     val dailyPlanId: Int,
     val planDate: String,
-    val taskName: String
+    val taskName: String,
+    val startTime: String,        // "16:30"
+    val endTime: String
 )
 
 @Serializable
@@ -57,5 +66,18 @@ data class QuizResultResponse(
     val totalQuestions: Int,
     val correctCount: Int,
     val weakAreas: List<WeakAreaSummary>,
-    val insertedReviewTasks: List<InsertedReviewTaskResponse>
+    val insertedReviewTasks: List<InsertedReviewTaskResponse>,
+    val results: List<QuizQuestionResult> = emptyList() // 제출한 문항별 채점 결과와 풀이
+)
+
+/** 제출한 문항 하나의 채점 결과. 앱은 isCorrect=false 인 문항에 풀이(explanation)를 보여주면 된다 */
+@Serializable
+data class QuizQuestionResult(
+    val questionId: Int,
+    val questionText: String,
+    val selectedChoiceId: Int,
+    val correctChoiceId: Int?,
+    val correctChoiceText: String?,
+    val isCorrect: Boolean,
+    val explanation: String? // 풀이 과정. 풀이 컬럼 추가 전에 만든 퀴즈는 null
 )

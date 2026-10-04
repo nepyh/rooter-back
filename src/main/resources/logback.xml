@@ -1,0 +1,16 @@
+<configuration>
+    <!--
+        logback.xml 이 없으면 logback 기본값(DEBUG)이 적용돼 Exposed 가 실행하는 SQL 과 파라미터
+        (이메일, 비밀번호 해시 등)가 그대로 로그에 남는다. 기본은 INFO 로 두고,
+        로컬에서 SQL 을 보고 싶으면 LOG_LEVEL=DEBUG 로 띄운다.
+    -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{YYYY-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <root level="${LOG_LEVEL:-INFO}">
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>

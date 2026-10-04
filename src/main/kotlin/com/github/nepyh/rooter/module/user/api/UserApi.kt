@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module.user.api
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
+import com.github.nepyh.rooter.module.user.AuthService
 import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
@@ -33,7 +34,7 @@ import java.time.LocalDate
 
 
 @OptIn(ExperimentalKtorApi::class)
-fun UserApi(userService: UserService) = ApiRoute("users") {
+fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("users") {
     post("") {
         val request = call.receive<UserRegisterRequest>()
         val response = userService.registerUser(request)
@@ -78,7 +79,8 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
         }.describe {
             tag("User")
             summary = "유저 정보 조회"
-            description = "유저 기본 정보와 학생 프로필을 함께 조회. 본인 정보만 조회 가능"
+            description = "유저 기본 정보와 학생 프로필을 함께 조회. 본인 정보만 조회 가능. 학생 프로필 등록 전이면 schoolId·grade·classNumber 는 null" +
+                "avatarUrl 은 아바타를 등록한 적이 없으면 null (S3 사용 시 presigned URL 이라 일정 시간 후 만료되므로 매번 새로 조회해야 함)"
             parameters {
                 path("id") {
                     description = "유저 ID"
@@ -236,12 +238,12 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
                 return@put call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 수정할 수 있습니다."))
             }
             val request = call.receive<ChangePasswordRequest>()
-            val response = userService.changePassword(id, request)
+            val response = authService.changePassword(id, request)
             call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("User")
             summary = "비밀번호 변경"
-            description = "현재 비밀번호 확인 후 새 비밀번호로 변경. 본인 정보만 변경 가능"
+            description = "현재 비밀번호 확인 후 새 비밀번호로 변경. 본인 정보만 변경 가능. 변경하면 기존에 발급된 토큰은 모두 무효화되고(다른 기기 로그아웃), 응답의 token 으로 교체해서 써야 함"
             parameters {
                 path("id") {
                     description = "유저 ID"
@@ -302,8 +304,9 @@ fun UserApi(userService: UserService) = ApiRoute("users") {
         }.describe {
             tag("User")
             summary = "아바타 이미지 업로드"
-            description = "이미지 파일을 업로드하고 유저의 avatarImageKey 를 갱신. 본인 정보만 수정 가능. " +
-                "허용 확장자: jpg, jpeg, png, webp / 최대 용량: 5MB"
+            description = "이미지 파일을 아바타로 등록하고 응답의 avatarUrl 로 바로 표시할 수 있음 " +
+                "(S3 사용 시 presigned URL 이라 일정 시간 후 만료되므로, 다시 보려면 유저 정보 조회로 새로 받아야 함). " +
+                "본인 정보만 수정 가능. 허용 확장자: jpg, jpeg, png, webp / 최대 용량: 5MB"
             parameters {
                 path("id") {
                     description = "유저 ID"

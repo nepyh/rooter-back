@@ -45,7 +45,7 @@ private data class ChatCompletionChoice(val message: ChatMessage)
 @Serializable
 private data class ChatCompletionResponse(val choices: List<ChatCompletionChoice>)
 
-class PlanGenerationLlmClient(private val appConfig: AppConfig) {
+open class PlanGenerationLlmClient(private val appConfig: AppConfig) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -55,7 +55,7 @@ class PlanGenerationLlmClient(private val appConfig: AppConfig) {
         }
     }
 
-    suspend fun generatePlan(context: String): GeneratedPlan {
+    open suspend fun generatePlan(context: String): GeneratedPlan {
         val prompt = PromptLoader.load("prompts/plan-generation.md", "CONTEXT" to context)
 
         val content = requestChatCompletion(prompt)

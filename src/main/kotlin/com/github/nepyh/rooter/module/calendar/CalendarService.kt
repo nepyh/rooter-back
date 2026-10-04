@@ -1,8 +1,10 @@
 package com.github.nepyh.rooter.module.calendar
 
+import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.calendar.dto.CalendarDayResponse
 import com.github.nepyh.rooter.module.calendar.dto.CalendarEventCreateRequest
 import com.github.nepyh.rooter.module.calendar.dto.CalendarEventResponse
+import com.github.nepyh.rooter.module.calendar.dto.CalendarEventUpdateRequest
 import com.github.nepyh.rooter.module.calendar.dto.CalendarExamResponse
 import com.github.nepyh.rooter.module.calendar.dto.CalendarRangeResponse
 import com.github.nepyh.rooter.module.calendar.dto.DailyCompletionResponse
@@ -66,7 +68,7 @@ class CalendarService {
                     planBoardId = it.id.value,
                     title = it.title,
                     examDate = examDate.toString(),
-                    dDay = ChronoUnit.DAYS.between(LocalDate.now(), examDate).toInt()
+                    dDay = ChronoUnit.DAYS.between(todayInAppZone(), examDate).toInt()
                 )
             }
 
@@ -90,6 +92,7 @@ class CalendarService {
                 .map {
                     PlanTaskResponse(
                         id = it.id.value,
+                        dailyPlanId = it.readValues[PlanTaskTable.dailyPlanId].value,
                         taskName = it.taskName,
                         startTime = it.startTime.toString(),
                         endTime = it.endTime.toString(),
@@ -139,6 +142,30 @@ class CalendarService {
                 eventDate = eventDate.toString(),
                 memo = request.memo
             )
+        }
+    }
+
+    fun updateEvent(userId: Int, eventId: Int, request: CalendarEventUpdateRequest): CalendarEventResponse {
+        request.title?.let {
+            if (it.isBlank() || it.length > 100) {
+                throw CalendarValidationException.InvalidTitleException()
+            }
+        }
+
+        val eventDate = request.eventDate?.let {
+            runCatching { LocalDate.parse(it) }
+                .getOrElse { throw CalendarValidationException.InvalidDateFormatException() }
+        }
+
+        return transaction {
+            val event = CalendarEventRow.findById(eventId)?.takeIf { it.userId == userId }
+                ?: throw CalendarEventNotFoundException()
+
+            request.title?.let { event.title = it }
+            eventDate?.let { event.eventDate = it }
+            request.memo?.let { event.memo = it }
+
+            event.toCalendarEventResponse()
         }
     }
 

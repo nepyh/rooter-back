@@ -28,7 +28,7 @@ private data class ChatCompletionChoice(val message: ChatMessage)
 @Serializable
 private data class ChatCompletionResponse(val choices: List<ChatCompletionChoice>)
 
-class ChatLlmClient(private val appConfig: AppConfig) {
+open class ChatLlmClient(private val appConfig: AppConfig) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -38,12 +38,14 @@ class ChatLlmClient(private val appConfig: AppConfig) {
         }
     }
 
-    suspend fun adjustPlan(
+    open suspend fun adjustPlan(
         grade: Int,
         studyStyleSummary: String,
         targetDate: String,
+        today: String,
         currentTasksJson: String,
         chatHistoryJson: String,
+        planBoardSummary: String,
         userMessage: String
     ): AiChatResult? {
         val prompt = PromptLoader.load(
@@ -51,8 +53,10 @@ class ChatLlmClient(private val appConfig: AppConfig) {
             "GRADE" to grade.toString(),
             "STUDY_STYLE_SUMMARY" to studyStyleSummary,
             "TARGET_DATE" to targetDate,
+            "TODAY" to today,
             "CURRENT_TASKS_JSON" to currentTasksJson,
             "CHAT_HISTORY_JSON" to chatHistoryJson,
+            "PLAN_BOARD" to planBoardSummary,
             "USER_MESSAGE" to userMessage
         )
 

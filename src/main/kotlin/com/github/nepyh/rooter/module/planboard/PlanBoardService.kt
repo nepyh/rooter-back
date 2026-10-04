@@ -10,7 +10,6 @@ import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundExcep
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.exception.PlanSubjectNotFoundException
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
-import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
@@ -26,7 +25,6 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
-import java.time.format.DateTimeFormatter
 
 /** 과목 범위 등록에 필요한 엔티티 묶음 — DAO 로 그대로 연결할 수 있게 Row 타입으로 들고 다닌다. */
 private data class ResolvedTextbookSubject(
@@ -48,7 +46,8 @@ class PlanBoardService {
                     title = it.title,
                     startDate = it.startDate.toString(),
                     endDate = it.endDate.toString(),
-                    createdAt = it.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                    examDate = it.examDate?.toString(),
+                    createdAt = it.createdAt.toString()
                 )
             }
     }
@@ -62,6 +61,9 @@ class PlanBoardService {
             .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
         val endDate = runCatching { LocalDate.parse(request.endDate) }
             .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
+        val examDate = request.examDate?.let {
+            runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
+        }
 
         if (endDate.isBefore(startDate)) {
             throw PlanBoardValidationException.InvalidDateRangeException()
@@ -73,12 +75,13 @@ class PlanBoardService {
                 title = request.title
                 this.startDate = startDate
                 this.endDate = endDate
+                this.examDate = examDate
                 createdAt = OffsetDateTime.now()
             }.id.value
         }
     }
 
-    /** title/startDate/endDate 중 전달된 필드만 수정. 본인 보드만 가능 */
+    /** title/startDate/endDate/examDate 중 전달된 필드만 수정 (null 은 변경 없음). 본인 보드만 가능 */
     fun updateBoard(userId: Int, boardId: Int, request: PlanBoardUpdateRequest): PlanBoardResponse = transaction {
         val board = PlanBoardRow.findById(boardId) ?: throw PlanBoardNotFoundException()
         if (board.user.id.value != userId) throw PlanBoardForbiddenException()
@@ -98,12 +101,18 @@ class PlanBoardService {
         board.startDate = newStartDate
         board.endDate = newEndDate
 
+        request.examDate?.let {
+            board.examDate = runCatching { LocalDate.parse(it) }
+                .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
+        }
+
         PlanBoardResponse(
             id = board.id.value,
             title = board.title,
             startDate = board.startDate.toString(),
             endDate = board.endDate.toString(),
-            createdAt = board.createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            examDate = board.examDate?.toString(),
+            createdAt = board.createdAt.toString()
         )
     }
 
@@ -120,13 +129,7 @@ class PlanBoardService {
         val subject = SubjectRow.findById(textbook.subject.id.value)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
 
-        val startChapter = ChapterRow.findById(request.startChapterId)
-            ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val endChapter = ChapterRow.findById(request.endChapterId)
-            ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        if (startChapter.chapterOrder > endChapter.chapterOrder) {
-            throw PlanBoardValidationException.InvalidSubjectRangeException()
-        }
+        val (startChapter, endChapter) = resolveChapterRange(textbook, request.startChapterId, request.endChapterId)
 
         return ResolvedTextbookSubject(subject, textbook, startChapter, endChapter)
     }

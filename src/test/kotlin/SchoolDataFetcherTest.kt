@@ -82,6 +82,33 @@ class SchoolDataFetcherTest : StringSpec({
         fetcher.searchSchools("없는학교").shouldBeEmpty()
     }
 
+    "실제 NICE 의 데이터 없음 응답(서비스 블록 없이 최상위 RESULT 만)도 빈 목록을 반환한다" {
+        val fetcher = fetcherWith {
+            jsonResponse("""{"RESULT":{"CODE":"INFO-200","MESSAGE":"해당하는 데이터가 없습니다."}}""")
+        }
+
+        fetcher.searchSchools("zzzzqqq").shouldBeEmpty()
+        fetcher.getExamScheduleCandidates("C107181084", 2026).shouldBeEmpty()
+    }
+
+    "실제 NICE 의 오류 응답(최상위 RESULT 의 ERROR-xxx)은 코드에 맞는 예외로 변환한다" {
+        fun fetcherReturning(code: String) = fetcherWith {
+            jsonResponse("""{"RESULT":{"CODE":"$code","MESSAGE":"오류 메시지"}}""")
+        }
+
+        shouldThrow<NiceApiException.InvalidKeyException> { fetcherReturning("ERROR-290").searchSchools("서울") }
+        shouldThrow<NiceApiException.BadRequestException> { fetcherReturning("ERROR-300").searchSchools("서울") }
+        shouldThrow<NiceApiException.BadRequestException> { fetcherReturning("ERROR-336").searchSchools("서울") }
+        shouldThrow<NiceApiException.RateLimitedException> { fetcherReturning("ERROR-337").searchSchools("서울") }
+        shouldThrow<NiceApiException.ServerException> { fetcherReturning("ERROR-500").searchSchools("서울") }
+    }
+
+    "서비스 블록도 최상위 RESULT 도 없으면 UnexpectedResponseException 을 던진다" {
+        val fetcher = fetcherWith { jsonResponse("""{"somethingElse":[]}""") }
+
+        shouldThrow<NiceApiException.UnexpectedResponseException> { fetcher.searchSchools("서울") }
+    }
+
     "인증키 오류(INFO-100) 는 InvalidKeyException 으로 변환한다" {
         val fetcher = fetcherWith {
             jsonResponse(
@@ -130,6 +157,35 @@ class SchoolDataFetcherTest : StringSpec({
         fetcher.getTimetable("C107181084", 2026, 1, 1, className = "3")
 
         classParam shouldBe "3"
+    }
+
+    "시간표는 기간을 주면 TI_FROM_YMD/TI_TO_YMD 로 걸고, 한 페이지를 넘으면 pIndex 로 모두 모은다" {
+        val requested = mutableListOf<Map<String, String?>>()
+        val fetcher = fetcherWith { request ->
+            val pageIndex = request.url.parameters["pIndex"]
+            requested += listOf("TI_FROM_YMD", "TI_TO_YMD", "pIndex").associateWith { request.url.parameters[it] }
+            val rows = when (pageIndex) {
+                null -> """{"ALL_TI_YMD":"20260928","PERIO":"1","ITRT_CNTNT":"국어","CLASS_NM":"1"}"""
+                "2" -> """{"ALL_TI_YMD":"20261009","PERIO":"6","ITRT_CNTNT":"수학","CLASS_NM":"1"}"""
+                else -> error("3페이지 이상은 요청하면 안 됨")
+            }
+            jsonResponse(
+                """
+                {"misTimetable":[{"head":[{"list_total_count":2},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[$rows]}]}
+                """.trimIndent()
+            )
+        }
+
+        val timetable = fetcher.getTimetable(
+            "B107132131", 2026, 2, 1, "1",
+            from = LocalDate.of(2026, 9, 28), to = LocalDate.of(2026, 10, 10)
+        )
+
+        requested shouldBe listOf(
+            mapOf("TI_FROM_YMD" to "20260928", "TI_TO_YMD" to "20261010", "pIndex" to null),
+            mapOf("TI_FROM_YMD" to "20260928", "TI_TO_YMD" to "20261010", "pIndex" to "2")
+        )
+        timetable.map { it.date to it.period } shouldBe listOf(LocalDate.of(2026, 9, 28) to 1, LocalDate.of(2026, 10, 9) to 6)
     }
 
     "학사일정은 SchoolSchedule row 를 SchoolEvent 로 변환한다" {
@@ -206,6 +262,76 @@ class SchoolDataFetcherTest : StringSpec({
         }
 
         fetcher.getExamScheduleCandidates("C107181084", 2026).shouldBeEmpty()
+    }
+
+    "학사일정은 AY 대신 학년도 기간(3월 1일 ~ 다음 해 2월 말일)을 AA_FROM_YMD/AA_TO_YMD 로 걸어 조회한다" {
+        val requested = mutableListOf<Map<String, String?>>()
+        val fetcher = fetcherWith { request ->
+            requested += listOf("AY", "AA_FROM_YMD", "AA_TO_YMD").associateWith { request.url.parameters[it] }
+            jsonResponse(
+                """
+                {"SchoolSchedule":[{"head":[{"list_total_count":1},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[{"AA_YMD":"20260301","EVENT_NM":"3·1절"}]}]}
+                """.trimIndent()
+            )
+        }
+
+        fetcher.getSchoolEvents("C107181084", 2026)
+        fetcher.getSchoolEvents("C107181084", 2027) // 다음 해가 윤년 — 2월 말일이 29일
+
+        requested shouldBe listOf(
+            mapOf("AY" to null, "AA_FROM_YMD" to "20260301", "AA_TO_YMD" to "20270228"),
+            mapOf("AY" to null, "AA_FROM_YMD" to "20270301", "AA_TO_YMD" to "20280229")
+        )
+    }
+
+    "학사일정이 한 페이지(100건)를 넘으면 list_total_count 만큼 pIndex 를 넘겨가며 모두 모은다" {
+        val requestedPages = mutableListOf<String?>()
+        val fetcher = fetcherWith { request ->
+            val pageIndex = request.url.parameters["pIndex"]
+            requestedPages += pageIndex
+            val rows = when (pageIndex) {
+                null -> """{"AA_YMD":"20260429","EVENT_NM":"중간고사"},{"AA_YMD":"20260715","EVENT_NM":"여름방학식"}"""
+                "2" -> """{"AA_YMD":"20261016","EVENT_NM":"2학기 중간고사"}"""
+                else -> error("3페이지 이상은 요청하면 안 됨")
+            }
+            jsonResponse(
+                """
+                {"SchoolSchedule":[{"head":[{"list_total_count":3},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[$rows]}]}
+                """.trimIndent()
+            )
+        }
+
+        val candidates = fetcher.getExamScheduleCandidates("C107181084", 2026)
+
+        requestedPages shouldBe listOf(null, "2")
+        candidates.map { it.date } shouldBe listOf(LocalDate.of(2026, 4, 29), LocalDate.of(2026, 10, 16))
+    }
+
+    "학교 안 가는 날은 학사일정의 SBTR_DD_SC_NM 이 공휴일·휴업일인 날이다 (방학·재량휴업일 포함)" {
+        var from: String? = null
+        var to: String? = null
+        val fetcher = fetcherWith { request ->
+            from = request.url.parameters["AA_FROM_YMD"]; to = request.url.parameters["AA_TO_YMD"]
+            jsonResponse(
+                """
+                {"SchoolSchedule":[{"head":[{"list_total_count":5},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[
+                    {"AA_YMD":"20260924","EVENT_NM":"추석연휴","SBTR_DD_SC_NM":"공휴일"},
+                    {"AA_YMD":"20260929","EVENT_NM":"중간고사","SBTR_DD_SC_NM":"해당없음"},
+                    {"AA_YMD":"20261009","EVENT_NM":"한글날","SBTR_DD_SC_NM":"공휴일"},
+                    {"AA_YMD":"20261119","EVENT_NM":"재량휴업일","SBTR_DD_SC_NM":"휴업일"},
+                    {"AA_YMD":"20270108","EVENT_NM":"겨울방학","SBTR_DD_SC_NM":"휴업일"}
+                ]}]}
+                """.trimIndent()
+            )
+        }
+
+        val days = fetcher.getNoSchoolDays("B107132131", LocalDate.of(2026, 9, 1), LocalDate.of(2027, 1, 31))
+
+        from shouldBe "20260901"
+        to shouldBe "20270131"
+        days shouldBe setOf(
+            LocalDate.of(2026, 9, 24), LocalDate.of(2026, 10, 9), LocalDate.of(2026, 11, 19), LocalDate.of(2027, 1, 8)
+        )
     }
 
     "잘못된 schoolId 형식은 HTTP 호출 전에 BadRequestException 을 던진다" {
