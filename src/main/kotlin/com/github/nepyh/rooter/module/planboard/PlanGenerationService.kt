@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.planboard
 
+import com.github.nepyh.rooter.common.APP_ZONE
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultRow
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultTable
@@ -34,7 +35,9 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
+import java.time.Clock
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
 
@@ -52,7 +55,8 @@ private data class PlanContext(
 
 class PlanGenerationService(
     private val llmClient: PlanGenerationLlmClient,
-    private val schoolDataFetcher: SchoolDataFetcher
+    private val schoolDataFetcher: SchoolDataFetcher,
+    private val clock: Clock = Clock.systemUTC()
 ) {
 
     suspend fun generate(userId: Int, request: PlanGenerationRequest): PlanGenerationResponse {
@@ -65,7 +69,7 @@ class PlanGenerationService(
 
         val startDate = request.startDate
             ?.let { runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() } }
-            ?: todayInAppZone()
+            ?: todayInAppZone(clock)
         val examDate = request.examDate
             ?.let { runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() } }
 
@@ -112,7 +116,7 @@ class PlanGenerationService(
         val levelTiers = planContext.levelTiers
         val grade = planContext.grade
 
-        val unavailableRanges = PlanTaskScheduler.withExistingTasks(
+        val baseUnavailableRanges = PlanTaskScheduler.withExistingTasks(
             PlanTaskScheduler.buildUnavailableRanges(
                 schoolDataFetcher = schoolDataFetcher,
                 startDate = startDate,
@@ -124,6 +128,27 @@ class PlanGenerationService(
             ),
             planContext.existingTaskRanges
         )
+        // 오늘부터 시작하는 계획이면 지금 이전 시간에는 배치하지 않는다 (챗봇 재조정과 같은 기준, 10분 단위 올림).
+        // 예전엔 저녁에 만들어도 오늘 할일이 하교 시각(주말은 06:30)부터 잡혀 만들자마자 지난 할일이 됐다.
+        val today = todayInAppZone(clock)
+        val unavailableRanges = if (startDate == today) {
+            val now = LocalTime.now(clock.withZone(APP_ZONE))
+            val earliestMinute = minOf(((now.hour * 60 + now.minute + 9) / 10) * 10, 24 * 60)
+            baseUnavailableRanges + (today to baseUnavailableRanges[today].orEmpty() + (0 to earliestMinute))
+        } else {
+            baseUnavailableRanges
+        }
+        // AI 가 첫날 분량을 남은 시간에 맞추도록 알려준다 (오늘 시작일 때만)
+        val firstDayNote = if (startDate == today) {
+            val freeMinutes = PlanTaskScheduler.freeIntervalsFromBusyRanges(unavailableRanges[today].orEmpty())
+                .sumOf { (start, end) -> end - start }
+            val nowLabel = LocalTime.now(clock.withZone(APP_ZONE)).withSecond(0).withNano(0)
+            "첫날(${today})은 지금 ${nowLabel} 이후만 공부할 수 있고, 남은 공부 가능 시간은 약 ${freeMinutes}분이다. " +
+                "첫날(day 1) tasks 의 estimated_minutes 합은 ${freeMinutes}분을 넘기지 마라" +
+                if (freeMinutes < 30) " (남은 시간이 거의 없으면 첫날 tasks 는 비워도 된다)." else "."
+        } else {
+            null
+        }
 
         val chunks = splitIntoChunks(totalDays)
         val generatedChunks = coroutineScope {
@@ -138,6 +163,7 @@ class PlanGenerationService(
                             if (chunks.size > 1) {
                                 appendLine("전체 계획 ${totalDays}일 (${startDate} ~ ${endDate}) 중 ${days.first}~${days.last}일차 구간이다. day 는 이 구간 안에서 1부터 ${days.count()}까지 매겨라.")
                             }
+                            if (index == 0) firstDayNote?.let { appendLine(it) }
                             appendLine("학년(중학교): $grade")
                             request.targetScore?.let { appendLine("목표 점수: $it") }
                             appendLine("벼락치기 모드: ${request.isCramMode}")
