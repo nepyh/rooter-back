@@ -1,6 +1,7 @@
 import com.github.nepyh.rooter.module.planboard.CatalogService
 import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionRow
 import com.github.nepyh.rooter.module.planboard.model.SchoolTextbookAdoptionTable
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PublisherRow
 import com.github.nepyh.rooter.module.planboard.model.PublisherTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
@@ -50,18 +51,21 @@ class CatalogServiceTest : StringSpec({
             // CASCADE 로 드랍: users 를 다른 스펙(예: PlanBoardServiceTest)의 테이블이 FK 로 참조하고
             // 있어도 실행 순서와 무관하게 안전하게 재생성하기 위함
             exec("DROP TABLE IF EXISTS school_textbook_adoptions CASCADE")
+            exec("DROP TABLE IF EXISTS chapters CASCADE")
             exec("DROP TABLE IF EXISTS textbooks CASCADE")
             exec("DROP TABLE IF EXISTS subjects CASCADE")
             exec("DROP TABLE IF EXISTS publishers CASCADE")
             exec("DROP TABLE IF EXISTS student_profiles CASCADE")
             exec("DROP TABLE IF EXISTS users CASCADE")
-            SchemaUtils.create(UserTable, StudentProfileTable, SubjectTable, PublisherTable, TextbookTable, SchoolTextbookAdoptionTable)
+            // 교과서 상세가 단원(chapters)을 읽는다 — 다른 테스트가 먼저 만들어 둔 테이블에 기대지 않도록 직접 만든다
+            SchemaUtils.create(UserTable, StudentProfileTable, SubjectTable, PublisherTable, TextbookTable, ChapterTable, SchoolTextbookAdoptionTable)
         }
     }
 
     beforeEach {
         transaction(db) {
             SchoolTextbookAdoptionTable.deleteAll()
+            ChapterTable.deleteAll()
             TextbookTable.deleteAll()
             SubjectTable.deleteAll()
             PublisherTable.deleteAll()

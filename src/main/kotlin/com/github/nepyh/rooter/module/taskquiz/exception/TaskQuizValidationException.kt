@@ -19,4 +19,7 @@ sealed class TaskQuizValidationException(
     class IncompleteAnswersException : TaskQuizValidationException(
         HttpStatusCode.BadRequest, "TASK_QUIZ_INCOMPLETE_ANSWERS", "아직 답하지 않은 문제가 있습니다."
     )
+    class GenerationFailedException : TaskQuizValidationException(
+        HttpStatusCode.BadGateway, "TASK_QUIZ_GENERATION_FAILED", "퀴즈를 만들지 못했습니다. 잠시 후 다시 시도해주세요."
+    )
 }

@@ -28,12 +28,15 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
             val taskId = call.parameters["taskId"]?.toIntOrNull()
                 ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
 
-            val response = taskQuizService.getCurrentQuiz(userId, taskId)
+            val response = taskQuizService.openQuiz(userId, taskId)
             call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("TaskQuiz")
             summary = "태스크 완료 확인 퀴즈 조회"
-            description = "태스크 종료 시각이 지나면 완료 처리 여부와 상관없이 자동 생성되는 퀴즈(5문항)를 조회. 가장 최근 시도(최초 또는 재시도)를 반환. 이미 답한 문제는 selectedChoiceId 가 채워져 있어 앱을 다시 켜도 이어서 풀 수 있음"
+            description = "퀴즈 열기 (앱의 완료 버튼). 풀 퀴즈(5문항)를 돌려줌 — 퀴즈를 통과해야 태스크가 완료됨. " +
+                "아직 퀴즈가 없으면 종료 시각을 기다리지 않고 지금 만들고(AI 생성이라 몇 초 걸림), " +
+                "직전 차수 불합격 후 10분이 지났으면 다음 차수를 바로 만듦. 그 외에는 가장 최근 차수(최초 또는 재시도)를 그대로 반환. " +
+                "종료 시각이 지나면 열지 않아도 기존처럼 자동 생성됨. 이미 답한 문제는 selectedChoiceId 가 채워져 있어 앱을 다시 켜도 이어서 풀 수 있음"
             responses {
                 HttpStatusCode.OK {
                     description = "조회 성공"
@@ -48,7 +51,10 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
-                    description = "아직 생성되지 않았거나 본인 소유가 아닌 태스크 (code=TASK_QUIZ_NOT_FOUND)"
+                    description = "존재하지 않거나 본인 소유가 아닌 태스크 (code=TASK_QUIZ_NOT_FOUND)"
+                }
+                HttpStatusCode.BadGateway {
+                    description = "AI 퀴즈 생성 실패 (code=TASK_QUIZ_GENERATION_FAILED) — 잠시 후 다시 열면 됨"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
