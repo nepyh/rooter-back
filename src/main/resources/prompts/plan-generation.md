@@ -7,6 +7,7 @@
 위 데이터를 바탕으로 total_days 일치 일일 학습 계획을 만들어라.
 - 각 날짜(day)마다 그날 다룰 topics(과목의 소단원/핵심 개념 단위로 세분화), 목표(goal), 세부 태스크(tasks: task_name + estimated_minutes)를 만들어라.
 - tasks의 estimated_minutes 합은 그날 계획된 학습 시간과 대략 맞아야 한다.
+- 데이터에 첫날 남은 공부 가능 시간이 적혀 있으면, 첫날(day 1) tasks 의 estimated_minutes 합이 그 시간을 넘지 않게 첫날 분량을 줄여라. 줄인 만큼은 다음 날들에 나눠 담아라.
 - subjectRanges에 없는 과목/개념을 새로 지어내지 마라.
 - levelTier가 "하"면 학년별 강도 하한에 가깝게, 기초 복습 task를 초반에 추가해라. "상"이면 상한에 가깝게, 심화 문제 비중을 높여라.
 - isCramMode가 true면 복습일 없이 진도를 빠르게 나가라.

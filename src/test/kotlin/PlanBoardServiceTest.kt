@@ -62,6 +62,7 @@ import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
+import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -623,6 +624,51 @@ class PlanBoardServiceTest : StringSpec({
         )
 
         response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("07:40~08:40", "08:50~09:20")
+    }
+
+    // 2026-10-05 은 월요일(등교일, 학교 정보 없음 → 하교 16:30), 2026-10-03 은 토요일
+    fun kstClock(dateTime: String): Clock = Clock.fixed(java.time.LocalDateTime.parse(dateTime).atZone(java.time.ZoneId.of("Asia/Seoul")).toInstant(), java.time.ZoneOffset.UTC)
+
+    suspend fun generateToday(email: String, clock: Clock, startDate: String? = null, days: Int = 1): Pair<com.github.nepyh.rooter.module.planboard.dto.PlanGenerationResponse, FakePlanGenerationLlmClient> {
+        val userId = seedUser(email)
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient(tasks = listOf(GeneratedPlanTask("수학 개념", 60), GeneratedPlanTask("수학 문제", 30)))
+        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher(), clock).generate(
+            userId,
+            PlanGenerationRequest(title = "오늘 시작", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = startDate, daysRemaining = days)
+        )
+        return response to llm
+    }
+
+    "plan-generation: 평일 저녁 8시 28분에 오늘부터 만들면 오늘 할일은 지금 이후(20:30)부터 잡히고, AI 에 남은 시간을 알려준다" {
+        val (response, llm) = generateToday("now-weekday@test.com", kstClock("2026-10-05T20:28"), days = 2)
+
+        response.dailyPlans.first().date shouldBe "2026-10-05"
+        response.dailyPlans.first().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("20:30~21:30", "21:40~22:10")
+        response.dailyPlans[1].tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:30~17:30", "17:40~18:10") // 내일은 그대로
+        llm.contexts.single().contains("첫날(2026-10-05)은 지금 20:28 이후만 공부할 수 있고, 남은 공부 가능 시간은 약 150분이다") shouldBe true
+    }
+
+    "plan-generation: 주말 오후 4시에 오늘부터 만들면 아침(06:30)이 아니라 지금(16:00)부터 잡힌다" {
+        val (response, _) = generateToday("now-weekend@test.com", kstClock("2026-10-03T16:00"))
+
+        response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:00~17:00", "17:10~17:40")
+    }
+
+    "plan-generation: 내일부터 시작하는 계획은 지금 시각과 상관없이 평소대로 잡히고, AI 에 남은 시간 안내도 없다" {
+        val (response, llm) = generateToday("now-tomorrow@test.com", kstClock("2026-10-05T20:28"), startDate = "2026-10-06")
+
+        response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:30~17:30", "17:40~18:10")
+        llm.contexts.single().contains("첫날(") shouldBe false
+    }
+
+    "plan-generation: 밤 늦게(22:50) 만들어 오늘 남은 시간이 부족하면 오늘 할일은 비고, 다음 날부터 잡힌다" {
+        val (response, llm) = generateToday("now-late@test.com", kstClock("2026-10-05T22:50"), days = 2)
+
+        response.dailyPlans.first().tasks shouldBe emptyList()
+        response.dailyPlans[1].tasks.size shouldBe 2
+        llm.contexts.single().contains("남은 시간이 거의 없으면 첫날 tasks 는 비워도 된다") shouldBe true
     }
 
     "addSubject: 정상 등록되면 subjectName/textbookTitle 이 채워진다" {
