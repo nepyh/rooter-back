@@ -33,12 +33,14 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
                 ?.let { runCatching { LocalDate.parse(it) }.getOrElse { throw QuizValidationException.InvalidDateFormatException() } }
                 ?: todayInAppZone()
 
-            val response = quizService.generateQuiz(userId, date)
+            val response = quizService.generateQuiz(userId, date, request.planBoardId)
             call.respond(HttpStatusCode.Created, response)
         }.describe {
             tag("Quiz")
             summary = "일일 퀴즈 생성"
-            description = "date(yyyy-MM-dd, 생략 시 한국 시간 기준 오늘)의 완료된 학습 범위를 바탕으로 퀴즈를 생성"
+            description = "date(yyyy-MM-dd, 생략 시 한국 시간 기준 오늘)의 완료된 학습 범위를 바탕으로 퀴즈를 생성. " +
+                "같은 날 플랜보드가 여러 개면 planBoardId 로 퀴즈를 만들 보드를 지정 " +
+                "(생략 시 그날 학습 범위가 있는 보드 중 먼저 만든 보드). 보드마다 퀴즈가 따로 만들어짐"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<QuizGenerateRequest>()
@@ -52,7 +54,7 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "날짜 형식 오류 (code=QUIZ_INVALID_DATE), 해당 날짜에 계획 없음 (code=QUIZ_NO_PLAN_FOR_DATE), 또는 퀴즈 생성 실패 (code=QUIZ_GENERATION_FAILED)"
+                    description = "날짜 형식 오류 (code=QUIZ_INVALID_DATE), 해당 날짜에 계획 없음·planBoardId 가 없거나 남의 보드 (code=QUIZ_NO_PLAN_FOR_DATE), 또는 퀴즈 생성 실패 (code=QUIZ_GENERATION_FAILED)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

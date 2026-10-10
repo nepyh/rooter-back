@@ -4,7 +4,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class QuizGenerateRequest(
-    val date: String? = null // yyyy-MM-dd, 생략 시 오늘
+    val date: String? = null, // yyyy-MM-dd, 생략 시 오늘
+    val planBoardId: Int? = null // 퀴즈를 만들 플랜보드, 생략 시 그날 학습 범위가 있는 보드
 )
 
 @Serializable

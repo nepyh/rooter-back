@@ -63,13 +63,27 @@ class QuizService(
      * LLM 호출(수 초)은 DB 트랜잭션 밖에서 하고, 저장할 때 일일 계획 행을 잠근 뒤 한 번 더 확인해서
      * 동시에 두 번 요청돼도 한 세트만 저장되게 한다.
      */
-    suspend fun generateQuiz(userId: Int, date: LocalDate): QuizResponse {
+    suspend fun generateQuiz(userId: Int, date: LocalDate, requestedPlanBoardId: Int? = null): QuizResponse {
         val prepared = newSuspendedTransaction {
             // 소유자 확인을 위해 daily_plans + plan_boards 를 조인해야 해서 Table DSL 을 쓴다 (집계/조인은 DAO 대상 아님).
-            val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
+            // 같은 날 플랜보드가 여러 개일 수 있어서 requestedPlanBoardId 를 받으면 그 보드로 한정한다.
+            // 남의 보드·없는 보드면 후보가 비어 NoPlanForDateException 이 된다.
+            val candidates = (DailyPlanTable innerJoin PlanBoardTable)
                 .selectAll()
-                .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq userId) }
-                .firstOrNull()
+                .where {
+                    val mine = (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq userId)
+                    if (requestedPlanBoardId == null) mine else mine and (PlanBoardTable.id eq requestedPlanBoardId)
+                }
+                .orderBy(PlanBoardTable.id to SortOrder.ASC)
+                .toList()
+            // 보드를 지정하지 않은 요청(예전 클라이언트)용: 학습 범위가 있는 보드를 우선한다
+            // (앱이 자동으로 만드는 범위 없는 '기본 플랜보드' 로 퀴즈가 만들어지지 않게)
+            val boardsWithRange = PlanSubjectTable.selectAll()
+                .where { PlanSubjectTable.planBoardId inList candidates.map { it[DailyPlanTable.planBoardId] } }
+                .map { it[PlanSubjectTable.planBoardId].value }
+                .toSet()
+            val dailyPlanRow = candidates.firstOrNull { it[DailyPlanTable.planBoardId].value in boardsWithRange }
+                ?: candidates.firstOrNull()
                 ?: throw QuizValidationException.NoPlanForDateException()
 
             val dailyPlanId = dailyPlanRow[DailyPlanTable.id].value
