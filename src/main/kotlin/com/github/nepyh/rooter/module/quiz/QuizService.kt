@@ -42,13 +42,19 @@ import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTrans
 import java.time.LocalDate
 import java.time.OffsetDateTime
 
-private const val DEFAULT_QUESTION_COUNT = 5
+/** 그날 완료한 할일 수에 맞춘 일일 퀴즈 문항 수 — 1개 이하 3문항, 3개 이하 5문항, 4개 이상 7문항 */
+fun dailyQuizQuestionCount(completedTaskCount: Int): Int = when {
+    completedTaskCount <= 1 -> 3
+    completedTaskCount <= 3 -> 5
+    else -> 7
+}
+
 private const val REVIEW_TASK_MINUTES = 20
 
 /** generateQuiz 의 첫 트랜잭션 결과 — 이미 있는 퀴즈를 돌려줄지, LLM 으로 새로 만들지 */
 private sealed interface QuizPreparation {
     data class Existing(val quiz: QuizResponse) : QuizPreparation
-    data class New(val dailyPlanId: Int, val context: String) : QuizPreparation
+    data class New(val dailyPlanId: Int, val context: String, val questionCount: Int) : QuizPreparation
 }
 
 class QuizService(
@@ -100,16 +106,18 @@ class QuizService(
                 context = buildString {
                     appendLine("학습 범위: ${chapterNames.joinToString(", ").ifBlank { "지정 안 됨" }}")
                     appendLine("오늘 완료한 학습: ${completedTaskNames.joinToString(", ").ifBlank { "없음" }}")
-                }
+                },
+                questionCount = dailyQuizQuestionCount(completedTaskNames.size)
             )
         }
 
-        val (dailyPlanId, context) = when (prepared) {
+        val (dailyPlanId, context, questionCount) = when (prepared) {
             is QuizPreparation.Existing -> return prepared.quiz
             is QuizPreparation.New -> prepared
         }
 
-        val generated = llmClient.generateQuestions(context, DEFAULT_QUESTION_COUNT)
+        // AI 가 더 많이 줘도 정한 문항 수까지만 쓴다
+        val generated = llmClient.generateQuestions(context, questionCount).take(questionCount)
         if (generated.isEmpty()) throw QuizValidationException.QuizGenerationFailedException()
 
         return newSuspendedTransaction {
