@@ -29,6 +29,8 @@ import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -196,6 +198,67 @@ class QuizServiceTest : StringSpec({
         QuizService(FakeQuizLlmClient(), noNiceFetcher).generateQuiz(userId, day).subjects shouldBe quiz.subjects
     }
 
+    // 같은 날 보드가 여러 개인 경우 (#241). 과학 교과서: 생물의 구성(식물세포) / 태양계(태양, 행성)
+    fun seedTwoBoards(firstBoardHasRange: Boolean): Triple<Int, Int, Int> = transaction(db) {
+        val subject = SubjectRow.find { SubjectTable.name eq "과학" }.firstOrNull() ?: SubjectRow.new { name = "과학" }
+        val textbook = TextbookRow.new { this.subject = subject; title = "과학 교과서" }
+        fun chapter(name: String, order: Int, parent: ChapterRow? = null) = ChapterRow.new {
+            this.textbook = textbook; chapterName = name; chapterOrder = order; parentId = parent?.id?.value
+        }
+        val life = chapter("생물의 구성", 1)
+        chapter("식물세포", 1, life)
+        val solar = chapter("태양계", 2)
+        chapter("태양", 1, solar)
+
+        val user = UserRow.new { email = "boards@test.com"; username = "tester"; password = "x"; createdAt = OffsetDateTime.now() }
+        fun board(title: String) = PlanBoardRow.new {
+            this.user = user; this.title = title; startDate = day; endDate = day; createdAt = OffsetDateTime.now()
+        }.also { DailyPlanRow.new { planBoard = it; planDate = day } }
+
+        // 먼저 만든 보드: 생물 범위가 있는 보드, 또는 앱이 자동으로 만드는 범위 없는 기본 보드
+        val first = board(if (firstBoardHasRange) "생물 수행평가" else "기본 플랜보드")
+        if (firstBoardHasRange) {
+            PlanSubjectRow.new { planBoard = first; this.textbook = textbook; startChapter = life; endChapter = life }
+        }
+        val science = board("과학 시험")
+        PlanSubjectRow.new { planBoard = science; this.textbook = textbook; startChapter = solar; endChapter = solar }
+        Triple(user.id.value, first.id.value, science.id.value)
+    }
+
+    "generateQuiz: planBoardId 를 주면 같은 날 다른 보드가 있어도 그 보드의 학습 범위로 만든다" {
+        val (userId, bioBoardId, scienceBoardId) = seedTwoBoards(firstBoardHasRange = true)
+        val llm = FakeQuizLlmClient()
+        val service = QuizService(llm, noNiceFetcher)
+
+        val science = service.generateQuiz(userId, day, scienceBoardId)
+        llm.lastContext shouldContain "태양계"
+        llm.lastContext shouldNotContain "식물세포"
+
+        // 보드마다 퀴즈가 따로 만들어진다
+        val bio = service.generateQuiz(userId, day, bioBoardId)
+        llm.lastContext shouldContain "식물세포"
+        (bio.dailyPlanId == science.dailyPlanId) shouldBe false
+        llm.calls.get() shouldBe 2
+    }
+
+    "generateQuiz: planBoardId 를 생략하면 학습 범위가 없는 기본 보드가 먼저 있어도 범위 있는 보드로 만든다" {
+        val (userId, _, _) = seedTwoBoards(firstBoardHasRange = false)
+        val llm = FakeQuizLlmClient()
+
+        QuizService(llm, noNiceFetcher).generateQuiz(userId, day)
+
+        llm.lastContext shouldContain "태양계"
+    }
+
+    "generateQuiz: 남의 플랜보드나 없는 플랜보드를 주면 NoPlanForDateException" {
+        val (_, _, scienceBoardId) = seedTwoBoards(firstBoardHasRange = true)
+        val (otherUserId, _) = seedDailyPlan()
+        val service = QuizService(FakeQuizLlmClient(), noNiceFetcher)
+
+        shouldThrow<QuizValidationException.NoPlanForDateException> { service.generateQuiz(otherUserId, day, scienceBoardId) }
+        shouldThrow<QuizValidationException.NoPlanForDateException> { service.generateQuiz(otherUserId, day, 999_999) }
+    }
+
     "generateQuiz: 해당 날짜에 계획이 없으면 NoPlanForDateException" {
         val (userId, _) = seedDailyPlan()
 
@@ -210,9 +273,11 @@ private class FakeQuizLlmClient(
     private val delayMillis: Long = 0
 ) : QuizLlmClient(dummyAppConfig()) {
     val calls = AtomicInteger(0)
+    @Volatile var lastContext: String = ""
 
     override suspend fun generateQuestions(context: String, count: Int): List<GeneratedQuestion> {
         val n = calls.incrementAndGet()
+        lastContext = context
         if (delayMillis > 0) delay(delayMillis)
         return (1..questionCount).map { i ->
             GeneratedQuestion(

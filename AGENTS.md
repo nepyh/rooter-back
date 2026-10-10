@@ -7,6 +7,8 @@ Kotlin + Ktor + Koin + Exposed(PostgreSQL) 조합을 사용합니다.
 
 - `README.md` — 실행 방법 (컨테이너 3가지, 로컬 JVM)
 - `.github/CONTRIBUTING.md` — 이슈/PR/브랜치/커밋 컨벤션. **이 문서의 규칙이 우선합니다.**
+- `MILESTONE.md` — 전체 진행 상태와 다음 작업. 작업 시작 전에 항목을 확인하고,
+  커밋/PR 직후 항목·근거·요약 표를 같은 커밋에서 갱신합니다.
 
 ## 실행과 확인
 
