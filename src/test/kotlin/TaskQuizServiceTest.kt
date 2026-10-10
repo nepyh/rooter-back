@@ -1,4 +1,5 @@
 import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.planboard.guessTaskSubject
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
@@ -19,7 +20,6 @@ import com.github.nepyh.rooter.module.taskquiz.GeneratedTaskQuizQuestion
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizLlmClient
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
 import com.github.nepyh.rooter.module.taskquiz.taskQuizPassCount
-import com.github.nepyh.rooter.module.taskquiz.taskQuizQuestionCount
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizNotFoundException
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizValidationException
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
@@ -105,7 +105,7 @@ class TaskQuizServiceTest : StringSpec({
     var lastUserId = -1 // seedTask 가 만든 유저 id. answerQuestion/submitQuiz 테스트에서 소유자로 씀
 
     /** 사용자가 직접 추가한 태스크 하나를 만든다. withScope 면 플랜보드에 과학 단원 범위를, grade 가 있으면 학생 프로필을 붙인다 */
-    fun seedTask(taskName: String, grade: Int?, withScope: Boolean, minutes: Int = 30): Int = transaction(db) {
+    fun seedTask(taskName: String, grade: Int?, withScope: Boolean, minutes: Int = 45): Int = transaction(db) {
         // 한 테스트에서 여러 번 불러도 이메일(유니크)이 겹치지 않게 한다
         val user = UserRow.new { email = "tq${UserRow.count()}@test.com"; username = "t"; password = "x"; createdAt = OffsetDateTime.now() }
         lastUserId = user.id.value
@@ -403,19 +403,35 @@ class TaskQuizServiceTest : StringSpec({
         transaction(db) { TaskQuizAttemptTable.selectAll().single()[TaskQuizAttemptTable.totalCount] } shouldBe 4
     }
 
-    "taskQuizQuestionCount: 30분 미만 3문항, 1시간 미만 5문항, 1시간 이상 7문항" {
-        listOf(10, 29, 30, 59, 60, 120).map { taskQuizQuestionCount(it) } shouldBe listOf(3, 3, 5, 5, 7, 7)
+    "quizQuestionCount: 30분 이하 4문항, 1시간 이하 5문항, 1시간 초과 7문항" {
+        listOf(0, 20, 30, 31, 60, 61, 120).map { quizQuestionCount(it) } shouldBe listOf(4, 4, 4, 5, 5, 7, 7)
     }
 
-    "taskQuizPassCount: 문항의 80% 이상 — 3문항 3개, 4문항 4개, 5문항 4개, 7문항 6개" {
-        listOf(1, 3, 4, 5, 7).map { taskQuizPassCount(it) } shouldBe listOf(1, 3, 4, 4, 6)
+    "taskQuizPassCount: 70점 이상 — 3문항 3개, 4문항 3개, 5문항 4개, 7문항 5개" {
+        listOf(1, 3, 4, 5, 7).map { taskQuizPassCount(it) } shouldBe listOf(1, 3, 3, 4, 5)
+    }
+
+    "submitQuiz: 30분 할일은 4문항이고 3개 맞으면 통과, 2개면 불합격" {
+        suspend fun solve(correct: Int): Boolean {
+            val taskId = seedTask("영어 단어 외우기", grade = null, withScope = false, minutes = 30)
+            val userId = lastUserId
+            val service = TaskQuizService(FakeTaskQuizLlmClient())
+            val quiz = service.openQuiz(userId, taskId)
+            quiz.questions.size shouldBe 4
+            quiz.passCount shouldBe 3
+            quiz.questions.forEachIndexed { i, q -> service.answerQuestion(userId, taskId, q.id, q.choices[if (i < correct) 0 else 1].id) }
+            return service.submitQuiz(userId, taskId).passed
+        }
+
+        solve(correct = 3) shouldBe true
+        solve(correct = 2) shouldBe false
     }
 
     "generateAttempt: 할일 길이에 맞춘 문항 수를 AI 에 요청하고 그만큼 저장한다" {
         val short = seedTask("영어 단어 외우기", grade = null, withScope = false, minutes = 20)
         val shortLlm = FakeTaskQuizLlmClient()
         TaskQuizService(shortLlm).generateAttempt(short, 1, "영어 단어 외우기")
-        shortLlm.lastCount shouldBe 3
+        shortLlm.lastCount shouldBe 4
 
         val long = seedTask("수학 문제집 풀기", grade = null, withScope = false, minutes = 90)
         val longLlm = FakeTaskQuizLlmClient()
@@ -425,7 +441,7 @@ class TaskQuizServiceTest : StringSpec({
         val stored = transaction(db) {
             TaskQuizAttemptTable.selectAll().associate { it[TaskQuizAttemptTable.planTaskId].value to it[TaskQuizAttemptTable.totalCount] }
         }
-        stored shouldBe mapOf(short to 3, long to 7)
+        stored shouldBe mapOf(short to 4, long to 7)
     }
 
     "generateAttempt: AI 가 요청보다 많이 주면 정한 문항 수까지만 저장한다" {
@@ -434,28 +450,28 @@ class TaskQuizServiceTest : StringSpec({
 
         TaskQuizService(llm).generateAttempt(taskId, 1, "영어 단어 외우기")
 
-        transaction(db) { TaskQuizQuestionTable.selectAll().count() } shouldBe 3L
+        transaction(db) { TaskQuizQuestionTable.selectAll().count() } shouldBe 4L
     }
 
-    "submitQuiz: 7문항이면 6개 맞아야 통과하고, 응답과 조회에 통과 기준(passCount)을 준다" {
+    "submitQuiz: 7문항이면 5개 맞아야 통과하고, 응답과 조회에 통과 기준(passCount)을 준다" {
         suspend fun solve(correct: Int): Pair<Int, Boolean> {
             val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false, minutes = 90)
             val userId = lastUserId
             val service = TaskQuizService(FakeTaskQuizLlmClient())
             val quiz = service.openQuiz(userId, taskId)
-            quiz.passCount shouldBe 6
+            quiz.passCount shouldBe 5
             quiz.questions.forEachIndexed { i, q -> service.answerQuestion(userId, taskId, q.id, q.choices[if (i < correct) 0 else 1].id) }
             val result = service.submitQuiz(userId, taskId)
             result.totalCount shouldBe 7
             return result.passCount to result.passed
         }
 
-        solve(correct = 6) shouldBe (6 to true)
-        solve(correct = 5) shouldBe (6 to false)
+        solve(correct = 5) shouldBe (5 to true)
+        solve(correct = 4) shouldBe (5 to false)
     }
 
     "submitQuiz: AI 가 문항을 덜 줘서 3문항만 저장됐으면 3개를 다 맞히면 통과한다 (예전엔 4개 기준이라 통과 불가)" {
-        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false) // 30분 → 5문항 요청
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false) // 45분 → 5문항 요청
         val userId = lastUserId
         val llm = FakeTaskQuizLlmClient((1..3).map { GeneratedTaskQuizQuestion("문제 $it", listOf("A", "B", "C", "D"), 0, "풀이") })
         val service = TaskQuizService(llm)

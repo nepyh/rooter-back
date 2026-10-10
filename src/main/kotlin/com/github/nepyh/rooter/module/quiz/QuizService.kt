@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.quiz
 
+import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.planBoardSubjects
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
@@ -41,13 +42,6 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
-
-/** 그날 완료한 할일 수에 맞춘 일일 퀴즈 문항 수 — 1개 이하 3문항, 3개 이하 5문항, 4개 이상 7문항 */
-fun dailyQuizQuestionCount(completedTaskCount: Int): Int = when {
-    completedTaskCount <= 1 -> 3
-    completedTaskCount <= 3 -> 5
-    else -> 7
-}
 
 private const val REVIEW_TASK_MINUTES = 20
 
@@ -97,9 +91,10 @@ class QuizService(
 
             val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
             val chapterNames = chapterNamesForPlanBoard(planBoardId)
-            val completedTaskNames = PlanTaskRow.find {
+            val completedTasks = PlanTaskRow.find {
                 (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq true)
-            }.map { it.taskName }
+            }.toList()
+            val completedTaskNames = completedTasks.map { it.taskName }
 
             QuizPreparation.New(
                 dailyPlanId = dailyPlanId,
@@ -107,7 +102,8 @@ class QuizService(
                     appendLine("학습 범위: ${chapterNames.joinToString(", ").ifBlank { "지정 안 됨" }}")
                     appendLine("오늘 완료한 학습: ${completedTaskNames.joinToString(", ").ifBlank { "없음" }}")
                 },
-                questionCount = dailyQuizQuestionCount(completedTaskNames.size)
+                // 그날 공부한 시간 = 완료한 할일들의 예상 시간 합
+                questionCount = quizQuestionCount(completedTasks.sumOf { it.estimatedMinutes })
             )
         }
 

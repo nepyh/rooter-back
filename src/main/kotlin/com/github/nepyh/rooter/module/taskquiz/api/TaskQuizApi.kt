@@ -33,7 +33,7 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("TaskQuiz")
             summary = "태스크 완료 확인 퀴즈 조회"
-            description = "퀴즈 열기 (앱의 완료 버튼). 풀 퀴즈를 돌려줌 — 퀴즈를 통과해야 태스크가 완료됨. 문항 수는 할일 길이(estimatedMinutes)에 따라 30분 미만 3문항, 1시간 미만 5문항, 1시간 이상 7문항이고, 통과에 필요한 정답 수는 passCount. " +
+            description = "퀴즈 열기 (앱의 완료 버튼). 풀 퀴즈를 돌려줌 — 퀴즈를 통과해야 태스크가 완료됨. 문항 수는 할일 길이(estimatedMinutes)에 따라 30분 이하 4문항, 1시간 이하 5문항, 1시간 초과 7문항이고, 통과에 필요한 정답 수는 passCount (70점 이상: 4문항 3개, 5문항 4개, 7문항 5개). " +
                 "아직 퀴즈가 없으면 종료 시각을 기다리지 않고 지금 만들고(AI 생성이라 몇 초 걸림), " +
                 "직전 차수 불합격 후 10분이 지났으면 다음 차수를 바로 만듦. 그 외에는 가장 최근 차수(최초 또는 재시도)를 그대로 반환. " +
                 "종료 시각이 지나면 열지 않아도 기존처럼 자동 생성됨. 이미 답한 문제는 selectedChoiceId 가 채워져 있어 앱을 다시 켜도 이어서 풀 수 있음"
@@ -131,7 +131,7 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
             tag("TaskQuiz")
             summary = "태스크 완료 확인 퀴즈 제출"
             description = "요청 본문 없음 — 채점은 항상 POST .../quiz/questions/{questionId}/answer 로 저장해 둔 답만 본다. " +
-                "문항의 80% 이상(passCount 개 이상) 정답이면 통과로, 해당 태스크가 자동으로 완료 처리됨(passed=true). " +
+                "70점 이상(passCount 개 이상 정답)이면 통과로, 해당 태스크가 자동으로 완료 처리됨(passed=true). " +
                 "그보다 적으면 10분 뒤 새 문제로 재시도가 자동 생성되고(retryScheduled=true), " +
                 "최초 1회 + 재시도 2회 모두 실패하면(attemptNumber=3에서 불합격) 해당 태스크가 미완료로 확정됨(taskInvalidated=true). 재시도가 잡히면(retryScheduled=true) 오늘 남은(아직 시작 안 한) 태스크를 15분 뒤로 밀고 shiftedTasks 로 돌려줌 (학원 등 불가능 시간은 건너뛰고, 23시를 넘어도 그날 안에 둠)"
             responses {

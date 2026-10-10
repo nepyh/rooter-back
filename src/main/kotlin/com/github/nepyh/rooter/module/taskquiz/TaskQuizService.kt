@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.taskquiz
 
 import com.github.nepyh.rooter.common.APP_ZONE
+import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
@@ -46,15 +47,8 @@ import java.time.LocalTime
 import java.time.OffsetDateTime
 
 const val MAX_ATTEMPTS = 3 // 최초 1회 + 재시도 2회
-const val PASS_PERCENT = 80 // 문항의 80% 이상 정답이면 통과 (3문항 3개, 5문항 4개, 7문항 6개)
+const val PASS_PERCENT = 70 // 70점 이상(문항의 70% 이상 정답)이면 통과 (4문항 3개, 5문항 4개, 7문항 5개)
 const val RETRY_DELAY_MINUTES = 10L
-
-/** 할일 길이(estimatedMinutes)에 맞춘 문항 수 — 30분 미만 3문항, 1시간 미만 5문항, 1시간 이상 7문항 */
-fun taskQuizQuestionCount(estimatedMinutes: Int): Int = when {
-    estimatedMinutes < 30 -> 3
-    estimatedMinutes < 60 -> 5
-    else -> 7
-}
 
 /** 통과에 필요한 정답 수. AI 가 문항을 덜 줘서 저장된 문항 수가 적어도 그 수 기준으로 계산한다 */
 fun taskQuizPassCount(totalCount: Int): Int = (totalCount * PASS_PERCENT + 99) / 100
@@ -367,8 +361,8 @@ class TaskQuizService(
      */
     private fun quizContextOf(planTaskId: Int): TaskQuizContext {
         val task = PlanTaskRow.findById(planTaskId)
-            ?: return TaskQuizContext("중학생(학년 정보 없음)", "지정 안 됨", taskQuizQuestionCount(0))
-        val questionCount = taskQuizQuestionCount(task.estimatedMinutes)
+            ?: return TaskQuizContext("중학생(학년 정보 없음)", "지정 안 됨", quizQuestionCount(0))
+        val questionCount = quizQuestionCount(task.estimatedMinutes)
         val board = task.dailyPlan.planBoard
 
         val grade = StudentProfileRow.find { StudentProfileTable.user eq board.user.id }.firstOrNull()?.grade

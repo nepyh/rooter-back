@@ -38,7 +38,7 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
         }.describe {
             tag("Quiz")
             summary = "일일 퀴즈 생성"
-            description = "date(yyyy-MM-dd, 생략 시 한국 시간 기준 오늘)의 완료된 학습 범위를 바탕으로 퀴즈를 생성. 문항 수는 그날 완료한 할일 수에 따라 1개 이하 3문항, 3개 이하 5문항, 4개 이상 7문항. " +
+            description = "date(yyyy-MM-dd, 생략 시 한국 시간 기준 오늘)의 완료된 학습 범위를 바탕으로 퀴즈를 생성. 문항 수는 그날 공부한 시간(완료한 할일들의 estimatedMinutes 합)에 따라 30분 이하 4문항, 1시간 이하 5문항, 1시간 초과 7문항. " +
                 "같은 날 플랜보드가 여러 개면 planBoardId 로 퀴즈를 만들 보드를 지정 " +
                 "(생략 시 그날 학습 범위가 있는 보드 중 먼저 만든 보드). 보드마다 퀴즈가 따로 만들어짐"
             requestBody {
