@@ -165,7 +165,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 - [x] done RB-075 날짜별 바쁜 시간·빈 시간 조회 API `GET /busy-times` (B-04) — PR #222 (10-01) · 운영 200 확인
 - [x] done RB-076 서버 "오늘"을 한국 시간 기준으로 (UTC 00~09시 어제 처리 문제) (B-03) — PR #194 (09-29)
 - [ ] todo RB-077 자정을 넘기는 할일 (B-09) — 지금은 `INVALID_TIME_RANGE` 로 거부. 정책 결정 필요
-- [ ] todo RB-078 같은 날 dailyPlanId 가 여러 개(보드 여러 개)일 때 챗봇·퀴즈 기준 (B-07) — 정책 결정 필요
+- [ ] doing RB-078 같은 날 dailyPlanId 가 여러 개(보드 여러 개)일 때 챗봇·퀴즈 기준 (B-07) — 일일 퀴즈 생성에 `planBoardId` 추가, 생략 시 학습 범위 있는 보드 우선 (이슈 #241, PR #246 open, 테스트 199건 통과). 챗봇은 경로의 dailyPlanId 로 이미 보드가 정해짐. 프론트가 `planBoardId` 를 보내야 완결
 - [ ] todo RB-079 일일 퀴즈 복습 할일·챗봇 재조정·퀴즈 실패 밀기도 다른 보드 할일을 피하도록 — 지금은 같은 보드의 그날 할일만 봄
 
 ## M9. 퀴즈 고도화
@@ -238,7 +238,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 | 6 | RB-115 태스크 source 필드 (B-13) | M | rooter-ddl | DDL 선행, dev DB 먼저 |
 | 7 | RB-060 Notification (B-12) | L | 브랜치 재정렬 | `feature/notification-settings` 를 main 위에 다시 얹기 |
 | 8 | RB-014 planboard 네이밍 | M | rooter-ddl #10 | DDL 선행 필요 (블로커) |
-| - | 정책 결정 대기 | - | 팀 결정 | RB-077 자정 넘김 · RB-078 dailyPlanId 여러 개 · RB-116 JWT 만료 · RB-126 도메인 · RB-127 DB 초기화 |
+| - | 정책 결정 대기 | - | 팀 결정 | RB-077 자정 넘김 · RB-116 JWT 만료 · RB-126 도메인 · RB-127 DB 초기화 |
 
 ## 폐기/보류
 
