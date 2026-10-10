@@ -183,7 +183,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 - [ ] doing RB-087 완료 버튼으로 퀴즈를 열면 종료 시각 전에도 바로 생성 (`GET .../quiz` 에서 생성) — PR #236 develop 머지 (10-04) · dev 서버에서 종료 시각 전 열기 200·6초·5문항 확인. **main(운영) 반영 대기**
 - [ ] todo RB-088 학습 범위 없는 날 퀴즈가 엉뚱해지는 문제 (B-08)
 - [ ] todo RB-089 보기 순서 섞기 (AI 가 정한 순서 그대로 나가 정답 위치가 쏠릴 수 있음) — DB 변경 없음
-- [ ] doing RB-129 퀴즈 문항 수 가변 (#243) — 태스크 퀴즈는 할일 길이별 3·5·7문항, 통과 기준 80% (`passCount` 응답 추가), 일일 퀴즈는 완료 할일 수별 3·5·7문항. 문항이 덜 저장되면 통과 못 하던 문제도 수정 — PR #247 open (`3a551e4`·`e4ac66c`) · `./gradlew test` 전체 통과 · 프론트(`rooter-front`)는 `questions.length`·서버 `passed` 기준이라 영향 없음 확인. DB 변경 없음
+- [ ] doing RB-129 퀴즈 문항 수 가변 (#243) — 공부 시간 기준 30분 이하 4·1시간 이하 5·초과 7문항 (태스크 퀴즈는 할일 estimatedMinutes, 일일 퀴즈는 완료 할일 합), 태스크 퀴즈 통과 70점 이상 (`passCount` 응답 추가). 문항이 덜 저장되면 통과 못 하던 문제도 수정 — PR #247 open (`3a551e4`·`e4ac66c`·`0618633`) · `./gradlew test` 전체 통과 · 프론트(`rooter-front`)는 `questions.length`·서버 `passed` 기준이라 영향 없음 확인. DB 변경 없음
 
 ## M10. 챗봇 재조정
 
