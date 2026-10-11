@@ -38,7 +38,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 
 | # | 마일스톤 | 진행 | 상태 |
 |---|---|---|---|
-| M1 | 플랜보드 코어 | 9/10 | doing |
+| M1 | 플랜보드 코어 | 9/11 | doing |
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 6/8 | doing |
@@ -82,6 +82,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 - [x] done RB-008 daily_plans 중복 생성 레이스 방지 — insertIgnore `c18cf9d` + `rooter-ddl` #11 closed(유니크 제약)
 - [x] done RB-009 DB 통합 테스트 (`PlanBoardServiceTest`, 18케이스) — `a5680c7`
 - [ ] todo RB-010 scheduler DAO 전환 — 미지시 항목
+- [ ] doing RB-130 퀴즈로 결과가 확정된 할일(통과 / 3차까지 불합격)은 완료 상태 변경 금지 (#244) — `completeTask` 에서 400 `TASK_FINALIZED`, 같은 값은 성공. PR #248 open (`35f894b`·`b1bc488`) · `./gradlew test` 전체 통과 (develop 합친 상태 211건) · 프론트는 `completeTask` 를 정의만 하고 호출하지 않아 영향 없음. DB 변경 없음
 
 ## M2. 컨벤션·구조 정비
 
