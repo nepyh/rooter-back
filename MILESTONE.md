@@ -46,7 +46,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
 | M8 | AI 계획 생성·스케줄링 | 7/10 | doing |
-| M9 | 퀴즈 고도화 | 7/11 | doing |
+| M9 | 퀴즈 고도화 | 7/12 | doing |
 | M10 | 챗봇 재조정 | 5/5 | done |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
@@ -185,6 +185,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 - [ ] todo RB-088 학습 범위 없는 날 퀴즈가 엉뚱해지는 문제 (B-08)
 - [ ] doing RB-089 보기 순서 섞기 (AI 가 정한 순서 그대로 나가 정답 위치가 쏠릴 수 있음) — 일일·태스크 퀴즈 모두 저장 전에 섞음, 정답 표시·오답 이유는 보기와 함께 이동. PR #249 open (`faa52d5`·`d32b075`) · `./gradlew test` 210건 3회 연속 통과, #248 과 합친 상태 213건 통과. DB·응답 형식·프론트 변경 없음
 - [ ] doing RB-129 퀴즈 문항 수 가변 (#243) — 공부 시간 기준 30분 이하 4·1시간 이하 5·초과 7문항 (태스크 퀴즈는 할일 estimatedMinutes, 일일 퀴즈는 완료 할일 합), 태스크 퀴즈 통과 70점 이상 (`passCount` 응답 추가). 문항이 덜 저장되면 통과 못 하던 문제도 수정 — PR #247 open (`3a551e4`·`e4ac66c`·`0618633`) · `./gradlew test` 전체 통과 · 프론트(`rooter-front`)는 `questions.length`·서버 `passed` 기준이라 영향 없음 확인. DB 변경 없음
+- [ ] doing RB-131 복습 퀴즈 1단계 — 일일·태스크 퀴즈 오답 자동 수집(`review_questions`·`review_choices`), `GET /review-questions`(id 커서, 50개), `POST /review-questions/{id}/answer`(맞히면 cleared, 틀리면 wrongCount). PR #250 open (`5da763e`·`661f97a`·`b91f3c0`) · `./gradlew test` 220건 통과 · **DDL 선행: rooter-ddl #26 → dev DB → 운영 DB**. 다음: 2단계 약점 분석 때 단원당 2문제 맞춤 문제(`CUSTOM`), 3단계 단원별 오답률 리포트
 
 ## M10. 챗봇 재조정
 

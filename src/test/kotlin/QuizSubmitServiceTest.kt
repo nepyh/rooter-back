@@ -20,6 +20,9 @@ import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceRow
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceTable
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionRow
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionTable
+import com.github.nepyh.rooter.module.review.ReviewService
+import com.github.nepyh.rooter.module.review.model.ReviewChoiceTable
+import com.github.nepyh.rooter.module.review.model.ReviewQuestionTable
 import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
@@ -68,14 +71,16 @@ class QuizSubmitServiceTest : StringSpec({
     beforeSpec {
         transaction(db) {
             listOf(
-                "daily_quiz_attempts", "daily_quiz_choices", "daily_quiz_questions", "plan_tasks", "plan_subjects",
+                "review_choices", "review_questions", "daily_quiz_attempts", "daily_quiz_choices", "daily_quiz_questions", "plan_tasks", "plan_subjects",
                 "daily_plans", "plan_boards", "chapters", "textbooks", "subjects",
                 "user_unavailable_times", "student_profiles", "users"
             ).forEach { exec("DROP TABLE IF EXISTS $it CASCADE") }
             SchemaUtils.create(
                 UserTable, StudentProfileTable, UnavailableTimeTable, SubjectTable, TextbookTable, ChapterTable,
                 PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable,
-                DailyQuizQuestionTable, DailyQuizChoiceTable, DailyQuizAttemptTable
+                DailyQuizQuestionTable, DailyQuizChoiceTable, DailyQuizAttemptTable,
+                // 틀린 문제를 복습 목록으로 복사한다 (users 를 지우면 cascade 로 함께 지워짐)
+                ReviewQuestionTable, ReviewChoiceTable
             )
         }
     }
@@ -205,6 +210,25 @@ class QuizSubmitServiceTest : StringSpec({
             listOf(q1, c1.first, c1.first, "정답", true, "풀이 1"),
             listOf(q2, c2.second, c2.first, "정답", false, "풀이 2")
         )
+    }
+
+    "틀린 문제만 풀이·보기와 함께 복습 목록에 들어간다" {
+        val quiz = seedQuiz(friday, friday.plusDays(7))
+        val (q1, c1) = quiz.answers[0]
+        val (q2, c2) = quiz.answers[1]
+
+        QuizService(FakeWeakAreaLlmClient(emptyList()), schoolDataFetcher).submitQuiz(
+            quiz.userId, quiz.dailyPlanId,
+            listOf(QuizAnswerSubmission(q1, c1.first), QuizAnswerSubmission(q2, c2.second))
+        )
+
+        val review = ReviewService().listOpen(quiz.userId, cursor = null)
+        review.totalCount shouldBe 1
+        val copied = review.questions.single()
+        listOf(copied.source, copied.questionText) shouldBe listOf("DAILY_QUIZ", "문제 2")
+        copied.choices.map { it.choiceText }.sorted() shouldBe listOf("오답", "정답")
+        val answer = ReviewService().answer(quiz.userId, copied.id, copied.choices.first { it.choiceText == "정답" }.id)
+        listOf(answer.isCorrect, answer.explanation, answer.cleared) shouldBe listOf(true, "풀이 2", true)
     }
 
     "모두 맞히면 약점 분석을 부르지 않는다" {

@@ -5,6 +5,9 @@ import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.review.ReviewChoiceDraft
+import com.github.nepyh.rooter.module.review.copyWrongQuestionToReview
+import com.github.nepyh.rooter.module.review.model.ReviewSource
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
@@ -211,6 +214,18 @@ class TaskQuizService(
             (TaskQuizQuestionTable.id eq question.id) and TaskQuizQuestionTable.selectedChoiceId.isNull()
         }) { it[TaskQuizQuestionTable.selectedChoiceId] = selectedChoiceId }
         if (saved == 0) throw TaskQuizValidationException.AlreadyAnsweredException()
+
+        if (!selectedChoice.isCorrect) {
+            // 틀린 문제는 복습 목록으로. 정답 보기의 explanation 이 자세한 풀이, 오답 보기의 explanation 이 짧은 이유다
+            copyWrongQuestionToReview(
+                userId = userId,
+                source = ReviewSource.TASK_QUIZ,
+                sourceQuestionId = question.id.value,
+                questionText = question.questionText,
+                explanation = correctChoice.explanation,
+                choices = choices.map { ReviewChoiceDraft(it.choiceText, it.isCorrect, reason = it.explanation) }
+            )
+        }
 
         TaskQuizAnswerResponse(
             questionId = question.id.value,
