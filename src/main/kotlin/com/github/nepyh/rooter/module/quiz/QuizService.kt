@@ -42,6 +42,7 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import kotlin.random.Random
 
 private const val REVIEW_TASK_MINUTES = 20
 
@@ -53,7 +54,8 @@ private sealed interface QuizPreparation {
 
 class QuizService(
     private val llmClient: QuizLlmClient,
-    private val schoolDataFetcher: SchoolDataFetcher
+    private val schoolDataFetcher: SchoolDataFetcher,
+    private val random: Random = Random.Default // 보기 섞기용. 테스트에서 시드를 고정한다
 ) {
 
     /**
@@ -128,7 +130,9 @@ class QuizService(
                     explanation = question.explanation.ifBlank { null }
                 }
 
-                val choices = question.choices.mapIndexed { index, choiceText ->
+                // AI 는 정답을 앞쪽 보기에 두는 경향이 있어, 저장 전에 보기 순서를 섞는다 (정답 표시는 보기와 함께 움직인다)
+                val choices = question.choices.indices.shuffled(random).map { index ->
+                    val choiceText = question.choices[index]
                     val choice = DailyQuizChoiceRow.new {
                         this.question = quizQuestion
                         this.choiceText = choiceText
