@@ -42,4 +42,9 @@ sealed class PlanTaskValidationException(
         "INVALID_DATE_PARAM",
         "date 파라미터 형식이 올바르지 않습니다. (yyyy-MM-dd)"
     )
+    class TaskFinalizedException : PlanTaskValidationException(
+        HttpStatusCode.BadRequest,
+        "TASK_FINALIZED",
+        "퀴즈로 결과가 확정된 할일은 완료 상태를 바꿀 수 없습니다."
+    )
 }

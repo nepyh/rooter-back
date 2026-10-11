@@ -15,11 +15,15 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.taskquiz.MAX_ATTEMPTS
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.between
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -150,7 +154,11 @@ class PlanTaskService {
         }
     }
 
-    /** 태스크 완료 처리/취소 (본인 플랜보드 소유권 확인) */
+    /**
+     * 태스크 완료 처리/취소 (본인 플랜보드 소유권 확인).
+     * 태스크 퀴즈로 결과가 확정된 태스크(통과, 또는 마지막 차수까지 불합격)는 완료 상태를 바꿀 수 없다.
+     * 지금 상태와 같은 값을 보내는 건 막지 않는다.
+     */
     fun completeTask(userId: Int, taskId: Int, isCompleted: Boolean): PlanTaskResponse = transaction {
         val task = PlanTaskRow.findById(taskId)
             ?: throw PlanTaskNotFoundException()
@@ -159,9 +167,22 @@ class PlanTaskService {
             throw PlanTaskNotFoundException()
         }
 
+        if (task.isCompleted != isCompleted && isFinalizedByQuiz(taskId)) {
+            throw PlanTaskValidationException.TaskFinalizedException()
+        }
+
         task.isCompleted = isCompleted
         task.toResponse()
     }
+
+    /** 태스크 퀴즈를 통과했거나, 마지막 차수(MAX_ATTEMPTS)까지 불합격해 결과가 확정된 태스크인지 */
+    private fun isFinalizedByQuiz(taskId: Int): Boolean =
+        !TaskQuizAttemptTable.selectAll().where {
+            (TaskQuizAttemptTable.planTaskId eq taskId) and (
+                (TaskQuizAttemptTable.passed eq true) or
+                    ((TaskQuizAttemptTable.passed eq false) and (TaskQuizAttemptTable.attemptNumber greaterEq MAX_ATTEMPTS))
+                )
+        }.empty()
 
     /** taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정 (본인 플랜보드 소유권 확인) */
     fun updateTask(userId: Int, taskId: Int, request: PlanTaskUpdateRequest): PlanTaskResponse = transaction {
