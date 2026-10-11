@@ -14,7 +14,7 @@ object TaskQuizAttemptTable : IntIdTable("task_quiz_attempts") {
     val attemptNumber = integer("attempt_number") // 1 = 최초, 2~3 = 재시도 (최대 2회)
     val totalCount = integer("total_count")
     val correctCount = integer("correct_count").nullable() // null = 아직 채점 전(미제출)
-    val passed = bool("passed").nullable() // null = 미제출, true/false = 채점 결과 (5문항 중 4개 이상 = true)
+    val passed = bool("passed").nullable() // null = 미제출, true/false = 채점 결과 (70점 이상 = 문항의 70% 이상 정답 = true, PASS_PERCENT)
     val createdAt = timestampWithTimeZone("created_at")
 }
 

@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.quiz
 
+import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.planBoardSubjects
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
@@ -42,13 +43,12 @@ import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTrans
 import java.time.LocalDate
 import java.time.OffsetDateTime
 
-private const val DEFAULT_QUESTION_COUNT = 5
 private const val REVIEW_TASK_MINUTES = 20
 
 /** generateQuiz 의 첫 트랜잭션 결과 — 이미 있는 퀴즈를 돌려줄지, LLM 으로 새로 만들지 */
 private sealed interface QuizPreparation {
     data class Existing(val quiz: QuizResponse) : QuizPreparation
-    data class New(val dailyPlanId: Int, val context: String) : QuizPreparation
+    data class New(val dailyPlanId: Int, val context: String, val questionCount: Int) : QuizPreparation
 }
 
 class QuizService(
@@ -91,25 +91,29 @@ class QuizService(
 
             val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
             val chapterNames = chapterNamesForPlanBoard(planBoardId)
-            val completedTaskNames = PlanTaskRow.find {
+            val completedTasks = PlanTaskRow.find {
                 (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq true)
-            }.map { it.taskName }
+            }.toList()
+            val completedTaskNames = completedTasks.map { it.taskName }
 
             QuizPreparation.New(
                 dailyPlanId = dailyPlanId,
                 context = buildString {
                     appendLine("학습 범위: ${chapterNames.joinToString(", ").ifBlank { "지정 안 됨" }}")
                     appendLine("오늘 완료한 학습: ${completedTaskNames.joinToString(", ").ifBlank { "없음" }}")
-                }
+                },
+                // 그날 공부한 시간 = 완료한 할일들의 예상 시간 합
+                questionCount = quizQuestionCount(completedTasks.sumOf { it.estimatedMinutes })
             )
         }
 
-        val (dailyPlanId, context) = when (prepared) {
+        val (dailyPlanId, context, questionCount) = when (prepared) {
             is QuizPreparation.Existing -> return prepared.quiz
             is QuizPreparation.New -> prepared
         }
 
-        val generated = llmClient.generateQuestions(context, DEFAULT_QUESTION_COUNT)
+        // AI 가 더 많이 줘도 정한 문항 수까지만 쓴다
+        val generated = llmClient.generateQuestions(context, questionCount).take(questionCount)
         if (generated.isEmpty()) throw QuizValidationException.QuizGenerationFailedException()
 
         return newSuspendedTransaction {

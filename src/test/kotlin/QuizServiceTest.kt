@@ -10,6 +10,7 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
@@ -44,6 +45,7 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -104,7 +106,8 @@ class QuizServiceTest : StringSpec({
     // 퀴즈 생성은 NICE 를 쓰지 않는다 (QuizService 생성자에 필요할 뿐)
     val noNiceFetcher = SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") })))
 
-    fun seedDailyPlan(): Pair<Int, Int> = transaction(db) {
+    /** 30분짜리 완료한 할일이 completedTasks 개 있는 일일 계획을 만든다 */
+    fun seedDailyPlan(completedTasks: Int = 0): Pair<Int, Int> = transaction(db) {
         val user = UserRow.new {
             email = "quiz@test.com"
             username = "tester"
@@ -122,6 +125,12 @@ class QuizServiceTest : StringSpec({
             planBoard = board
             planDate = day
         }
+        repeat(completedTasks) { i ->
+            PlanTaskRow.new {
+                this.dailyPlan = dailyPlan; taskName = "할일 $i"; isCompleted = true
+                startTime = LocalTime.of(16 + i, 0); endTime = LocalTime.of(16 + i, 30); estimatedMinutes = 30
+            }
+        }
         user.id.value to dailyPlan.id.value
     }
 
@@ -138,7 +147,7 @@ class QuizServiceTest : StringSpec({
         val second = service.generateQuiz(userId, day)
 
         llm.calls.get() shouldBe 1
-        storedQuestionCount(dailyPlanId) shouldBe 5L
+        storedQuestionCount(dailyPlanId) shouldBe 4L
         second.questions.map { it.id } shouldBe first.questions.map { it.id }
         second.questions.map { q -> q.choices.map { it.id } } shouldBe first.questions.map { q -> q.choices.map { it.id } }
         service.getQuiz(userId, dailyPlanId).questions.map { it.id } shouldBe first.questions.map { it.id }
@@ -151,7 +160,7 @@ class QuizServiceTest : StringSpec({
         transaction(db) {
             DailyQuizQuestionTable.selectAll().where { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
                 .orderBy(DailyQuizQuestionTable.id).map { it[DailyQuizQuestionTable.explanation] }
-        } shouldBe (1..5).map { "풀이 $it" }
+        } shouldBe (1..4).map { "풀이 $it" }
     }
 
     "generateQuiz: 동시에 두 번 요청돼도 한 세트만 저장되고 둘 다 같은 퀴즈를 받는다" {
@@ -164,7 +173,7 @@ class QuizServiceTest : StringSpec({
             listOf(async { service.generateQuiz(userId, day) }, async { service.generateQuiz(userId, day) }).awaitAll()
         }
 
-        storedQuestionCount(dailyPlanId) shouldBe 5L
+        storedQuestionCount(dailyPlanId) shouldBe 4L
         results[1].questions.map { it.id } shouldBe results[0].questions.map { it.id }
     }
 
@@ -259,6 +268,26 @@ class QuizServiceTest : StringSpec({
         shouldThrow<QuizValidationException.NoPlanForDateException> { service.generateQuiz(otherUserId, day, 999_999) }
     }
 
+    "generateQuiz: 그날 공부한 시간(완료한 할일 예상 시간 합)에 맞춘 문항 수를 AI 에 요청하고 그만큼 저장한다" {
+        val (userId, dailyPlanId) = seedDailyPlan(completedTasks = 4) // 30분 × 4 = 120분 → 7문항
+        val llm = FakeQuizLlmClient()
+
+        val quiz = QuizService(llm, noNiceFetcher).generateQuiz(userId, day)
+
+        llm.lastCount shouldBe 7
+        quiz.questions.size shouldBe 7
+        storedQuestionCount(dailyPlanId) shouldBe 7L
+    }
+
+    "generateQuiz: AI 가 요청보다 많이 주면 정한 문항 수까지만 저장한다" {
+        val (userId, dailyPlanId) = seedDailyPlan(completedTasks = 2) // 60분 → 5문항
+
+        val quiz = QuizService(FakeQuizLlmClient(questionCount = 8), noNiceFetcher).generateQuiz(userId, day)
+
+        quiz.questions.size shouldBe 5
+        storedQuestionCount(dailyPlanId) shouldBe 5L
+    }
+
     "generateQuiz: 해당 날짜에 계획이 없으면 NoPlanForDateException" {
         val (userId, _) = seedDailyPlan()
 
@@ -269,17 +298,19 @@ class QuizServiceTest : StringSpec({
 })
 
 private class FakeQuizLlmClient(
-    private val questionCount: Int = 5,
+    private val questionCount: Int? = null, // null 이면 요청받은 count 만큼 만든다
     private val delayMillis: Long = 0
 ) : QuizLlmClient(dummyAppConfig()) {
     val calls = AtomicInteger(0)
     @Volatile var lastContext: String = ""
+    @Volatile var lastCount: Int = 0
 
     override suspend fun generateQuestions(context: String, count: Int): List<GeneratedQuestion> {
         val n = calls.incrementAndGet()
         lastContext = context
+        lastCount = count
         if (delayMillis > 0) delay(delayMillis)
-        return (1..questionCount).map { i ->
+        return (1..(questionCount ?: count)).map { i ->
             GeneratedQuestion(
                 questionText = "문제 $i (호출 $n)",
                 choices = listOf("A", "B", "C", "D"),

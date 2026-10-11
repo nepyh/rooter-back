@@ -15,8 +15,6 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-private const val LLM_QUESTION_COUNT = 5
-
 @Serializable
 data class GeneratedTaskQuizQuestion(
     val question_text: String,
@@ -52,16 +50,16 @@ open class TaskQuizLlmClient(private val appConfig: AppConfig) {
     }
 
     /**
-     * taskName(예: "인수분해를 이용한 이차방정식 풀이") 의 내용을 묻는 객관식 5문항을 만든다.
+     * taskName(예: "인수분해를 이용한 이차방정식 풀이") 의 내용을 묻는 객관식 count 문항을 만든다.
      * 사용자가 직접 추가한 태스크는 이름만으로 내용을 알기 어려워서, 학년과 플랜보드 학습 범위를 함께 넘긴다.
      */
-    open suspend fun generateQuestions(taskName: String, gradeLabel: String, studyScope: String): List<GeneratedTaskQuizQuestion> {
+    open suspend fun generateQuestions(taskName: String, gradeLabel: String, studyScope: String, count: Int): List<GeneratedTaskQuizQuestion> {
         val prompt = PromptLoader.load(
             "prompts/task-quiz-generation.md",
             "TASK_NAME" to taskName,
             "GRADE" to gradeLabel,
             "STUDY_SCOPE" to studyScope,
-            "COUNT" to LLM_QUESTION_COUNT.toString()
+            "COUNT" to count.toString()
         )
 
         val content = requestChatCompletion(prompt) ?: return emptyList()
