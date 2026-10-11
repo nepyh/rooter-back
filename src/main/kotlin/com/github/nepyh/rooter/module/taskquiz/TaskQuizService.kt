@@ -45,6 +45,7 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.Clock
 import java.time.LocalTime
 import java.time.OffsetDateTime
+import kotlin.random.Random
 
 const val MAX_ATTEMPTS = 3 // 최초 1회 + 재시도 2회
 const val PASS_PERCENT = 70 // 70점 이상(문항의 70% 이상 정답)이면 통과 (4문항 3개, 5문항 4개, 7문항 5개)
@@ -58,7 +59,8 @@ private data class TaskQuizContext(val gradeLabel: String, val studyScope: Strin
 
 class TaskQuizService(
     private val llmClient: TaskQuizLlmClient,
-    private val clock: Clock = Clock.systemUTC()
+    private val clock: Clock = Clock.systemUTC(),
+    private val random: Random = Random.Default // 보기 섞기용. 테스트에서 시드를 고정한다
 ) {
 
     /** 스케줄러가 호출. taskName은 findDue 시점에 이미 조회해둔 값을 그대로 받는다. */
@@ -94,7 +96,9 @@ class TaskQuizService(
                     questionText = question.question_text
                 }
 
-                question.choices.forEachIndexed { index, choiceText ->
+                // AI 는 정답을 앞쪽 보기에 두는 경향이 있어, 저장 전에 보기 순서를 섞는다 (정답 표시·짧은 이유는 보기와 함께 움직인다)
+                question.choices.indices.shuffled(random).forEach { index ->
+                    val choiceText = question.choices[index]
                     TaskQuizChoiceRow.new {
                         this.question = quizQuestion
                         this.choiceText = choiceText
