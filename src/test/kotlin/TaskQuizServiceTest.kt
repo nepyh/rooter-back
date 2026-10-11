@@ -18,6 +18,9 @@ import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
+import com.github.nepyh.rooter.module.review.ReviewService
+import com.github.nepyh.rooter.module.review.model.ReviewChoiceTable
+import com.github.nepyh.rooter.module.review.model.ReviewQuestionTable
 import com.github.nepyh.rooter.module.taskquiz.GeneratedTaskQuizQuestion
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizLlmClient
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
@@ -76,12 +79,14 @@ class TaskQuizServiceTest : StringSpec({
     beforeSpec {
         transaction(db) {
             listOf(
-                "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "plan_subjects",
+                "review_choices", "review_questions", "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "plan_subjects",
                 "daily_plans", "plan_boards", "chapters", "textbooks", "subjects", "student_profiles", "users"
             ).forEach { exec("DROP TABLE IF EXISTS $it CASCADE") }
             SchemaUtils.create(
                 UserTable, StudentProfileTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable,
-                DailyPlanTable, PlanTaskTable, TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable
+                DailyPlanTable, PlanTaskTable, TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable,
+                // 틀린 문제를 복습 목록으로 복사한다 (users 를 지우면 cascade 로 함께 지워짐)
+                ReviewQuestionTable, ReviewChoiceTable
             )
         }
     }
@@ -296,6 +301,23 @@ class TaskQuizServiceTest : StringSpec({
         response.correctChoiceId shouldBe firstQuestion.choices[0].id
         response.reason shouldBe "B 가 틀린 이유" // 고른 오답 보기의 짧은 이유
         response.explanation shouldBe "자세한 풀이 1" // 정답 보기의 자세한 풀이
+    }
+
+    "answerQuestion: 틀린 문제는 보기별 이유·풀이와 함께 복습 목록에 들어가고, 맞힌 문제는 들어가지 않는다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val userId = lastUserId
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+        service.generateAttempt(taskId, 1, "수학 문제집 풀기")
+        val (first, second) = service.getCurrentQuiz(userId, taskId).questions
+
+        service.answerQuestion(userId, taskId, first.id, first.choices.first { it.choiceText == "A" }.id) // 맞힘
+        service.answerQuestion(userId, taskId, second.id, second.choices.first { it.choiceText == "C" }.id) // 틀림
+
+        val copied = ReviewService().listOpen(userId, cursor = null).questions.single()
+        listOf(copied.source, copied.questionText) shouldBe listOf("TASK_QUIZ", "문제 2")
+        copied.choices.map { it.choiceText }.sorted() shouldBe listOf("A", "B", "C", "D")
+        val wrong = ReviewService().answer(userId, copied.id, copied.choices.first { it.choiceText == "B" }.id)
+        listOf(wrong.isCorrect, wrong.reason, wrong.explanation, wrong.cleared) shouldBe listOf(false, "B 가 틀린 이유", "자세한 풀이 2", false)
     }
 
     "answerQuestion: 이미 답한 문제에 다시 답하면 AlreadyAnsweredException — 정답을 본 뒤 답 변경을 막는다" {
