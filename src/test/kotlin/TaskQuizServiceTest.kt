@@ -1,6 +1,8 @@
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.config.EnvironmentMode
+import com.github.nepyh.rooter.module.planboard.PlanTaskService
+import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.planboard.guessTaskSubject
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
@@ -40,6 +42,7 @@ import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
+import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
@@ -389,6 +392,52 @@ class TaskQuizServiceTest : StringSpec({
 
         questions.first().selectedChoiceId shouldBe first.choices[2].id
         questions.drop(1).map { it.selectedChoiceId } shouldBe List(4) { null }
+    }
+
+    /** 채점이 끝난 퀴즈 차수를 넣고 태스크 완료 상태를 퀴즈 결과대로 맞춘다 */
+    fun seedGradedAttempt(taskId: Int, attemptNumber: Int, passed: Boolean) = transaction(db) {
+        TaskQuizAttemptTable.insert {
+            it[planTaskId] = taskId; it[this.attemptNumber] = attemptNumber; it[totalCount] = 5
+            it[correctCount] = if (passed) 5 else 0; it[this.passed] = passed; it[createdAt] = OffsetDateTime.now()
+        }
+        PlanTaskRow[taskId].isCompleted = passed
+    }
+
+    "completeTask: 퀴즈를 통과한 태스크는 미완료로 되돌릴 수 없다 (같은 값은 그대로 성공)" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        seedGradedAttempt(taskId, 1, passed = true)
+
+        shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
+            PlanTaskService().completeTask(lastUserId, taskId, false)
+        }
+        PlanTaskService().completeTask(lastUserId, taskId, true).isCompleted shouldBe true
+        transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe true
+    }
+
+    "completeTask: 3차까지 모두 떨어져 실패가 확정된 태스크는 완료로 바꿀 수 없다" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        (1..3).forEach { seedGradedAttempt(taskId, it, passed = false) }
+
+        shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
+            PlanTaskService().completeTask(lastUserId, taskId, true)
+        }
+        transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe false
+    }
+
+    "completeTask: 아직 재시도가 남았거나 퀴즈가 없는 태스크는 자유롭게 완료·취소할 수 있다" {
+        val retrying = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        seedGradedAttempt(retrying, 1, passed = false)
+        PlanTaskService().completeTask(lastUserId, retrying, true).isCompleted shouldBe true
+        PlanTaskService().completeTask(lastUserId, retrying, false).isCompleted shouldBe false
+
+        val noQuiz = transaction(db) {
+            PlanTaskRow.new {
+                dailyPlan = PlanTaskRow[retrying].dailyPlan; taskName = "영어 단어 외우기"
+                startTime = LocalTime.of(17, 0); endTime = LocalTime.of(17, 30); estimatedMinutes = 30
+            }.id.value
+        }
+        PlanTaskService().completeTask(lastUserId, noQuiz, true).isCompleted shouldBe true
+        PlanTaskService().completeTask(lastUserId, noQuiz, false).isCompleted shouldBe false
     }
 
     "generateAttempt: 정답 번호가 보기 범위를 벗어난 문제는 저장하지 않는다" {
