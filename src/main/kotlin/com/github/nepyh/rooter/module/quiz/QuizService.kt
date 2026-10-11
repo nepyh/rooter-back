@@ -26,6 +26,9 @@ import com.github.nepyh.rooter.module.quiz.dto.QuizResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizResultResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizSubjectResponse
 import com.github.nepyh.rooter.module.quiz.dto.WeakAreaSummary
+import com.github.nepyh.rooter.module.review.ReviewChoiceDraft
+import com.github.nepyh.rooter.module.review.copyWrongQuestionToReview
+import com.github.nepyh.rooter.module.review.model.ReviewSource
 import com.github.nepyh.rooter.module.quiz.exception.QuizNotFoundException
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttemptRow
@@ -234,14 +237,22 @@ class QuizService(
                 }
 
                 val question = DailyQuizQuestionRow[answer.questionId]
+                val questionChoices = DailyQuizChoiceRow.find { DailyQuizChoiceTable.questionId eq answer.questionId }.toList()
                 if (choiceRow.isCorrect) {
                     correctCount++
                 } else {
                     wrongQuestionTexts.add(question.questionText)
+                    // 틀린 문제는 복습 목록으로 (일일 퀴즈는 보기별 이유가 없어 풀이만 옮긴다)
+                    copyWrongQuestionToReview(
+                        userId = userId,
+                        source = ReviewSource.DAILY_QUIZ,
+                        sourceQuestionId = answer.questionId,
+                        questionText = question.questionText,
+                        explanation = question.explanation,
+                        choices = questionChoices.map { ReviewChoiceDraft(it.choiceText, it.isCorrect) }
+                    )
                 }
-                val correctChoice = DailyQuizChoiceRow.find {
-                    (DailyQuizChoiceTable.questionId eq answer.questionId) and (DailyQuizChoiceTable.isCorrect eq true)
-                }.firstOrNull()
+                val correctChoice = questionChoices.firstOrNull { it.isCorrect }
                 results += QuizQuestionResult(
                     questionId = answer.questionId,
                     questionText = question.questionText,
