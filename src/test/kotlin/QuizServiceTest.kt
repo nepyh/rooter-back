@@ -29,6 +29,7 @@ import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -47,6 +48,7 @@ import java.sql.SQLException
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
+import kotlin.random.Random
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -286,6 +288,27 @@ class QuizServiceTest : StringSpec({
 
         quiz.questions.size shouldBe 5
         storedQuestionCount(dailyPlanId) shouldBe 5L
+    }
+
+    "generateQuiz: 보기 순서를 섞어 저장하고 응답도 그 순서로 주며, 정답 표시는 보기와 함께 움직인다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val quiz = QuizService(FakeQuizLlmClient(), noNiceFetcher, random = Random(7)).generateQuiz(userId, day)
+
+        // 문항별 보기를 저장 순서대로: (보기, 정답 여부)
+        val stored = transaction(db) {
+            DailyQuizQuestionTable.selectAll().where { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
+                .orderBy(DailyQuizQuestionTable.id).map { question ->
+                    DailyQuizChoiceTable.selectAll().where { DailyQuizChoiceTable.questionId eq question[DailyQuizQuestionTable.id] }
+                        .orderBy(DailyQuizChoiceTable.id).map { it[DailyQuizChoiceTable.choiceText] to it[DailyQuizChoiceTable.isCorrect] }
+                }
+        }
+        quiz.questions.map { q -> q.choices.map { it.choiceText } } shouldBe stored.map { choices -> choices.map { it.first } }
+        stored.forEach { choices ->
+            choices.map { it.first }.sorted() shouldBe listOf("A", "B", "C", "D")
+            choices.single { it.second }.first shouldBe "A"
+        }
+        // AI 는 모든 문항의 정답을 첫 보기로 줬지만 저장된 정답 위치는 한 곳에 몰리지 않는다
+        stored.map { choices -> choices.indexOfFirst { it.second } }.toSet().size shouldBeGreaterThan 1
     }
 
     "generateQuiz: 해당 날짜에 계획이 없으면 NoPlanForDateException" {
