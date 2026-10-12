@@ -3,7 +3,9 @@ package com.github.nepyh.rooter.module.review
 import com.github.nepyh.rooter.module.review.model.ReviewChoiceTable
 import com.github.nepyh.rooter.module.review.model.ReviewQuestionTable
 import com.github.nepyh.rooter.module.review.model.ReviewSource
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.jdbc.insert
+import org.jetbrains.exposed.v1.jdbc.insertAndGetId
 import org.jetbrains.exposed.v1.jdbc.insertIgnoreAndGetId
 import java.time.OffsetDateTime
 
@@ -34,6 +36,35 @@ fun copyWrongQuestionToReview(
         it[createdAt] = OffsetDateTime.now()
     } ?: return // 이미 복사된 문항
 
+    insertShuffledChoices(reviewQuestionId, choices)
+}
+
+/**
+ * 약점 분석으로 만든 맞춤 문제를 복습 목록에 넣는다 (source=CUSTOM, 원본 문항 없음). 트랜잭션 안에서 호출한다.
+ * 정답 보기가 없는 문제는 복습에서 맞힐 수 없으니 넣지 않고, 넣었으면 true.
+ */
+fun addCustomReviewQuestion(
+    userId: Int,
+    chapterName: String,
+    questionText: String,
+    explanation: String?,
+    choices: List<ReviewChoiceDraft>
+): Boolean {
+    if (choices.none { it.isCorrect }) return false
+
+    val reviewQuestionId = ReviewQuestionTable.insertAndGetId {
+        it[this.userId] = userId
+        it[sourceType] = ReviewSource.CUSTOM
+        it[this.chapterName] = chapterName
+        it[this.questionText] = questionText
+        it[this.explanation] = explanation?.ifBlank { null }
+        it[createdAt] = OffsetDateTime.now()
+    }
+    insertShuffledChoices(reviewQuestionId, choices)
+    return true
+}
+
+private fun insertShuffledChoices(reviewQuestionId: EntityID<Int>, choices: List<ReviewChoiceDraft>) {
     choices.shuffled().forEach { choice ->
         ReviewChoiceTable.insert {
             it[this.reviewQuestionId] = reviewQuestionId
