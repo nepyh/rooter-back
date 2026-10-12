@@ -24,6 +24,7 @@ import com.github.nepyh.rooter.module.quiz.QuizService
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttemptTable
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceTable
+import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionRow
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
@@ -252,6 +253,18 @@ class QuizServiceTest : StringSpec({
         llm.calls.get() shouldBe 2
     }
 
+    "generateQuiz: 문항마다 AI 가 붙인 단원을 저장하되, 학습 범위 밖 단원이나 빈 값은 단원 미상(null)으로 둔다" {
+        val (userId, _, scienceBoardId) = seedTwoBoards(firstBoardHasRange = true)
+        val llm = FakeQuizLlmClient(questionCount = 4, chapterNames = listOf(" 태양계 ", "식물세포", "", "없는 단원"))
+
+        val quiz = QuizService(llm, noNiceFetcher).generateQuiz(userId, day, scienceBoardId)
+
+        // 과학 시험 보드의 범위는 태양계 — 다른 보드 범위(식물세포)도 받지 않는다
+        transaction(db) {
+            quiz.questions.map { DailyQuizQuestionRow[it.id].chapterName }
+        } shouldBe listOf("태양계", null, null, null)
+    }
+
     "generateQuiz: planBoardId 를 생략하면 학습 범위가 없는 기본 보드가 먼저 있어도 범위 있는 보드로 만든다" {
         val (userId, _, _) = seedTwoBoards(firstBoardHasRange = false)
         val llm = FakeQuizLlmClient()
@@ -322,7 +335,8 @@ class QuizServiceTest : StringSpec({
 
 private class FakeQuizLlmClient(
     private val questionCount: Int? = null, // null 이면 요청받은 count 만큼 만든다
-    private val delayMillis: Long = 0
+    private val delayMillis: Long = 0,
+    private val chapterNames: List<String> = emptyList() // i 번째 문제에 붙일 단원 (없으면 "")
 ) : QuizLlmClient(dummyAppConfig()) {
     val calls = AtomicInteger(0)
     @Volatile var lastContext: String = ""
@@ -338,7 +352,8 @@ private class FakeQuizLlmClient(
                 questionText = "문제 $i (호출 $n)",
                 choices = listOf("A", "B", "C", "D"),
                 correctIndex = 0,
-                explanation = "풀이 $i"
+                explanation = "풀이 $i",
+                chapterName = chapterNames.getOrElse(i - 1) { "" }
             )
         }
     }
