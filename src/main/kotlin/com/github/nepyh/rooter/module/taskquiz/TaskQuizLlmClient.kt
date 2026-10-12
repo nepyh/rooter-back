@@ -21,7 +21,8 @@ data class GeneratedTaskQuizQuestion(
     val choices: List<String>,
     val correct_index: Int,
     val explanation: String, // 다 푼 뒤 보여줄 자세한 풀이
-    val choice_reasons: List<String> = emptyList() // choices 와 같은 순서, 그 보기를 골랐을 때 바로 보여줄 틀린 이유 (정답 자리는 "")
+    val choice_reasons: List<String> = emptyList(), // choices 와 같은 순서, 그 보기를 골랐을 때 바로 보여줄 틀린 이유 (정답 자리는 "")
+    val chapter_name: String = "" // 이 문제가 다루는 학습 범위 단원. 범위 밖이면 저장할 때 버린다
 )
 
 @Serializable

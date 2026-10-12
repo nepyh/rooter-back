@@ -1,5 +1,7 @@
 package com.github.nepyh.rooter.module.quiz
 
+import com.github.nepyh.rooter.common.QUIZ_CHAPTER_NAME_MAX
+import com.github.nepyh.rooter.common.matchQuizChapter
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.planBoardSubjects
@@ -56,7 +58,7 @@ private const val CUSTOM_QUESTIONS_PER_CHAPTER = 2 // 약점 단원마다 복습
 /** generateQuiz 의 첫 트랜잭션 결과 — 이미 있는 퀴즈를 돌려줄지, LLM 으로 새로 만들지 */
 private sealed interface QuizPreparation {
     data class Existing(val quiz: QuizResponse) : QuizPreparation
-    data class New(val dailyPlanId: Int, val context: String, val questionCount: Int) : QuizPreparation
+    data class New(val dailyPlanId: Int, val context: String, val questionCount: Int, val chapterNames: List<String>) : QuizPreparation
 }
 
 class QuizService(
@@ -112,11 +114,12 @@ class QuizService(
                     appendLine("오늘 완료한 학습: ${completedTaskNames.joinToString(", ").ifBlank { "없음" }}")
                 },
                 // 그날 공부한 시간 = 완료한 할일들의 예상 시간 합
-                questionCount = quizQuestionCount(completedTasks.sumOf { it.estimatedMinutes })
+                questionCount = quizQuestionCount(completedTasks.sumOf { it.estimatedMinutes }),
+                chapterNames = chapterNames
             )
         }
 
-        val (dailyPlanId, context, questionCount) = when (prepared) {
+        val (dailyPlanId, context, questionCount, chapterNames) = when (prepared) {
             is QuizPreparation.Existing -> return prepared.quiz
             is QuizPreparation.New -> prepared
         }
@@ -135,6 +138,7 @@ class QuizService(
                     this.dailyPlan = DailyPlanRow[dailyPlanId]
                     questionText = question.questionText
                     explanation = question.explanation.ifBlank { null }
+                    chapterName = matchQuizChapter(question.chapterName, chapterNames)
                 }
 
                 // AI 는 정답을 앞쪽 보기에 두는 경향이 있어, 저장 전에 보기 순서를 섞는다 (정답 표시는 보기와 함께 움직인다)
@@ -257,6 +261,7 @@ class QuizService(
                         userId = userId,
                         source = ReviewSource.DAILY_QUIZ,
                         sourceQuestionId = answer.questionId,
+                        chapterName = question.chapterName,
                         questionText = question.questionText,
                         explanation = question.explanation,
                         choices = questionChoices.map { ReviewChoiceDraft(it.choiceText, it.isCorrect) }
@@ -390,7 +395,7 @@ class QuizService(
      * (chapter_name 은 단원별 오답률 리포트의 기준이라 약점 단원 이름 그대로여야 한다).
      */
     private suspend fun addCustomReviewQuestions(userId: Int, graded: GradedQuiz, suggestions: List<WeakAreaSuggestion>): Int {
-        val weakChapterNames = suggestions.map { it.chapterName.trim().take(100) }.filter { it.isNotEmpty() }.distinct()
+        val weakChapterNames = suggestions.map { it.chapterName.trim().take(QUIZ_CHAPTER_NAME_MAX) }.filter { it.isNotEmpty() }.distinct()
         if (weakChapterNames.isEmpty()) return 0
 
         val generated = runCatching {
@@ -400,7 +405,7 @@ class QuizService(
         }.getOrElse { return 0 }
 
         val accepted = generated
-            .map { it.copy(chapterName = it.chapterName.trim().take(100)) }
+            .map { it.copy(chapterName = it.chapterName.trim().take(QUIZ_CHAPTER_NAME_MAX)) }
             .filter { it.chapterName in weakChapterNames && it.questionText.isNotBlank() && it.choices.size >= 2 && it.correctIndex in it.choices.indices }
             .groupBy { it.chapterName }
             .values

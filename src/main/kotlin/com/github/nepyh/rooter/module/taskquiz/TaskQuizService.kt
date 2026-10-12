@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.taskquiz
 
 import com.github.nepyh.rooter.common.APP_ZONE
+import com.github.nepyh.rooter.common.matchQuizChapter
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
@@ -57,8 +58,8 @@ const val RETRY_DELAY_MINUTES = 10L
 /** 통과에 필요한 정답 수. AI 가 문항을 덜 줘서 저장된 문항 수가 적어도 그 수 기준으로 계산한다 */
 fun taskQuizPassCount(totalCount: Int): Int = (totalCount * PASS_PERCENT + 99) / 100
 
-/** 퀴즈 출제에 쓸 학년 표시, 학습 범위(과목·단원), 문항 수 */
-private data class TaskQuizContext(val gradeLabel: String, val studyScope: String, val questionCount: Int)
+/** 퀴즈 출제에 쓸 학년 표시, 학습 범위(과목·단원), 문항 수, 문항에 붙일 수 있는 단원 이름 */
+private data class TaskQuizContext(val gradeLabel: String, val studyScope: String, val questionCount: Int, val chapterNames: List<String>)
 
 class TaskQuizService(
     private val llmClient: TaskQuizLlmClient,
@@ -72,7 +73,7 @@ class TaskQuizService(
      * 스케줄러(종료 시각)와 퀴즈 열기([openQuiz])가 동시에 부를 수 있어, 저장할 때 태스크 행을 잠그고 같은 차수가 있으면 만들지 않는다.
      */
     suspend fun generateAttempt(planTaskId: Int, attemptNumber: Int, taskName: String): Boolean {
-        val (gradeLabel, studyScope, questionCount) = newSuspendedTransaction { quizContextOf(planTaskId) }
+        val (gradeLabel, studyScope, questionCount, chapterNames) = newSuspendedTransaction { quizContextOf(planTaskId) }
         // 정답 번호가 보기 범위를 벗어난 문제는 채점할 수 없으니 버리고, AI 가 더 많이 줘도 정한 문항 수까지만 쓴다
         val generated = llmClient.generateQuestions(taskName, gradeLabel, studyScope, questionCount)
             .filter { it.choices.size >= 2 && it.correct_index in it.choices.indices }
@@ -97,6 +98,7 @@ class TaskQuizService(
                 val quizQuestion = TaskQuizQuestionRow.new {
                     this.attempt = attempt
                     questionText = question.question_text
+                    chapterName = matchQuizChapter(question.chapter_name, chapterNames)
                 }
 
                 // AI 는 정답을 앞쪽 보기에 두는 경향이 있어, 저장 전에 보기 순서를 섞는다 (정답 표시·짧은 이유는 보기와 함께 움직인다)
@@ -221,6 +223,7 @@ class TaskQuizService(
                 userId = userId,
                 source = ReviewSource.TASK_QUIZ,
                 sourceQuestionId = question.id.value,
+                chapterName = question.chapterName,
                 questionText = question.questionText,
                 explanation = correctChoice.explanation,
                 choices = choices.map { ReviewChoiceDraft(it.choiceText, it.isCorrect, reason = it.explanation) }
@@ -380,20 +383,22 @@ class TaskQuizService(
      */
     private fun quizContextOf(planTaskId: Int): TaskQuizContext {
         val task = PlanTaskRow.findById(planTaskId)
-            ?: return TaskQuizContext("중학생(학년 정보 없음)", "지정 안 됨", quizQuestionCount(0))
+            ?: return TaskQuizContext("중학생(학년 정보 없음)", "지정 안 됨", quizQuestionCount(0), emptyList())
         val questionCount = quizQuestionCount(task.estimatedMinutes)
         val board = task.dailyPlan.planBoard
 
         val grade = StudentProfileRow.find { StudentProfileTable.user eq board.user.id }.firstOrNull()?.grade
         val gradeLabel = grade?.let { "중학교 ${it}학년" } ?: "중학생(학년 정보 없음)"
 
+        val chapterNames = mutableListOf<String>()
         val studyScope = PlanSubjectRow.find { PlanSubjectTable.planBoardId eq board.id }.joinToString("\n") { subject ->
-            val chapters = orderedChaptersInRange(subject.textbook, subject.startChapter, subject.endChapter)
-                .map { it.chapterName } + listOfNotNull(subject.customRangeText?.takeIf { it.isNotBlank() })
+            val textbookChapters = orderedChaptersInRange(subject.textbook, subject.startChapter, subject.endChapter).map { it.chapterName }
+            chapterNames += textbookChapters // 직접 적은 범위(customRangeText)는 단원이 아니라 리포트 기준에서 뺀다
+            val chapters = textbookChapters + listOfNotNull(subject.customRangeText?.takeIf { it.isNotBlank() })
             "${subject.textbook.subject.name}: ${chapters.joinToString(", ")}"
         }.ifBlank { "지정 안 됨" }
 
-        return TaskQuizContext(gradeLabel, studyScope, questionCount)
+        return TaskQuizContext(gradeLabel, studyScope, questionCount, chapterNames)
     }
 
 }

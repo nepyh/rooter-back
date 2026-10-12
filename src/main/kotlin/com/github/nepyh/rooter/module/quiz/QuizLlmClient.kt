@@ -21,7 +21,8 @@ data class GeneratedQuestion(
     val questionText: String,
     val choices: List<String>,
     val correctIndex: Int,
-    val explanation: String = "" // 풀이 과정. AI 가 빠뜨려도 파싱은 되게 기본값
+    val explanation: String = "", // 풀이 과정. AI 가 빠뜨려도 파싱은 되게 기본값
+    val chapterName: String = "" // 이 문제가 다루는 학습 범위 단원. 범위 밖이면 저장할 때 버린다
 )
 
 @Serializable
