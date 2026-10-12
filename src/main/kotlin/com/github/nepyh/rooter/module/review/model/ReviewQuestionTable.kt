@@ -21,7 +21,7 @@ object ReviewQuestionTable : IntIdTable("review_questions") {
     val sourceType = enumerationByName("source", 20, ReviewSource::class) // ColumnSet.source 와 이름이 겹쳐 sourceType
     // 원본 문항 id (DAILY_QUIZ = daily_quiz_questions.id, TASK_QUIZ = task_quiz_questions.id, CUSTOM = null). 원본이 지워져도 남도록 FK 없음
     val sourceQuestionId = integer("source_question_id").nullable()
-    val chapterName = varchar("chapter_name", 100).nullable() // 맞춤 문제의 약점 단원. 틀린 문제 복사분은 null
+    val chapterName = varchar("chapter_name", 150).nullable() // 문제의 단원. 맞춤 문제는 약점 단원, 틀린 문제 복사분은 원본 문항의 단원 (없으면 null)
     val questionText = text("question_text")
     val explanation = text("explanation").nullable() // 자세한 풀이 (예전 일일 퀴즈는 null)
     val wrongCount = integer("wrong_count").default(0) // 복습에서 틀린 횟수
