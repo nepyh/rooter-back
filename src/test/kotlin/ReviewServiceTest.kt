@@ -68,6 +68,7 @@ class ReviewServiceTest : StringSpec({
             userId = userId,
             source = source,
             sourceQuestionId = sourceQuestionId,
+            chapterName = null,
             questionText = "문제 $sourceQuestionId",
             explanation = "풀이 $sourceQuestionId",
             choices = listOf(
@@ -161,7 +162,7 @@ class ReviewServiceTest : StringSpec({
         seedWrong(userId, 1)
         seedWrong(userId, 1, source = ReviewSource.DAILY_QUIZ) // 출처가 다르면 다른 원본 문항
         transaction(db) {
-            copyWrongQuestionToReview(userId, ReviewSource.TASK_QUIZ, 2, "정답 없는 문제", null, listOf(ReviewChoiceDraft("A", false)))
+            copyWrongQuestionToReview(userId, ReviewSource.TASK_QUIZ, 2, null, "정답 없는 문제", null, listOf(ReviewChoiceDraft("A", false)))
         }
 
         reviewQuestionCount() shouldBe 2L

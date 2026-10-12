@@ -154,6 +154,25 @@ class TaskQuizServiceTest : StringSpec({
         transaction(db) { TaskQuizQuestionTable.selectAll().count() } shouldBe 5L
     }
 
+    "문항마다 학습 범위 단원을 저장하고(범위 밖·빈 값은 null), 틀린 문제 복사분에도 단원이 따라간다" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = true)
+        val userId = lastUserId
+        fun q(n: Int, chapter: String) = GeneratedTaskQuizQuestion(
+            "문제 $n", listOf("A", "B", "C", "D"), 0, "풀이 $n", listOf("", "B 이유", "C 이유", "D 이유"), chapter_name = chapter
+        )
+        // 대단원(Ⅰ 지권의 변화)은 고른 범위(지구계~지권의 구조)에 없어 받지 않는다
+        val service = TaskQuizService(FakeTaskQuizLlmClient(listOf(q(1, "지구계"), q(2, "지권의 구조 "), q(3, "Ⅰ 지권의 변화"), q(4, ""))))
+        service.generateAttempt(taskId, 1, "과학 문제집 30쪽 풀기")
+
+        transaction(db) {
+            TaskQuizQuestionRow.all().sortedBy { it.id.value }.map { it.chapterName }
+        } shouldBe listOf("지구계", "지권의 구조", null, null)
+
+        val second = service.getCurrentQuiz(userId, taskId).questions[1]
+        service.answerQuestion(userId, taskId, second.id, second.choice("B").id)
+        ReviewService().listOpen(userId, cursor = null).questions.single().chapterName shouldBe "지권의 구조"
+    }
+
     "학습 범위도 학생 프로필도 없으면 '지정 안 됨' 과 학년 정보 없음으로 넘긴다" {
         val taskId = seedTask("영어 단어 30개 외우기", grade = null, withScope = false)
         val llm = FakeTaskQuizLlmClient()
