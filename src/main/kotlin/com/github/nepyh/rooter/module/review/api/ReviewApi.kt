@@ -7,6 +7,7 @@ import com.github.nepyh.rooter.module.review.ReviewService
 import com.github.nepyh.rooter.module.review.dto.ReviewAnswerRequest
 import com.github.nepyh.rooter.module.review.dto.ReviewAnswerResponse
 import com.github.nepyh.rooter.module.review.dto.ReviewQuestionListResponse
+import com.github.nepyh.rooter.module.review.dto.ReviewReportResponse
 import com.github.nepyh.rooter.module.review.exception.ReviewValidationException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -60,6 +61,32 @@ fun ReviewApi(reviewService: ReviewService) = ApiRoute("review-questions") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "cursor 가 정수가 아니거나 limit 이 1~50 밖 (code=REVIEW_INVALID_PAGE)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        get("report") {
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            call.respond(HttpStatusCode.OK, reviewService.chapterReport(userId))
+        }.describe {
+            tag("Review")
+            summary = "단원별 오답률 리포트"
+            description = "일일 퀴즈 제출과 태스크 퀴즈 답변을 문항의 단원으로 묶어 오답률(틀린 수 ÷ 푼 수, % 반올림)을 오답률 높은 단원부터 반환. " +
+                "openReviewCount 는 그 단원에서 아직 맞히지 않은 복습 문제 수. 복습에서 다시 푼 기록은 오답률에 넣지 않음. " +
+                "단원을 알 수 없는 문항(단원 기록 기능 전에 푼 퀴즈, 학습 범위 밖 문항)은 chapters 에서 빠지고 untaggedAnsweredCount 로만 셈. " +
+                "푼 퀴즈가 없으면 chapters 는 빈 배열"
+            responses {
+                HttpStatusCode.OK {
+                    description = "조회 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<ReviewReportResponse>()
+                    }
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
