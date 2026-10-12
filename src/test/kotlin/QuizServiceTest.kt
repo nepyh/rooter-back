@@ -10,6 +10,7 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
@@ -28,7 +29,10 @@ import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -42,7 +46,9 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
+import kotlin.random.Random
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -102,7 +108,8 @@ class QuizServiceTest : StringSpec({
     // 퀴즈 생성은 NICE 를 쓰지 않는다 (QuizService 생성자에 필요할 뿐)
     val noNiceFetcher = SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") })))
 
-    fun seedDailyPlan(): Pair<Int, Int> = transaction(db) {
+    /** 30분짜리 완료한 할일이 completedTasks 개 있는 일일 계획을 만든다 */
+    fun seedDailyPlan(completedTasks: Int = 0): Pair<Int, Int> = transaction(db) {
         val user = UserRow.new {
             email = "quiz@test.com"
             username = "tester"
@@ -120,6 +127,12 @@ class QuizServiceTest : StringSpec({
             planBoard = board
             planDate = day
         }
+        repeat(completedTasks) { i ->
+            PlanTaskRow.new {
+                this.dailyPlan = dailyPlan; taskName = "할일 $i"; isCompleted = true
+                startTime = LocalTime.of(16 + i, 0); endTime = LocalTime.of(16 + i, 30); estimatedMinutes = 30
+            }
+        }
         user.id.value to dailyPlan.id.value
     }
 
@@ -136,7 +149,7 @@ class QuizServiceTest : StringSpec({
         val second = service.generateQuiz(userId, day)
 
         llm.calls.get() shouldBe 1
-        storedQuestionCount(dailyPlanId) shouldBe 5L
+        storedQuestionCount(dailyPlanId) shouldBe 4L
         second.questions.map { it.id } shouldBe first.questions.map { it.id }
         second.questions.map { q -> q.choices.map { it.id } } shouldBe first.questions.map { q -> q.choices.map { it.id } }
         service.getQuiz(userId, dailyPlanId).questions.map { it.id } shouldBe first.questions.map { it.id }
@@ -149,7 +162,7 @@ class QuizServiceTest : StringSpec({
         transaction(db) {
             DailyQuizQuestionTable.selectAll().where { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
                 .orderBy(DailyQuizQuestionTable.id).map { it[DailyQuizQuestionTable.explanation] }
-        } shouldBe (1..5).map { "풀이 $it" }
+        } shouldBe (1..4).map { "풀이 $it" }
     }
 
     "generateQuiz: 동시에 두 번 요청돼도 한 세트만 저장되고 둘 다 같은 퀴즈를 받는다" {
@@ -162,7 +175,7 @@ class QuizServiceTest : StringSpec({
             listOf(async { service.generateQuiz(userId, day) }, async { service.generateQuiz(userId, day) }).awaitAll()
         }
 
-        storedQuestionCount(dailyPlanId) shouldBe 5L
+        storedQuestionCount(dailyPlanId) shouldBe 4L
         results[1].questions.map { it.id } shouldBe results[0].questions.map { it.id }
     }
 
@@ -196,6 +209,108 @@ class QuizServiceTest : StringSpec({
         QuizService(FakeQuizLlmClient(), noNiceFetcher).generateQuiz(userId, day).subjects shouldBe quiz.subjects
     }
 
+    // 같은 날 보드가 여러 개인 경우 (#241). 과학 교과서: 생물의 구성(식물세포) / 태양계(태양, 행성)
+    fun seedTwoBoards(firstBoardHasRange: Boolean): Triple<Int, Int, Int> = transaction(db) {
+        val subject = SubjectRow.find { SubjectTable.name eq "과학" }.firstOrNull() ?: SubjectRow.new { name = "과학" }
+        val textbook = TextbookRow.new { this.subject = subject; title = "과학 교과서" }
+        fun chapter(name: String, order: Int, parent: ChapterRow? = null) = ChapterRow.new {
+            this.textbook = textbook; chapterName = name; chapterOrder = order; parentId = parent?.id?.value
+        }
+        val life = chapter("생물의 구성", 1)
+        chapter("식물세포", 1, life)
+        val solar = chapter("태양계", 2)
+        chapter("태양", 1, solar)
+
+        val user = UserRow.new { email = "boards@test.com"; username = "tester"; password = "x"; createdAt = OffsetDateTime.now() }
+        fun board(title: String) = PlanBoardRow.new {
+            this.user = user; this.title = title; startDate = day; endDate = day; createdAt = OffsetDateTime.now()
+        }.also { DailyPlanRow.new { planBoard = it; planDate = day } }
+
+        // 먼저 만든 보드: 생물 범위가 있는 보드, 또는 앱이 자동으로 만드는 범위 없는 기본 보드
+        val first = board(if (firstBoardHasRange) "생물 수행평가" else "기본 플랜보드")
+        if (firstBoardHasRange) {
+            PlanSubjectRow.new { planBoard = first; this.textbook = textbook; startChapter = life; endChapter = life }
+        }
+        val science = board("과학 시험")
+        PlanSubjectRow.new { planBoard = science; this.textbook = textbook; startChapter = solar; endChapter = solar }
+        Triple(user.id.value, first.id.value, science.id.value)
+    }
+
+    "generateQuiz: planBoardId 를 주면 같은 날 다른 보드가 있어도 그 보드의 학습 범위로 만든다" {
+        val (userId, bioBoardId, scienceBoardId) = seedTwoBoards(firstBoardHasRange = true)
+        val llm = FakeQuizLlmClient()
+        val service = QuizService(llm, noNiceFetcher)
+
+        val science = service.generateQuiz(userId, day, scienceBoardId)
+        llm.lastContext shouldContain "태양계"
+        llm.lastContext shouldNotContain "식물세포"
+
+        // 보드마다 퀴즈가 따로 만들어진다
+        val bio = service.generateQuiz(userId, day, bioBoardId)
+        llm.lastContext shouldContain "식물세포"
+        (bio.dailyPlanId == science.dailyPlanId) shouldBe false
+        llm.calls.get() shouldBe 2
+    }
+
+    "generateQuiz: planBoardId 를 생략하면 학습 범위가 없는 기본 보드가 먼저 있어도 범위 있는 보드로 만든다" {
+        val (userId, _, _) = seedTwoBoards(firstBoardHasRange = false)
+        val llm = FakeQuizLlmClient()
+
+        QuizService(llm, noNiceFetcher).generateQuiz(userId, day)
+
+        llm.lastContext shouldContain "태양계"
+    }
+
+    "generateQuiz: 남의 플랜보드나 없는 플랜보드를 주면 NoPlanForDateException" {
+        val (_, _, scienceBoardId) = seedTwoBoards(firstBoardHasRange = true)
+        val (otherUserId, _) = seedDailyPlan()
+        val service = QuizService(FakeQuizLlmClient(), noNiceFetcher)
+
+        shouldThrow<QuizValidationException.NoPlanForDateException> { service.generateQuiz(otherUserId, day, scienceBoardId) }
+        shouldThrow<QuizValidationException.NoPlanForDateException> { service.generateQuiz(otherUserId, day, 999_999) }
+    }
+
+    "generateQuiz: 그날 공부한 시간(완료한 할일 예상 시간 합)에 맞춘 문항 수를 AI 에 요청하고 그만큼 저장한다" {
+        val (userId, dailyPlanId) = seedDailyPlan(completedTasks = 4) // 30분 × 4 = 120분 → 7문항
+        val llm = FakeQuizLlmClient()
+
+        val quiz = QuizService(llm, noNiceFetcher).generateQuiz(userId, day)
+
+        llm.lastCount shouldBe 7
+        quiz.questions.size shouldBe 7
+        storedQuestionCount(dailyPlanId) shouldBe 7L
+    }
+
+    "generateQuiz: AI 가 요청보다 많이 주면 정한 문항 수까지만 저장한다" {
+        val (userId, dailyPlanId) = seedDailyPlan(completedTasks = 2) // 60분 → 5문항
+
+        val quiz = QuizService(FakeQuizLlmClient(questionCount = 8), noNiceFetcher).generateQuiz(userId, day)
+
+        quiz.questions.size shouldBe 5
+        storedQuestionCount(dailyPlanId) shouldBe 5L
+    }
+
+    "generateQuiz: 보기 순서를 섞어 저장하고 응답도 그 순서로 주며, 정답 표시는 보기와 함께 움직인다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val quiz = QuizService(FakeQuizLlmClient(), noNiceFetcher, random = Random(7)).generateQuiz(userId, day)
+
+        // 문항별 보기를 저장 순서대로: (보기, 정답 여부)
+        val stored = transaction(db) {
+            DailyQuizQuestionTable.selectAll().where { DailyQuizQuestionTable.dailyPlanId eq dailyPlanId }
+                .orderBy(DailyQuizQuestionTable.id).map { question ->
+                    DailyQuizChoiceTable.selectAll().where { DailyQuizChoiceTable.questionId eq question[DailyQuizQuestionTable.id] }
+                        .orderBy(DailyQuizChoiceTable.id).map { it[DailyQuizChoiceTable.choiceText] to it[DailyQuizChoiceTable.isCorrect] }
+                }
+        }
+        quiz.questions.map { q -> q.choices.map { it.choiceText } } shouldBe stored.map { choices -> choices.map { it.first } }
+        stored.forEach { choices ->
+            choices.map { it.first }.sorted() shouldBe listOf("A", "B", "C", "D")
+            choices.single { it.second }.first shouldBe "A"
+        }
+        // AI 는 모든 문항의 정답을 첫 보기로 줬지만 저장된 정답 위치는 한 곳에 몰리지 않는다
+        stored.map { choices -> choices.indexOfFirst { it.second } }.toSet().size shouldBeGreaterThan 1
+    }
+
     "generateQuiz: 해당 날짜에 계획이 없으면 NoPlanForDateException" {
         val (userId, _) = seedDailyPlan()
 
@@ -206,15 +321,19 @@ class QuizServiceTest : StringSpec({
 })
 
 private class FakeQuizLlmClient(
-    private val questionCount: Int = 5,
+    private val questionCount: Int? = null, // null 이면 요청받은 count 만큼 만든다
     private val delayMillis: Long = 0
 ) : QuizLlmClient(dummyAppConfig()) {
     val calls = AtomicInteger(0)
+    @Volatile var lastContext: String = ""
+    @Volatile var lastCount: Int = 0
 
     override suspend fun generateQuestions(context: String, count: Int): List<GeneratedQuestion> {
         val n = calls.incrementAndGet()
+        lastContext = context
+        lastCount = count
         if (delayMillis > 0) delay(delayMillis)
-        return (1..questionCount).map { i ->
+        return (1..(questionCount ?: count)).map { i ->
             GeneratedQuestion(
                 questionText = "문제 $i (호출 $n)",
                 choices = listOf("A", "B", "C", "D"),

@@ -44,6 +44,7 @@ import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultTable
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
@@ -99,6 +100,7 @@ class PlanBoardServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS level_test_results CASCADE")
             exec("DROP TABLE IF EXISTS student_profiles CASCADE")
             exec("DROP TABLE IF EXISTS user_unavailable_times CASCADE")
+            exec("DROP TABLE IF EXISTS task_quiz_attempts CASCADE")
             exec("DROP TABLE IF EXISTS plan_subjects CASCADE")
             exec("DROP TABLE IF EXISTS plan_tasks CASCADE")
             exec("DROP TABLE IF EXISTS daily_plans CASCADE")
@@ -110,7 +112,9 @@ class PlanBoardServiceTest : StringSpec({
             SchemaUtils.create(
                 UserTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable,
                 // plan-generation 이 등급·프로필·불가 시간을 조회한다
-                LevelTestResultTable, StudentProfileTable, UnavailableTimeTable
+                LevelTestResultTable, StudentProfileTable, UnavailableTimeTable,
+                // 태스크 완료 처리가 퀴즈로 확정된 태스크인지 조회한다
+                TaskQuizAttemptTable
             )
             // DDL(rooter-ddl) 의 uq_daily_plans_board_date 와 동일한 제약 — insertIgnore 레이스 방지 검증용
             exec("ALTER TABLE daily_plans ADD CONSTRAINT uq_daily_plans_board_date UNIQUE (plan_board_id, plan_date)")
@@ -123,6 +127,7 @@ class PlanBoardServiceTest : StringSpec({
             LevelTestResultTable.deleteAll()
             StudentProfileTable.deleteAll()
             UnavailableTimeTable.deleteAll()
+            TaskQuizAttemptTable.deleteAll()
             PlanTaskTable.deleteAll()
             PlanSubjectTable.deleteAll()
             DailyPlanTable.deleteAll()

@@ -38,7 +38,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 
 | # | 마일스톤 | 진행 | 상태 |
 |---|---|---|---|
-| M1 | 플랜보드 코어 | 9/10 | doing |
+| M1 | 플랜보드 코어 | 9/11 | doing |
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 6/8 | doing |
@@ -46,7 +46,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
 | M8 | AI 계획 생성·스케줄링 | 7/10 | doing |
-| M9 | 퀴즈 고도화 | 7/10 | doing |
+| M9 | 퀴즈 고도화 | 8/13 | doing |
 | M10 | 챗봇 재조정 | 5/5 | done |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
@@ -82,6 +82,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 - [x] done RB-008 daily_plans 중복 생성 레이스 방지 — insertIgnore `c18cf9d` + `rooter-ddl` #11 closed(유니크 제약)
 - [x] done RB-009 DB 통합 테스트 (`PlanBoardServiceTest`, 18케이스) — `a5680c7`
 - [ ] todo RB-010 scheduler DAO 전환 — 미지시 항목
+- [ ] doing RB-130 퀴즈로 결과가 확정된 할일(통과 / 3차까지 불합격)은 완료 상태 변경 금지 (#244) — `completeTask` 에서 400 `TASK_FINALIZED`, 같은 값은 성공. PR #248 open (`35f894b`·`b1bc488`) · `./gradlew test` 전체 통과 (develop 합친 상태 211건) · 프론트는 `completeTask` 를 정의만 하고 호출하지 않아 영향 없음. DB 변경 없음
 
 ## M2. 컨벤션·구조 정비
 
@@ -165,7 +166,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 - [x] done RB-075 날짜별 바쁜 시간·빈 시간 조회 API `GET /busy-times` (B-04) — PR #222 (10-01) · 운영 200 확인
 - [x] done RB-076 서버 "오늘"을 한국 시간 기준으로 (UTC 00~09시 어제 처리 문제) (B-03) — PR #194 (09-29)
 - [ ] todo RB-077 자정을 넘기는 할일 (B-09) — 지금은 `INVALID_TIME_RANGE` 로 거부. 정책 결정 필요
-- [ ] todo RB-078 같은 날 dailyPlanId 가 여러 개(보드 여러 개)일 때 챗봇·퀴즈 기준 (B-07) — 정책 결정 필요
+- [ ] doing RB-078 같은 날 dailyPlanId 가 여러 개(보드 여러 개)일 때 챗봇·퀴즈 기준 (B-07) — 일일 퀴즈 생성에 `planBoardId` 추가, 생략 시 학습 범위 있는 보드 우선 (이슈 #241, PR #246 open, 테스트 199건 통과). 챗봇은 경로의 dailyPlanId 로 이미 보드가 정해짐. 프론트가 `planBoardId` 를 보내야 완결
 - [ ] todo RB-079 일일 퀴즈 복습 할일·챗봇 재조정·퀴즈 실패 밀기도 다른 보드 할일을 피하도록 — 지금은 같은 보드의 그날 할일만 봄
 
 ## M9. 퀴즈 고도화
@@ -182,7 +183,10 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 - [x] done RB-086 퀴즈 응답에 과목 정보 `subjects` / `subject` (B-15) — PR #228 (10-01)
 - [ ] doing RB-087 완료 버튼으로 퀴즈를 열면 종료 시각 전에도 바로 생성 (`GET .../quiz` 에서 생성) — PR #236 develop 머지 (10-04) · dev 서버에서 종료 시각 전 열기 200·6초·5문항 확인. **main(운영) 반영 대기**
 - [ ] todo RB-088 학습 범위 없는 날 퀴즈가 엉뚱해지는 문제 (B-08)
-- [ ] todo RB-089 보기 순서 섞기 (AI 가 정한 순서 그대로 나가 정답 위치가 쏠릴 수 있음) — DB 변경 없음
+- [ ] doing RB-089 보기 순서 섞기 (AI 가 정한 순서 그대로 나가 정답 위치가 쏠릴 수 있음) — 일일·태스크 퀴즈 모두 저장 전에 섞음, 정답 표시·오답 이유는 보기와 함께 이동. PR #249 open (`faa52d5`·`d32b075`) · `./gradlew test` 210건 3회 연속 통과, #248 과 합친 상태 213건 통과. DB·응답 형식·프론트 변경 없음
+- [ ] doing RB-129 퀴즈 문항 수 가변 (#243) — 공부 시간 기준 30분 이하 4·1시간 이하 5·초과 7문항 (태스크 퀴즈는 할일 estimatedMinutes, 일일 퀴즈는 완료 할일 합), 태스크 퀴즈 통과 70점 이상 (`passCount` 응답 추가). 문항이 덜 저장되면 통과 못 하던 문제도 수정 — PR #247 open (`3a551e4`·`e4ac66c`·`0618633`) · `./gradlew test` 전체 통과 · 프론트(`rooter-front`)는 `questions.length`·서버 `passed` 기준이라 영향 없음 확인. DB 변경 없음
+- [x] done RB-131 복습 퀴즈 1단계 — 일일·태스크 퀴즈 오답 자동 수집(`review_questions`·`review_choices`), `GET /review-questions`(id 커서, 50개), `POST /review-questions/{id}/answer`(맞히면 cleared, 틀리면 wrongCount) — PR #250 (10-12, develop) · rooter-ddl #26 머지
+- [ ] doing RB-132 복습 퀴즈 2단계 — 일일 퀴즈 약점 단원마다 맞춤 문제 2개를 `CUSTOM` 으로 복습 목록에 추가(보기별 이유·풀이 포함, 복습 태스크 배치와 동시 실행, 실패해도 제출 성공), 응답에 `customReviewQuestionCount` (이슈 #251, PR #252 open, `1a842e5`·`f3bec2e`) · `./gradlew test` 224건 통과 · DB 변경 없음. 다음: 3단계 단원별 오답률 리포트
 
 ## M10. 챗봇 재조정
 
@@ -238,7 +242,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 | 6 | RB-115 태스크 source 필드 (B-13) | M | rooter-ddl | DDL 선행, dev DB 먼저 |
 | 7 | RB-060 Notification (B-12) | L | 브랜치 재정렬 | `feature/notification-settings` 를 main 위에 다시 얹기 |
 | 8 | RB-014 planboard 네이밍 | M | rooter-ddl #10 | DDL 선행 필요 (블로커) |
-| - | 정책 결정 대기 | - | 팀 결정 | RB-077 자정 넘김 · RB-078 dailyPlanId 여러 개 · RB-116 JWT 만료 · RB-126 도메인 · RB-127 DB 초기화 |
+| - | 정책 결정 대기 | - | 팀 결정 | RB-077 자정 넘김 · RB-116 JWT 만료 · RB-126 도메인 · RB-127 DB 초기화 |
 
 ## 폐기/보류
 

@@ -1,5 +1,8 @@
 import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.config.EnvironmentMode
+import com.github.nepyh.rooter.module.planboard.PlanTaskService
+import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.planboard.guessTaskSubject
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
@@ -15,9 +18,15 @@ import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
+import com.github.nepyh.rooter.module.review.ReviewService
+import com.github.nepyh.rooter.module.review.model.ReviewChoiceTable
+import com.github.nepyh.rooter.module.review.model.ReviewQuestionTable
 import com.github.nepyh.rooter.module.taskquiz.GeneratedTaskQuizQuestion
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizLlmClient
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
+import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResponse
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceRow
+import com.github.nepyh.rooter.module.taskquiz.taskQuizPassCount
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizNotFoundException
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizValidationException
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
@@ -30,6 +39,7 @@ import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -38,6 +48,7 @@ import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
+import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
@@ -47,6 +58,7 @@ import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
+import kotlin.random.Random
 
 /**
  * 태스크 완료 퀴즈 생성 통합 테스트 (로컬 PostgreSQL 필요). LLM 은 [FakeTaskQuizLlmClient] 로 고정 응답을 준다.
@@ -71,12 +83,14 @@ class TaskQuizServiceTest : StringSpec({
     beforeSpec {
         transaction(db) {
             listOf(
-                "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "plan_subjects",
+                "review_choices", "review_questions", "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "plan_subjects",
                 "daily_plans", "plan_boards", "chapters", "textbooks", "subjects", "student_profiles", "users"
             ).forEach { exec("DROP TABLE IF EXISTS $it CASCADE") }
             SchemaUtils.create(
                 UserTable, StudentProfileTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable,
-                DailyPlanTable, PlanTaskTable, TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable
+                DailyPlanTable, PlanTaskTable, TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable,
+                // 틀린 문제를 복습 목록으로 복사한다 (users 를 지우면 cascade 로 함께 지워짐)
+                ReviewQuestionTable, ReviewChoiceTable
             )
         }
     }
@@ -103,8 +117,9 @@ class TaskQuizServiceTest : StringSpec({
     var lastUserId = -1 // seedTask 가 만든 유저 id. answerQuestion/submitQuiz 테스트에서 소유자로 씀
 
     /** 사용자가 직접 추가한 태스크 하나를 만든다. withScope 면 플랜보드에 과학 단원 범위를, grade 가 있으면 학생 프로필을 붙인다 */
-    fun seedTask(taskName: String, grade: Int?, withScope: Boolean): Int = transaction(db) {
-        val user = UserRow.new { email = "tq@test.com"; username = "t"; password = "x"; createdAt = OffsetDateTime.now() }
+    fun seedTask(taskName: String, grade: Int?, withScope: Boolean, minutes: Int = 45): Int = transaction(db) {
+        // 한 테스트에서 여러 번 불러도 이메일(유니크)이 겹치지 않게 한다
+        val user = UserRow.new { email = "tq${UserRow.count()}@test.com"; username = "t"; password = "x"; createdAt = OffsetDateTime.now() }
         lastUserId = user.id.value
         if (grade != null) {
             StudentProfileRow.new { this.user = user; schoolId = "B107132131"; this.grade = grade; classNumber = 1 }
@@ -123,7 +138,7 @@ class TaskQuizServiceTest : StringSpec({
         val dailyPlan = DailyPlanRow.new { planBoard = board; planDate = day }
         PlanTaskRow.new {
             this.dailyPlan = dailyPlan; this.taskName = taskName
-            startTime = LocalTime.of(16, 0); endTime = LocalTime.of(16, 30); estimatedMinutes = 30
+            startTime = LocalTime.of(16, 0); endTime = LocalTime.of(16, 0).plusMinutes(minutes.toLong()); estimatedMinutes = minutes
         }.id.value
     }
 
@@ -187,7 +202,7 @@ class TaskQuizServiceTest : StringSpec({
     }
 
     suspend fun failAll(service: TaskQuizService, userId: Int, taskId: Int) {
-        service.getCurrentQuiz(userId, taskId).questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choices[1].id) }
+        service.getCurrentQuiz(userId, taskId).questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choice("B").id) }
         service.submitQuiz(userId, taskId)
     }
 
@@ -226,7 +241,7 @@ class TaskQuizServiceTest : StringSpec({
         val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
         val userId = lastUserId
         val service = TaskQuizService(FakeTaskQuizLlmClient())
-        service.openQuiz(userId, taskId).questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choices[0].id) }
+        service.openQuiz(userId, taskId).questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choice("A").id) }
         service.submitQuiz(userId, taskId).passed shouldBe true
 
         service.openQuiz(userId, taskId).attemptNumber shouldBe 1
@@ -265,7 +280,7 @@ class TaskQuizServiceTest : StringSpec({
         val service = TaskQuizService(FakeTaskQuizLlmClient())
         service.generateAttempt(taskId, 1, "수학 문제집 풀기")
         val firstQuestion = service.getCurrentQuiz(userId, taskId).questions.first()
-        val correctChoiceId = firstQuestion.choices[0].id // FakeTaskQuizLlmClient 는 correct_index=0
+        val correctChoiceId = firstQuestion.choice("A").id // FakeTaskQuizLlmClient 는 "A" 가 정답
 
         val response = service.answerQuestion(userId, taskId, firstQuestion.id, correctChoiceId)
 
@@ -282,14 +297,31 @@ class TaskQuizServiceTest : StringSpec({
         val service = TaskQuizService(FakeTaskQuizLlmClient())
         service.generateAttempt(taskId, 1, "수학 문제집 풀기")
         val firstQuestion = service.getCurrentQuiz(userId, taskId).questions.first()
-        val wrongChoiceId = firstQuestion.choices[1].id
+        val wrongChoiceId = firstQuestion.choice("B").id
 
         val response = service.answerQuestion(userId, taskId, firstQuestion.id, wrongChoiceId)
 
         response.isCorrect shouldBe false
-        response.correctChoiceId shouldBe firstQuestion.choices[0].id
+        response.correctChoiceId shouldBe firstQuestion.choice("A").id
         response.reason shouldBe "B 가 틀린 이유" // 고른 오답 보기의 짧은 이유
         response.explanation shouldBe "자세한 풀이 1" // 정답 보기의 자세한 풀이
+    }
+
+    "answerQuestion: 틀린 문제는 보기별 이유·풀이와 함께 복습 목록에 들어가고, 맞힌 문제는 들어가지 않는다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val userId = lastUserId
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+        service.generateAttempt(taskId, 1, "수학 문제집 풀기")
+        val (first, second) = service.getCurrentQuiz(userId, taskId).questions
+
+        service.answerQuestion(userId, taskId, first.id, first.choices.first { it.choiceText == "A" }.id) // 맞힘
+        service.answerQuestion(userId, taskId, second.id, second.choices.first { it.choiceText == "C" }.id) // 틀림
+
+        val copied = ReviewService().listOpen(userId, cursor = null).questions.single()
+        listOf(copied.source, copied.questionText) shouldBe listOf("TASK_QUIZ", "문제 2")
+        copied.choices.map { it.choiceText }.sorted() shouldBe listOf("A", "B", "C", "D")
+        val wrong = ReviewService().answer(userId, copied.id, copied.choices.first { it.choiceText == "B" }.id)
+        listOf(wrong.isCorrect, wrong.reason, wrong.explanation, wrong.cleared) shouldBe listOf(false, "B 가 틀린 이유", "자세한 풀이 2", false)
     }
 
     "answerQuestion: 이미 답한 문제에 다시 답하면 AlreadyAnsweredException — 정답을 본 뒤 답 변경을 막는다" {
@@ -298,10 +330,10 @@ class TaskQuizServiceTest : StringSpec({
         val service = TaskQuizService(FakeTaskQuizLlmClient())
         service.generateAttempt(taskId, 1, "수학 문제집 풀기")
         val firstQuestion = service.getCurrentQuiz(userId, taskId).questions.first()
-        service.answerQuestion(userId, taskId, firstQuestion.id, firstQuestion.choices[1].id)
+        service.answerQuestion(userId, taskId, firstQuestion.id, firstQuestion.choice("B").id)
 
         shouldThrow<TaskQuizValidationException.AlreadyAnsweredException> {
-            service.answerQuestion(userId, taskId, firstQuestion.id, firstQuestion.choices[0].id)
+            service.answerQuestion(userId, taskId, firstQuestion.id, firstQuestion.choice("A").id)
         }
     }
 
@@ -311,7 +343,7 @@ class TaskQuizServiceTest : StringSpec({
         val service = TaskQuizService(FakeTaskQuizLlmClient())
         service.generateAttempt(taskId, 1, "수학 문제집 풀기")
         val questions = service.getCurrentQuiz(userId, taskId).questions
-        val choiceIdFromAnotherQuestion = questions[1].choices[0].id
+        val choiceIdFromAnotherQuestion = questions[1].choice("A").id
 
         shouldThrow<TaskQuizValidationException.InvalidAnswerException> {
             service.answerQuestion(userId, taskId, questions[0].id, choiceIdFromAnotherQuestion)
@@ -324,7 +356,7 @@ class TaskQuizServiceTest : StringSpec({
         val service = TaskQuizService(FakeTaskQuizLlmClient())
         service.generateAttempt(taskId, 1, "수학 문제집 풀기")
         val questions = service.getCurrentQuiz(userId, taskId).questions
-        questions.take(4).forEach { service.answerQuestion(userId, taskId, it.id, it.choices[0].id) }
+        questions.take(4).forEach { service.answerQuestion(userId, taskId, it.id, it.choice("A").id) }
 
         shouldThrow<TaskQuizValidationException.IncompleteAnswersException> {
             service.submitQuiz(userId, taskId)
@@ -337,7 +369,7 @@ class TaskQuizServiceTest : StringSpec({
         val service = TaskQuizService(FakeTaskQuizLlmClient())
         service.generateAttempt(taskId, 1, "수학 문제집 풀기")
         val questions = service.getCurrentQuiz(userId, taskId).questions
-        questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choices[0].id) } // 전부 정답(index 0)
+        questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choice("A").id) } // 전부 정답("A")
 
         val result = service.submitQuiz(userId, taskId)
 
@@ -353,7 +385,7 @@ class TaskQuizServiceTest : StringSpec({
         val service = TaskQuizService(FakeTaskQuizLlmClient())
         service.generateAttempt(taskId, 1, "수학 문제집 풀기")
         val questions = service.getCurrentQuiz(userId, taskId).questions
-        questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choices[0].id) }
+        questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choice("A").id) }
         service.submitQuiz(userId, taskId)
 
         shouldThrow<TaskQuizValidationException.AlreadySubmittedException> {
@@ -366,7 +398,7 @@ class TaskQuizServiceTest : StringSpec({
         val service = TaskQuizService(FakeTaskQuizLlmClient())
         service.generateAttempt(taskId, 1, "수학 문제집 풀기")
         val questions = service.getCurrentQuiz(userId, taskId).questions
-        questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choices[1].id) } // 전부 오답
+        questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choice("B").id) } // 전부 오답
 
         val response = service.submitQuiz(userId, taskId)
 
@@ -380,12 +412,58 @@ class TaskQuizServiceTest : StringSpec({
         val service = TaskQuizService(FakeTaskQuizLlmClient())
         service.generateAttempt(taskId, 1, "수학 문제집 풀기")
         val first = service.getCurrentQuiz(userId, taskId).questions.first()
-        service.answerQuestion(userId, taskId, first.id, first.choices[2].id)
+        service.answerQuestion(userId, taskId, first.id, first.choice("C").id)
 
         val questions = service.getCurrentQuiz(userId, taskId).questions
 
-        questions.first().selectedChoiceId shouldBe first.choices[2].id
+        questions.first().selectedChoiceId shouldBe first.choice("C").id
         questions.drop(1).map { it.selectedChoiceId } shouldBe List(4) { null }
+    }
+
+    /** 채점이 끝난 퀴즈 차수를 넣고 태스크 완료 상태를 퀴즈 결과대로 맞춘다 */
+    fun seedGradedAttempt(taskId: Int, attemptNumber: Int, passed: Boolean) = transaction(db) {
+        TaskQuizAttemptTable.insert {
+            it[planTaskId] = taskId; it[this.attemptNumber] = attemptNumber; it[totalCount] = 5
+            it[correctCount] = if (passed) 5 else 0; it[this.passed] = passed; it[createdAt] = OffsetDateTime.now()
+        }
+        PlanTaskRow[taskId].isCompleted = passed
+    }
+
+    "completeTask: 퀴즈를 통과한 태스크는 미완료로 되돌릴 수 없다 (같은 값은 그대로 성공)" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        seedGradedAttempt(taskId, 1, passed = true)
+
+        shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
+            PlanTaskService().completeTask(lastUserId, taskId, false)
+        }
+        PlanTaskService().completeTask(lastUserId, taskId, true).isCompleted shouldBe true
+        transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe true
+    }
+
+    "completeTask: 3차까지 모두 떨어져 실패가 확정된 태스크는 완료로 바꿀 수 없다" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        (1..3).forEach { seedGradedAttempt(taskId, it, passed = false) }
+
+        shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
+            PlanTaskService().completeTask(lastUserId, taskId, true)
+        }
+        transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe false
+    }
+
+    "completeTask: 아직 재시도가 남았거나 퀴즈가 없는 태스크는 자유롭게 완료·취소할 수 있다" {
+        val retrying = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        seedGradedAttempt(retrying, 1, passed = false)
+        PlanTaskService().completeTask(lastUserId, retrying, true).isCompleted shouldBe true
+        PlanTaskService().completeTask(lastUserId, retrying, false).isCompleted shouldBe false
+
+        val noQuiz = transaction(db) {
+            PlanTaskRow.new {
+                dailyPlan = PlanTaskRow[retrying].dailyPlan; taskName = "영어 단어 외우기"
+                startTime = LocalTime.of(17, 0); endTime = LocalTime.of(17, 30); estimatedMinutes = 30
+            }.id.value
+        }
+        PlanTaskService().completeTask(lastUserId, noQuiz, true).isCompleted shouldBe true
+        PlanTaskService().completeTask(lastUserId, noQuiz, false).isCompleted shouldBe false
     }
 
     "generateAttempt: 정답 번호가 보기 범위를 벗어난 문제는 저장하지 않는다" {
@@ -399,22 +477,126 @@ class TaskQuizServiceTest : StringSpec({
         transaction(db) { TaskQuizQuestionTable.selectAll().count() } shouldBe 4L
         transaction(db) { TaskQuizAttemptTable.selectAll().single()[TaskQuizAttemptTable.totalCount] } shouldBe 4
     }
+
+    "generateAttempt: 보기 순서를 섞어 저장하고, 정답 표시와 오답 보기의 짧은 이유는 보기와 함께 움직인다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        TaskQuizService(FakeTaskQuizLlmClient(), random = Random(7)).generateAttempt(taskId, 1, "수학 문제집 풀기")
+
+        // 문항별 보기를 저장(=응답) 순서대로: (보기, 정답 여부, 풀이·이유)
+        val stored = transaction(db) {
+            TaskQuizQuestionRow.all().sortedBy { it.id.value }.map { question ->
+                TaskQuizChoiceRow.find { TaskQuizChoiceTable.questionId eq question.id }.sortedBy { it.id.value }
+                    .map { Triple(it.choiceText, it.isCorrect, it.explanation) }
+            }
+        }
+        stored.forEachIndexed { i, choices ->
+            choices.map { it.first }.sorted() shouldBe listOf("A", "B", "C", "D")
+            choices.single { it.second }.first shouldBe "A"
+            choices.associate { it.first to it.third } shouldBe mapOf(
+                "A" to "자세한 풀이 ${i + 1}", "B" to "B 가 틀린 이유", "C" to "C 가 틀린 이유", "D" to "D 가 틀린 이유"
+            )
+        }
+        // AI 는 모든 문항의 정답을 첫 보기로 줬지만 저장된 정답 위치는 한 곳에 몰리지 않는다
+        stored.map { choices -> choices.indexOfFirst { it.second } }.toSet().size shouldBeGreaterThan 1
+    }
+
+    "quizQuestionCount: 30분 이하 4문항, 1시간 이하 5문항, 1시간 초과 7문항" {
+        listOf(0, 20, 30, 31, 60, 61, 120).map { quizQuestionCount(it) } shouldBe listOf(4, 4, 4, 5, 5, 7, 7)
+    }
+
+    "taskQuizPassCount: 70점 이상 — 3문항 3개, 4문항 3개, 5문항 4개, 7문항 5개" {
+        listOf(1, 3, 4, 5, 7).map { taskQuizPassCount(it) } shouldBe listOf(1, 3, 3, 4, 5)
+    }
+
+    "submitQuiz: 30분 할일은 4문항이고 3개 맞으면 통과, 2개면 불합격" {
+        suspend fun solve(correct: Int): Boolean {
+            val taskId = seedTask("영어 단어 외우기", grade = null, withScope = false, minutes = 30)
+            val userId = lastUserId
+            val service = TaskQuizService(FakeTaskQuizLlmClient())
+            val quiz = service.openQuiz(userId, taskId)
+            quiz.questions.size shouldBe 4
+            quiz.passCount shouldBe 3
+            quiz.questions.forEachIndexed { i, q -> service.answerQuestion(userId, taskId, q.id, q.choice(if (i < correct) "A" else "B").id) }
+            return service.submitQuiz(userId, taskId).passed
+        }
+
+        solve(correct = 3) shouldBe true
+        solve(correct = 2) shouldBe false
+    }
+
+    "generateAttempt: 할일 길이에 맞춘 문항 수를 AI 에 요청하고 그만큼 저장한다" {
+        val short = seedTask("영어 단어 외우기", grade = null, withScope = false, minutes = 20)
+        val shortLlm = FakeTaskQuizLlmClient()
+        TaskQuizService(shortLlm).generateAttempt(short, 1, "영어 단어 외우기")
+        shortLlm.lastCount shouldBe 4
+
+        val long = seedTask("수학 문제집 풀기", grade = null, withScope = false, minutes = 90)
+        val longLlm = FakeTaskQuizLlmClient()
+        TaskQuizService(longLlm).generateAttempt(long, 1, "수학 문제집 풀기")
+        longLlm.lastCount shouldBe 7
+
+        val stored = transaction(db) {
+            TaskQuizAttemptTable.selectAll().associate { it[TaskQuizAttemptTable.planTaskId].value to it[TaskQuizAttemptTable.totalCount] }
+        }
+        stored shouldBe mapOf(short to 4, long to 7)
+    }
+
+    "generateAttempt: AI 가 요청보다 많이 주면 정한 문항 수까지만 저장한다" {
+        val taskId = seedTask("영어 단어 외우기", grade = null, withScope = false, minutes = 20)
+        val llm = FakeTaskQuizLlmClient((1..6).map { GeneratedTaskQuizQuestion("문제 $it", listOf("A", "B", "C", "D"), 0, "풀이") })
+
+        TaskQuizService(llm).generateAttempt(taskId, 1, "영어 단어 외우기")
+
+        transaction(db) { TaskQuizQuestionTable.selectAll().count() } shouldBe 4L
+    }
+
+    "submitQuiz: 7문항이면 5개 맞아야 통과하고, 응답과 조회에 통과 기준(passCount)을 준다" {
+        suspend fun solve(correct: Int): Pair<Int, Boolean> {
+            val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false, minutes = 90)
+            val userId = lastUserId
+            val service = TaskQuizService(FakeTaskQuizLlmClient())
+            val quiz = service.openQuiz(userId, taskId)
+            quiz.passCount shouldBe 5
+            quiz.questions.forEachIndexed { i, q -> service.answerQuestion(userId, taskId, q.id, q.choice(if (i < correct) "A" else "B").id) }
+            val result = service.submitQuiz(userId, taskId)
+            result.totalCount shouldBe 7
+            return result.passCount to result.passed
+        }
+
+        solve(correct = 5) shouldBe (5 to true)
+        solve(correct = 4) shouldBe (5 to false)
+    }
+
+    "submitQuiz: AI 가 문항을 덜 줘서 3문항만 저장됐으면 3개를 다 맞히면 통과한다 (예전엔 4개 기준이라 통과 불가)" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false) // 45분 → 5문항 요청
+        val userId = lastUserId
+        val llm = FakeTaskQuizLlmClient((1..3).map { GeneratedTaskQuizQuestion("문제 $it", listOf("A", "B", "C", "D"), 0, "풀이") })
+        val service = TaskQuizService(llm)
+        service.openQuiz(userId, taskId).questions.forEach { service.answerQuestion(userId, taskId, it.id, it.choice("A").id) }
+
+        val result = service.submitQuiz(userId, taskId)
+
+        result.totalCount shouldBe 3
+        result.passed shouldBe true
+    }
 })
 
 private class FakeTaskQuizLlmClient(
-    private val questions: List<GeneratedTaskQuizQuestion> = (1..5).map {
-        GeneratedTaskQuizQuestion("문제 $it", listOf("A", "B", "C", "D"), 0, "자세한 풀이 $it", listOf("", "B 가 틀린 이유", "C 가 틀린 이유", "D 가 틀린 이유"))
-    }
+    private val questions: List<GeneratedTaskQuizQuestion>? = null // null 이면 요청받은 count 만큼 만든다
 ) : TaskQuizLlmClient(dummyAppConfig()) {
     var lastTaskName: String? = null
     var lastGradeLabel: String? = null
     var lastStudyScope: String? = null
+    var lastCount: Int? = null
 
-    override suspend fun generateQuestions(taskName: String, gradeLabel: String, studyScope: String): List<GeneratedTaskQuizQuestion> {
+    override suspend fun generateQuestions(taskName: String, gradeLabel: String, studyScope: String, count: Int): List<GeneratedTaskQuizQuestion> {
         lastTaskName = taskName
         lastGradeLabel = gradeLabel
         lastStudyScope = studyScope
-        return questions
+        lastCount = count
+        return questions ?: (1..count).map {
+            GeneratedTaskQuizQuestion("문제 $it", listOf("A", "B", "C", "D"), 0, "자세한 풀이 $it", listOf("", "B 가 틀린 이유", "C 가 틀린 이유", "D 가 틀린 이유"))
+        }
     }
 }
 
@@ -442,3 +624,6 @@ private fun ensureTestDatabase(url: String, user: String, password: String) {
         if (e.sqlState != "42P04") throw e
     }
 }
+
+/** 보기 순서가 섞여 저장되므로 테스트는 위치가 아니라 보기 글자로 고른다 */
+private fun TaskQuizQuestionResponse.choice(text: String) = choices.first { it.choiceText == text }

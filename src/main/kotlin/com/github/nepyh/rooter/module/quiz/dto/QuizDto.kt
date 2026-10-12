@@ -4,7 +4,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class QuizGenerateRequest(
-    val date: String? = null // yyyy-MM-dd, 생략 시 오늘
+    val date: String? = null, // yyyy-MM-dd, 생략 시 오늘
+    val planBoardId: Int? = null // 퀴즈를 만들 플랜보드, 생략 시 그날 학습 범위가 있는 보드
 )
 
 @Serializable
@@ -67,6 +68,7 @@ data class QuizResultResponse(
     val correctCount: Int,
     val weakAreas: List<WeakAreaSummary>,
     val insertedReviewTasks: List<InsertedReviewTaskResponse>,
+    val customReviewQuestionCount: Int = 0, // 약점 단원 맞춤 문제로 복습 목록에 새로 들어간 수 (단원당 2문제, AI 실패 시 0)
     val results: List<QuizQuestionResult> = emptyList() // 제출한 문항별 채점 결과와 풀이
 )
 

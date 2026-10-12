@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.quiz
 
+import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.planBoardSubjects
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
@@ -25,6 +26,10 @@ import com.github.nepyh.rooter.module.quiz.dto.QuizResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizResultResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizSubjectResponse
 import com.github.nepyh.rooter.module.quiz.dto.WeakAreaSummary
+import com.github.nepyh.rooter.module.review.ReviewChoiceDraft
+import com.github.nepyh.rooter.module.review.addCustomReviewQuestion
+import com.github.nepyh.rooter.module.review.copyWrongQuestionToReview
+import com.github.nepyh.rooter.module.review.model.ReviewSource
 import com.github.nepyh.rooter.module.quiz.exception.QuizNotFoundException
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttemptRow
@@ -33,6 +38,8 @@ import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceRow
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceTable
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionRow
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionTable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -41,19 +48,21 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import kotlin.random.Random
 
-private const val DEFAULT_QUESTION_COUNT = 5
 private const val REVIEW_TASK_MINUTES = 20
+private const val CUSTOM_QUESTIONS_PER_CHAPTER = 2 // 약점 단원마다 복습 목록에 넣을 맞춤 문제 수
 
 /** generateQuiz 의 첫 트랜잭션 결과 — 이미 있는 퀴즈를 돌려줄지, LLM 으로 새로 만들지 */
 private sealed interface QuizPreparation {
     data class Existing(val quiz: QuizResponse) : QuizPreparation
-    data class New(val dailyPlanId: Int, val context: String) : QuizPreparation
+    data class New(val dailyPlanId: Int, val context: String, val questionCount: Int) : QuizPreparation
 }
 
 class QuizService(
     private val llmClient: QuizLlmClient,
-    private val schoolDataFetcher: SchoolDataFetcher
+    private val schoolDataFetcher: SchoolDataFetcher,
+    private val random: Random = Random.Default // 보기 섞기용. 테스트에서 시드를 고정한다
 ) {
 
     /**
@@ -63,13 +72,27 @@ class QuizService(
      * LLM 호출(수 초)은 DB 트랜잭션 밖에서 하고, 저장할 때 일일 계획 행을 잠근 뒤 한 번 더 확인해서
      * 동시에 두 번 요청돼도 한 세트만 저장되게 한다.
      */
-    suspend fun generateQuiz(userId: Int, date: LocalDate): QuizResponse {
+    suspend fun generateQuiz(userId: Int, date: LocalDate, requestedPlanBoardId: Int? = null): QuizResponse {
         val prepared = newSuspendedTransaction {
             // 소유자 확인을 위해 daily_plans + plan_boards 를 조인해야 해서 Table DSL 을 쓴다 (집계/조인은 DAO 대상 아님).
-            val dailyPlanRow = (DailyPlanTable innerJoin PlanBoardTable)
+            // 같은 날 플랜보드가 여러 개일 수 있어서 requestedPlanBoardId 를 받으면 그 보드로 한정한다.
+            // 남의 보드·없는 보드면 후보가 비어 NoPlanForDateException 이 된다.
+            val candidates = (DailyPlanTable innerJoin PlanBoardTable)
                 .selectAll()
-                .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq userId) }
-                .firstOrNull()
+                .where {
+                    val mine = (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq userId)
+                    if (requestedPlanBoardId == null) mine else mine and (PlanBoardTable.id eq requestedPlanBoardId)
+                }
+                .orderBy(PlanBoardTable.id to SortOrder.ASC)
+                .toList()
+            // 보드를 지정하지 않은 요청(예전 클라이언트)용: 학습 범위가 있는 보드를 우선한다
+            // (앱이 자동으로 만드는 범위 없는 '기본 플랜보드' 로 퀴즈가 만들어지지 않게)
+            val boardsWithRange = PlanSubjectTable.selectAll()
+                .where { PlanSubjectTable.planBoardId inList candidates.map { it[DailyPlanTable.planBoardId] } }
+                .map { it[PlanSubjectTable.planBoardId].value }
+                .toSet()
+            val dailyPlanRow = candidates.firstOrNull { it[DailyPlanTable.planBoardId].value in boardsWithRange }
+                ?: candidates.firstOrNull()
                 ?: throw QuizValidationException.NoPlanForDateException()
 
             val dailyPlanId = dailyPlanRow[DailyPlanTable.id].value
@@ -77,25 +100,29 @@ class QuizService(
 
             val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
             val chapterNames = chapterNamesForPlanBoard(planBoardId)
-            val completedTaskNames = PlanTaskRow.find {
+            val completedTasks = PlanTaskRow.find {
                 (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq true)
-            }.map { it.taskName }
+            }.toList()
+            val completedTaskNames = completedTasks.map { it.taskName }
 
             QuizPreparation.New(
                 dailyPlanId = dailyPlanId,
                 context = buildString {
                     appendLine("학습 범위: ${chapterNames.joinToString(", ").ifBlank { "지정 안 됨" }}")
                     appendLine("오늘 완료한 학습: ${completedTaskNames.joinToString(", ").ifBlank { "없음" }}")
-                }
+                },
+                // 그날 공부한 시간 = 완료한 할일들의 예상 시간 합
+                questionCount = quizQuestionCount(completedTasks.sumOf { it.estimatedMinutes })
             )
         }
 
-        val (dailyPlanId, context) = when (prepared) {
+        val (dailyPlanId, context, questionCount) = when (prepared) {
             is QuizPreparation.Existing -> return prepared.quiz
             is QuizPreparation.New -> prepared
         }
 
-        val generated = llmClient.generateQuestions(context, DEFAULT_QUESTION_COUNT)
+        // AI 가 더 많이 줘도 정한 문항 수까지만 쓴다
+        val generated = llmClient.generateQuestions(context, questionCount).take(questionCount)
         if (generated.isEmpty()) throw QuizValidationException.QuizGenerationFailedException()
 
         return newSuspendedTransaction {
@@ -110,7 +137,9 @@ class QuizService(
                     explanation = question.explanation.ifBlank { null }
                 }
 
-                val choices = question.choices.mapIndexed { index, choiceText ->
+                // AI 는 정답을 앞쪽 보기에 두는 경향이 있어, 저장 전에 보기 순서를 섞는다 (정답 표시는 보기와 함께 움직인다)
+                val choices = question.choices.indices.shuffled(random).map { index ->
+                    val choiceText = question.choices[index]
                     val choice = DailyQuizChoiceRow.new {
                         this.question = quizQuestion
                         this.choiceText = choiceText
@@ -166,6 +195,8 @@ class QuizService(
      * - 채점·제출 기록은 먼저 저장해 끝낸다. 약점 분석(LLM)이 실패해도 제출은 성공하고 weakAreas 만 비어서 나간다.
      * - 복습 태스크는 퀴즈 다음 날(플랜보드 기간을 넘으면 퀴즈 당일)에, 학교·수면·불가능 시간과
      *   그날 이미 있는 태스크를 피해서 배치한다. 빈 시간이 없어 못 넣은 제안은 insertedReviewTasks 에서 빠진다.
+     * - 약점 단원마다 맞춤 문제를 [CUSTOM_QUESTIONS_PER_CHAPTER]개씩 만들어 복습 목록에 넣는다.
+     *   복습 태스크 배치와 동시에 돌리고, 만들기에 실패해도 제출은 성공한다 (customReviewQuestionCount 만 0).
      */
     suspend fun submitQuiz(
         userId: Int,
@@ -216,14 +247,22 @@ class QuizService(
                 }
 
                 val question = DailyQuizQuestionRow[answer.questionId]
+                val questionChoices = DailyQuizChoiceRow.find { DailyQuizChoiceTable.questionId eq answer.questionId }.toList()
                 if (choiceRow.isCorrect) {
                     correctCount++
                 } else {
                     wrongQuestionTexts.add(question.questionText)
+                    // 틀린 문제는 복습 목록으로 (일일 퀴즈는 보기별 이유가 없어 풀이만 옮긴다)
+                    copyWrongQuestionToReview(
+                        userId = userId,
+                        source = ReviewSource.DAILY_QUIZ,
+                        sourceQuestionId = answer.questionId,
+                        questionText = question.questionText,
+                        explanation = question.explanation,
+                        choices = questionChoices.map { ReviewChoiceDraft(it.choiceText, it.isCorrect) }
+                    )
                 }
-                val correctChoice = DailyQuizChoiceRow.find {
-                    (DailyQuizChoiceTable.questionId eq answer.questionId) and (DailyQuizChoiceTable.isCorrect eq true)
-                }.firstOrNull()
+                val correctChoice = questionChoices.firstOrNull { it.isCorrect }
                 results += QuizQuestionResult(
                     questionId = answer.questionId,
                     questionText = question.questionText,
@@ -257,10 +296,14 @@ class QuizService(
         val weakAreas = suggestions.map {
             WeakAreaSummary(chapterName = it.chapterName, reviewTaskDescription = it.reviewTaskDescription)
         }
-        val insertedReviewTasks = if (suggestions.isEmpty()) {
-            emptyList()
-        } else {
-            insertReviewTasks(graded, suggestions.map { "복습: ${it.reviewTaskDescription}".take(150) })
+        val (insertedReviewTasks, customReviewQuestionCount) = coroutineScope {
+            val customCount = async { addCustomReviewQuestions(userId, graded, suggestions) }
+            val tasks = if (suggestions.isEmpty()) {
+                emptyList()
+            } else {
+                insertReviewTasks(graded, suggestions.map { "복습: ${it.reviewTaskDescription}".take(150) })
+            }
+            tasks to customCount.await()
         }
 
         return QuizResultResponse(
@@ -268,6 +311,7 @@ class QuizService(
             correctCount = graded.correctCount,
             weakAreas = weakAreas,
             insertedReviewTasks = insertedReviewTasks,
+            customReviewQuestionCount = customReviewQuestionCount,
             results = graded.results
         )
     }
@@ -335,6 +379,44 @@ class QuizService(
                     taskName = task.taskName,
                     startTime = task.startTime.toString(),
                     endTime = task.endTime.toString()
+                )
+            }
+        }
+    }
+
+    /**
+     * 약점 단원 맞춤 문제를 AI 로 만들어 복습 목록에 넣고, 넣은 개수를 돌려준다. AI 실패는 0 으로 넘긴다.
+     * AI 가 약점 단원이 아닌 이름을 쓰거나 단원당 수를 넘기거나 정답 위치가 잘못된 문제는 버린다
+     * (chapter_name 은 단원별 오답률 리포트의 기준이라 약점 단원 이름 그대로여야 한다).
+     */
+    private suspend fun addCustomReviewQuestions(userId: Int, graded: GradedQuiz, suggestions: List<WeakAreaSuggestion>): Int {
+        val weakChapterNames = suggestions.map { it.chapterName.trim().take(100) }.filter { it.isNotEmpty() }.distinct()
+        if (weakChapterNames.isEmpty()) return 0
+
+        val generated = runCatching {
+            llmClient.generateCustomReviewQuestions(
+                weakChapterNames, graded.wrongQuestionTexts, graded.scheduleContext.grade, CUSTOM_QUESTIONS_PER_CHAPTER
+            )
+        }.getOrElse { return 0 }
+
+        val accepted = generated
+            .map { it.copy(chapterName = it.chapterName.trim().take(100)) }
+            .filter { it.chapterName in weakChapterNames && it.questionText.isNotBlank() && it.choices.size >= 2 && it.correctIndex in it.choices.indices }
+            .groupBy { it.chapterName }
+            .values
+            .flatMap { it.take(CUSTOM_QUESTIONS_PER_CHAPTER) }
+        if (accepted.isEmpty()) return 0
+
+        return newSuspendedTransaction {
+            accepted.count { question ->
+                addCustomReviewQuestion(
+                    userId = userId,
+                    chapterName = question.chapterName,
+                    questionText = question.questionText,
+                    explanation = question.explanation,
+                    choices = question.choices.mapIndexed { index, text ->
+                        ReviewChoiceDraft(text.take(200), index == question.correctIndex, question.choiceReasons.getOrNull(index))
+                    }
                 )
             }
         }

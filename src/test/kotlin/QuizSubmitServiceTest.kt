@@ -10,6 +10,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
+import com.github.nepyh.rooter.module.quiz.CustomReviewQuestion
 import com.github.nepyh.rooter.module.quiz.QuizLlmClient
 import com.github.nepyh.rooter.module.quiz.QuizService
 import com.github.nepyh.rooter.module.quiz.WeakAreaSuggestion
@@ -20,6 +21,9 @@ import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceRow
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceTable
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionRow
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionTable
+import com.github.nepyh.rooter.module.review.ReviewService
+import com.github.nepyh.rooter.module.review.model.ReviewChoiceTable
+import com.github.nepyh.rooter.module.review.model.ReviewQuestionTable
 import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
@@ -68,14 +72,16 @@ class QuizSubmitServiceTest : StringSpec({
     beforeSpec {
         transaction(db) {
             listOf(
-                "daily_quiz_attempts", "daily_quiz_choices", "daily_quiz_questions", "plan_tasks", "plan_subjects",
+                "review_choices", "review_questions", "daily_quiz_attempts", "daily_quiz_choices", "daily_quiz_questions", "plan_tasks", "plan_subjects",
                 "daily_plans", "plan_boards", "chapters", "textbooks", "subjects",
                 "user_unavailable_times", "student_profiles", "users"
             ).forEach { exec("DROP TABLE IF EXISTS $it CASCADE") }
             SchemaUtils.create(
                 UserTable, StudentProfileTable, UnavailableTimeTable, SubjectTable, TextbookTable, ChapterTable,
                 PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable,
-                DailyQuizQuestionTable, DailyQuizChoiceTable, DailyQuizAttemptTable
+                DailyQuizQuestionTable, DailyQuizChoiceTable, DailyQuizAttemptTable,
+                // 틀린 문제를 복습 목록으로 복사한다 (users 를 지우면 cascade 로 함께 지워짐)
+                ReviewQuestionTable, ReviewChoiceTable
             )
         }
     }
@@ -207,6 +213,69 @@ class QuizSubmitServiceTest : StringSpec({
         )
     }
 
+    "틀린 문제만 풀이·보기와 함께 복습 목록에 들어간다" {
+        val quiz = seedQuiz(friday, friday.plusDays(7))
+        val (q1, c1) = quiz.answers[0]
+        val (q2, c2) = quiz.answers[1]
+
+        QuizService(FakeWeakAreaLlmClient(emptyList()), schoolDataFetcher).submitQuiz(
+            quiz.userId, quiz.dailyPlanId,
+            listOf(QuizAnswerSubmission(q1, c1.first), QuizAnswerSubmission(q2, c2.second))
+        )
+
+        val review = ReviewService().listOpen(quiz.userId, cursor = null)
+        review.totalCount shouldBe 1
+        val copied = review.questions.single()
+        listOf(copied.source, copied.questionText) shouldBe listOf("DAILY_QUIZ", "문제 2")
+        copied.choices.map { it.choiceText }.sorted() shouldBe listOf("오답", "정답")
+        val answer = ReviewService().answer(quiz.userId, copied.id, copied.choices.first { it.choiceText == "정답" }.id)
+        listOf(answer.isCorrect, answer.explanation, answer.cleared) shouldBe listOf(true, "풀이 2", true)
+    }
+
+    fun custom(chapter: String, text: String) = CustomReviewQuestion(
+        chapterName = chapter, questionText = text, choices = listOf("정답", "오답A", "오답B", "오답C"), correctIndex = 0,
+        explanation = "$text 풀이", choiceReasons = listOf("", "A 이유", "B 이유", "C 이유")
+    )
+
+    "약점 단원마다 맞춤 문제 2개가 CUSTOM 으로 복습 목록에 들어가고, 약점 단원이 아니거나 넘치는 문제는 버린다" {
+        val quiz = seedQuiz(friday, friday.plusDays(7))
+        val llm = FakeWeakAreaLlmClient(
+            twoSuggestions,
+            customQuestions = listOf(
+                custom("1단원", "맞춤 1-1"), custom("1단원", "맞춤 1-2"), custom("1단원", "맞춤 1-3"), // 3번째는 버림
+                custom(" 2단원 ", "맞춤 2-1"), // 앞뒤 공백은 정리해서 받음
+                custom("3단원", "약점 아님"), // 약점 단원이 아님
+                custom("2단원", "정답 위치 잘못").copy(correctIndex = 4)
+            )
+        )
+
+        val result = QuizService(llm, schoolDataFetcher).submitQuiz(quiz.userId, quiz.dailyPlanId, wrongAnswers(quiz))
+
+        result.customReviewQuestionCount shouldBe 3
+        llm.customRequest shouldBe Triple(listOf("1단원", "2단원"), listOf("문제 1", "문제 2"), 2)
+        val customs = ReviewService().listOpen(quiz.userId, cursor = null).questions.filter { it.source == "CUSTOM" }
+        customs.map { it.chapterName to it.questionText }.sortedBy { it.second } shouldBe listOf(
+            "1단원" to "맞춤 1-1", "1단원" to "맞춤 1-2", "2단원" to "맞춤 2-1"
+        )
+        // 오답을 고르면 보기별 이유와 풀이가 나가고, 정답을 고르면 목록에서 빠진다
+        val question = customs.first { it.questionText == "맞춤 2-1" }
+        val wrong = ReviewService().answer(quiz.userId, question.id, question.choices.first { it.choiceText == "오답B" }.id)
+        listOf(wrong.isCorrect, wrong.reason, wrong.explanation, wrong.cleared) shouldBe listOf(false, "B 이유", "맞춤 2-1 풀이", false)
+        ReviewService().answer(quiz.userId, question.id, question.choices.first { it.choiceText == "정답" }.id).cleared shouldBe true
+    }
+
+    "맞춤 문제 만들기가 실패해도 제출과 복습 태스크는 그대로 된다" {
+        val quiz = seedQuiz(friday, friday.plusDays(7))
+        val service = QuizService(FakeWeakAreaLlmClient(twoSuggestions, failCustom = true), schoolDataFetcher)
+
+        val result = service.submitQuiz(quiz.userId, quiz.dailyPlanId, wrongAnswers(quiz))
+
+        result.customReviewQuestionCount shouldBe 0
+        result.insertedReviewTasks.size shouldBe 2
+        // 틀린 문제 복사분만 남는다
+        ReviewService().listOpen(quiz.userId, cursor = null).questions.map { it.source } shouldBe listOf("DAILY_QUIZ", "DAILY_QUIZ")
+    }
+
     "모두 맞히면 약점 분석을 부르지 않는다" {
         val quiz = seedQuiz(friday, friday.plusDays(7))
         val llm = FakeWeakAreaLlmClient(twoSuggestions)
@@ -217,20 +286,36 @@ class QuizSubmitServiceTest : StringSpec({
 
         result.correctCount shouldBe 2
         llm.calls.get() shouldBe 0
+        llm.customRequest shouldBe null
+        result.customReviewQuestionCount shouldBe 0
         result.insertedReviewTasks shouldBe emptyList()
     }
 })
 
 private class FakeWeakAreaLlmClient(
     private val suggestions: List<WeakAreaSuggestion> = emptyList(),
-    private val fail: Boolean = false
+    private val fail: Boolean = false,
+    private val customQuestions: List<CustomReviewQuestion> = emptyList(),
+    private val failCustom: Boolean = false
 ) : QuizLlmClient(dummyAppConfig()) {
     val calls = AtomicInteger(0)
+    @Volatile var customRequest: Triple<List<String>, List<String>, Int>? = null // (약점 단원, 틀린 문제, 단원당 문항 수)
 
     override suspend fun analyzeWeakAreas(wrongQuestionTexts: List<String>, chapterNames: List<String>): List<WeakAreaSuggestion> {
         calls.incrementAndGet()
         if (fail) throw QuizValidationException.QuizGenerationFailedException()
         return suggestions
+    }
+
+    override suspend fun generateCustomReviewQuestions(
+        weakChapterNames: List<String>,
+        wrongQuestionTexts: List<String>,
+        grade: Int,
+        countPerChapter: Int
+    ): List<CustomReviewQuestion> {
+        customRequest = Triple(weakChapterNames, wrongQuestionTexts, countPerChapter)
+        if (failCustom) throw QuizValidationException.QuizGenerationFailedException()
+        return customQuestions
     }
 
 }

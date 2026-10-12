@@ -28,7 +28,8 @@ data class TaskQuizSubjectResponse(
 data class TaskQuizResponse(
     val planTaskId: Int,
     val attemptNumber: Int,
-    val questions: List<TaskQuizQuestionResponse>,
+    val questions: List<TaskQuizQuestionResponse>, // 문항 수는 할일 길이에 따라 4·5·7개
+    val passCount: Int = 0, // 통과에 필요한 정답 수 (70점 이상)
     // 이 태스크의 과목 (추정). 태스크 이름에 과목명이 하나만 있으면 그 과목, 아니면 플랜보드 과목이 하나뿐일 때 그 과목, 그 외엔 null
     val subject: TaskQuizSubjectResponse? = null,
     val subjects: List<TaskQuizSubjectResponse> = emptyList() // 플랜보드 학습 범위 과목 (퀴즈는 이 범위에서 출제)
@@ -66,6 +67,7 @@ data class TaskQuizSubmitResponse(
     val attemptNumber: Int,
     val correctCount: Int,
     val totalCount: Int,
+    val passCount: Int = 0, // 통과에 필요한 정답 수 (70점 이상)
     // 퀴즈 자체가 완료 확인 수단이라, passed 가 true 면 이 응답과 함께 태스크가 자동으로 완료 처리됨
     val passed: Boolean,
     // true 면 10분 뒤 재시도 퀴즈가 자동으로 생성됨. attemptNumber 3까지 실패하면 재시도는 더 없고

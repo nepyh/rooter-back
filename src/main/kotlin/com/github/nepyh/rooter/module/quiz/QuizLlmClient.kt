@@ -30,6 +30,17 @@ data class WeakAreaSuggestion(
     val reviewTaskDescription: String
 )
 
+/** 약점 단원 맞춤 복습 문제 하나. 복습 목록(review_questions, source=CUSTOM)에 저장된다 */
+@Serializable
+data class CustomReviewQuestion(
+    val chapterName: String,
+    val questionText: String,
+    val choices: List<String>,
+    val correctIndex: Int,
+    val explanation: String = "",
+    val choiceReasons: List<String> = emptyList() // choices 와 같은 순서, 그 보기를 골랐을 때 보여줄 틀린 이유 (정답 자리는 "")
+)
+
 @Serializable
 private data class ChatMessage(val role: String, val content: String)
 
@@ -76,6 +87,25 @@ open class QuizLlmClient(private val appConfig: AppConfig) {
 
         val content = requestChatCompletion(prompt)
         return runCatching { json.decodeFromString<List<WeakAreaSuggestion>>(content) }
+            .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
+    }
+
+    open suspend fun generateCustomReviewQuestions(
+        weakChapterNames: List<String>,
+        wrongQuestionTexts: List<String>,
+        grade: Int,
+        countPerChapter: Int
+    ): List<CustomReviewQuestion> {
+        val prompt = PromptLoader.load(
+            "prompts/review-custom-generation.md",
+            "GRADE" to "중학교 ${grade}학년",
+            "WEAK_CHAPTERS" to weakChapterNames.joinToString("\n") { "- $it" },
+            "WRONG_QUESTIONS" to wrongQuestionTexts.joinToString("\n") { "- $it" },
+            "COUNT_PER_CHAPTER" to countPerChapter.toString()
+        )
+
+        val content = requestChatCompletion(prompt)
+        return runCatching { json.decodeFromString<List<CustomReviewQuestion>>(content) }
             .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
     }
 

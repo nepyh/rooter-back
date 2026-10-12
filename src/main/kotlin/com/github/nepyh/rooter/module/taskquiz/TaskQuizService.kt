@@ -1,9 +1,13 @@
 package com.github.nepyh.rooter.module.taskquiz
 
 import com.github.nepyh.rooter.common.APP_ZONE
+import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.review.ReviewChoiceDraft
+import com.github.nepyh.rooter.module.review.copyWrongQuestionToReview
+import com.github.nepyh.rooter.module.review.model.ReviewSource
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
@@ -44,15 +48,22 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.Clock
 import java.time.LocalTime
 import java.time.OffsetDateTime
+import kotlin.random.Random
 
 const val MAX_ATTEMPTS = 3 // 최초 1회 + 재시도 2회
-const val PASS_THRESHOLD = 4 // 5문항 중 4개 이상 정답이면 통과
-const val QUESTION_COUNT = 5
+const val PASS_PERCENT = 70 // 70점 이상(문항의 70% 이상 정답)이면 통과 (4문항 3개, 5문항 4개, 7문항 5개)
 const val RETRY_DELAY_MINUTES = 10L
+
+/** 통과에 필요한 정답 수. AI 가 문항을 덜 줘서 저장된 문항 수가 적어도 그 수 기준으로 계산한다 */
+fun taskQuizPassCount(totalCount: Int): Int = (totalCount * PASS_PERCENT + 99) / 100
+
+/** 퀴즈 출제에 쓸 학년 표시, 학습 범위(과목·단원), 문항 수 */
+private data class TaskQuizContext(val gradeLabel: String, val studyScope: String, val questionCount: Int)
 
 class TaskQuizService(
     private val llmClient: TaskQuizLlmClient,
-    private val clock: Clock = Clock.systemUTC()
+    private val clock: Clock = Clock.systemUTC(),
+    private val random: Random = Random.Default // 보기 섞기용. 테스트에서 시드를 고정한다
 ) {
 
     /** 스케줄러가 호출. taskName은 findDue 시점에 이미 조회해둔 값을 그대로 받는다. */
@@ -61,10 +72,11 @@ class TaskQuizService(
      * 스케줄러(종료 시각)와 퀴즈 열기([openQuiz])가 동시에 부를 수 있어, 저장할 때 태스크 행을 잠그고 같은 차수가 있으면 만들지 않는다.
      */
     suspend fun generateAttempt(planTaskId: Int, attemptNumber: Int, taskName: String): Boolean {
-        val (gradeLabel, studyScope) = newSuspendedTransaction { quizContextOf(planTaskId) }
-        // 정답 번호가 보기 범위를 벗어난 문제는 채점할 수 없으니 버린다
-        val generated = llmClient.generateQuestions(taskName, gradeLabel, studyScope)
+        val (gradeLabel, studyScope, questionCount) = newSuspendedTransaction { quizContextOf(planTaskId) }
+        // 정답 번호가 보기 범위를 벗어난 문제는 채점할 수 없으니 버리고, AI 가 더 많이 줘도 정한 문항 수까지만 쓴다
+        val generated = llmClient.generateQuestions(taskName, gradeLabel, studyScope, questionCount)
             .filter { it.choices.size >= 2 && it.correct_index in it.choices.indices }
+            .take(questionCount)
         if (generated.isEmpty()) return false // AI 생성 실패 시 이번 attempt는 건너뜀 (다음 스케줄 대상이 되진 않음)
 
         newSuspendedTransaction {
@@ -87,7 +99,9 @@ class TaskQuizService(
                     questionText = question.question_text
                 }
 
-                question.choices.forEachIndexed { index, choiceText ->
+                // AI 는 정답을 앞쪽 보기에 두는 경향이 있어, 저장 전에 보기 순서를 섞는다 (정답 표시·짧은 이유는 보기와 함께 움직인다)
+                question.choices.indices.shuffled(random).forEach { index ->
+                    val choiceText = question.choices[index]
                     TaskQuizChoiceRow.new {
                         this.question = quizQuestion
                         this.choiceText = choiceText
@@ -163,6 +177,7 @@ class TaskQuizService(
             planTaskId = planTaskId,
             attemptNumber = latestAttempt.attemptNumber,
             questions = questions,
+            passCount = taskQuizPassCount(latestAttempt.totalCount),
             subject = guessTaskSubject(task.taskName, subjects)?.let { (id, name) -> TaskQuizSubjectResponse(id, name) },
             subjects = subjects.map { (id, name) -> TaskQuizSubjectResponse(id, name) }
         )
@@ -199,6 +214,18 @@ class TaskQuizService(
             (TaskQuizQuestionTable.id eq question.id) and TaskQuizQuestionTable.selectedChoiceId.isNull()
         }) { it[TaskQuizQuestionTable.selectedChoiceId] = selectedChoiceId }
         if (saved == 0) throw TaskQuizValidationException.AlreadyAnsweredException()
+
+        if (!selectedChoice.isCorrect) {
+            // 틀린 문제는 복습 목록으로. 정답 보기의 explanation 이 자세한 풀이, 오답 보기의 explanation 이 짧은 이유다
+            copyWrongQuestionToReview(
+                userId = userId,
+                source = ReviewSource.TASK_QUIZ,
+                sourceQuestionId = question.id.value,
+                questionText = question.questionText,
+                explanation = correctChoice.explanation,
+                choices = choices.map { ReviewChoiceDraft(it.choiceText, it.isCorrect, reason = it.explanation) }
+            )
+        }
 
         TaskQuizAnswerResponse(
             questionId = question.id.value,
@@ -247,7 +274,8 @@ class TaskQuizService(
         val attemptNumber = attempt.attemptNumber
         val totalCount = attempt.totalCount
         val correctCount = results.count { it.isCorrect }
-        val passed = correctCount >= PASS_THRESHOLD
+        val passCount = taskQuizPassCount(totalCount)
+        val passed = correctCount >= passCount
 
         // 제출을 연달아 보내도 한 번만 채점·완료·계획 밀기가 일어나도록, 아직 채점 전일 때만 결과를 저장한다
         val graded = TaskQuizAttemptTable.update({
@@ -279,6 +307,7 @@ class TaskQuizService(
             attemptNumber = attemptNumber,
             correctCount = correctCount,
             totalCount = totalCount,
+            passCount = passCount,
             passed = passed,
             retryScheduled = retryScheduled,
             taskInvalidated = taskInvalidated,
@@ -346,12 +375,14 @@ class TaskQuizService(
     }
 
     /**
-     * 퀴즈 출제에 쓸 학년 표시와 학습 범위(과목·단원). 사용자가 직접 추가한 태스크는 이름만 있어서
-     * ("영어 단어 30개 외우기" 등) 이게 없으면 AI 가 "학생이 완료한 활동은?" 같은 문제를 냈다.
+     * 퀴즈 출제에 쓸 학년 표시와 학습 범위(과목·단원), 할일 길이에 맞춘 문항 수. 사용자가 직접 추가한 태스크는 이름만 있어서
+     * ("영어 단어 30개 외우기" 등) 학년·범위가 없으면 AI 가 "학생이 완료한 활동은?" 같은 문제를 냈다.
      */
-    private fun quizContextOf(planTaskId: Int): Pair<String, String> {
-        val board = PlanTaskRow.findById(planTaskId)?.dailyPlan?.planBoard
-            ?: return "중학생(학년 정보 없음)" to "지정 안 됨"
+    private fun quizContextOf(planTaskId: Int): TaskQuizContext {
+        val task = PlanTaskRow.findById(planTaskId)
+            ?: return TaskQuizContext("중학생(학년 정보 없음)", "지정 안 됨", quizQuestionCount(0))
+        val questionCount = quizQuestionCount(task.estimatedMinutes)
+        val board = task.dailyPlan.planBoard
 
         val grade = StudentProfileRow.find { StudentProfileTable.user eq board.user.id }.firstOrNull()?.grade
         val gradeLabel = grade?.let { "중학교 ${it}학년" } ?: "중학생(학년 정보 없음)"
@@ -362,7 +393,7 @@ class TaskQuizService(
             "${subject.textbook.subject.name}: ${chapters.joinToString(", ")}"
         }.ifBlank { "지정 안 됨" }
 
-        return gradeLabel to studyScope
+        return TaskQuizContext(gradeLabel, studyScope, questionCount)
     }
 
 }

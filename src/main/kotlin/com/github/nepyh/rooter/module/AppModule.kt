@@ -42,6 +42,9 @@ import com.github.nepyh.rooter.module.studystyle.exception.StudyStyleValidationE
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizNotFoundException
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizValidationException
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizModule
+import com.github.nepyh.rooter.module.review.ReviewModule
+import com.github.nepyh.rooter.module.review.exception.ReviewQuestionNotFoundException
+import com.github.nepyh.rooter.module.review.exception.ReviewValidationException
 import com.github.nepyh.rooter.module.user.UserModule
 import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
@@ -81,6 +84,7 @@ fun AppModule(appConfig: AppConfig): Module = module {
         LevelTestModule(appConfig),
         StudyStyleModule(),
         TaskQuizModule(appConfig),
+        ReviewModule(),
         ChatModule(appConfig)
     )
 
@@ -165,6 +169,12 @@ fun Application.configureAppModule() {
             call.respondError(HttpStatusCode.NotFound, "TASK_QUIZ_NOT_FOUND", cause.message)
         }
         exception<TaskQuizValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<ReviewQuestionNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "REVIEW_QUESTION_NOT_FOUND", cause.message)
+        }
+        exception<ReviewValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<LevelTestNotFoundException> { call, cause ->

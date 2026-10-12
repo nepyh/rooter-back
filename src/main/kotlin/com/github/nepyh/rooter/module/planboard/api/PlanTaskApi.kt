@@ -160,7 +160,8 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("PlanTask")
             summary = "태스크 완료 처리/취소"
-            description = "isCompleted를 true/false로 보내 완료 상태를 토글. 본인 플랜보드 소유 태스크만 가능"
+            description = "isCompleted를 true/false로 보내 완료 상태를 토글. 본인 플랜보드 소유 태스크만 가능. " +
+                "태스크 퀴즈로 결과가 확정된 태스크(통과했거나, 3차까지 모두 불합격)는 완료 상태를 바꿀 수 없음 (지금과 같은 값은 그대로 성공)"
             parameters {
                 path("taskId") {
                     description = "태스크 ID"
@@ -181,7 +182,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 퀴즈로 결과가 확정된 태스크의 완료 상태 변경 (code=TASK_FINALIZED)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
