@@ -21,6 +21,7 @@ fun copyWrongQuestionToReview(
     userId: Int,
     source: ReviewSource,
     sourceQuestionId: Int,
+    chapterName: String?,
     questionText: String,
     explanation: String?,
     choices: List<ReviewChoiceDraft>
@@ -31,6 +32,7 @@ fun copyWrongQuestionToReview(
         it[this.userId] = userId
         it[sourceType] = source
         it[this.sourceQuestionId] = sourceQuestionId
+        it[this.chapterName] = chapterName
         it[this.questionText] = questionText
         it[this.explanation] = explanation?.ifBlank { null }
         it[createdAt] = OffsetDateTime.now()
