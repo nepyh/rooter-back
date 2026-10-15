@@ -39,6 +39,8 @@ import com.github.nepyh.rooter.module.leveltest.exception.LevelTestValidationExc
 import com.github.nepyh.rooter.module.quiz.exception.QuizNotFoundException
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
 import com.github.nepyh.rooter.module.studystyle.exception.StudyStyleValidationException
+import com.github.nepyh.rooter.module.taskquiz.exception.QuizHistoryNotFoundException
+import com.github.nepyh.rooter.module.taskquiz.exception.QuizHistoryValidationException
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizNotFoundException
 import com.github.nepyh.rooter.module.taskquiz.exception.TaskQuizValidationException
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizModule
@@ -170,6 +172,12 @@ fun Application.configureAppModule() {
         }
         exception<TaskQuizValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<QuizHistoryValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<QuizHistoryNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "QUIZ_HISTORY_NOT_FOUND", cause.message)
         }
         exception<ReviewQuestionNotFoundException> { call, cause ->
             call.respondError(HttpStatusCode.NotFound, "REVIEW_QUESTION_NOT_FOUND", cause.message)
