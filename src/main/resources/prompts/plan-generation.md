@@ -16,8 +16,9 @@ tips 는 학생에게 직접 건네는 조언으로 써라. "태스크를 나눴
 - 각 날짜(day)마다 그날 다룰 topics(과목의 소단원/핵심 개념 단위로 세분화), 목표(goal), 세부 태스크(tasks: task_name + estimated_minutes)를 만들어라.
 - tasks의 estimated_minutes 합은 그날 계획된 학습 시간과 대략 맞아야 한다.
 - 데이터에 첫날 남은 공부 가능 시간이 적혀 있으면, 첫날(day 1) tasks 의 estimated_minutes 합이 그 시간을 넘지 않게 첫날 분량을 줄여라. 줄인 만큼은 다음 날들에 나눠 담아라.
+- 각 task 에는 위에 제시된 과목명 중 하나를 subject_name 으로 반드시 표기해라. 과목명을 다른 말로 바꾸거나 새로 만들지 말고, 위 목록에 있는 이름을 그대로 써라.
 - subjectRanges에 없는 과목/개념을 새로 지어내지 마라.
 - levelTier가 "하"면 학년별 강도 하한에 가깝게, 기초 복습 task를 초반에 추가해라. "상"이면 상한에 가깝게, 심화 문제 비중을 높여라.
 - isCramMode가 true면 복습일 없이 진도를 빠르게 나가라.
 반드시 아래 JSON 형식으로만 응답하고, 다른 설명은 절대 붙이지 마라.
-{"daily_plans": [{"day": 1, "topics": ["..."], "goal": "...", "tasks": [{"task_name": "...", "estimated_minutes": 60}]}], "tips": ["..."]}
+{"daily_plans": [{"day": 1, "topics": ["..."], "goal": "...", "tasks": [{"task_name": "...", "estimated_minutes": 60, "subject_name": "..."}]}], "tips": ["..."]}
