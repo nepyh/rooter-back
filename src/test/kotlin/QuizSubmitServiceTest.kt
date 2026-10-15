@@ -118,7 +118,7 @@ class QuizSubmitServiceTest : StringSpec({
         }
         val dailyPlan = DailyPlanRow.new { planBoard = board; planDate = quizDate }
         val answers = (1..2).map { i ->
-            val question = DailyQuizQuestionRow.new { this.dailyPlan = dailyPlan; questionText = "문제 $i"; explanation = "풀이 $i" }
+            val question = DailyQuizQuestionRow.new { this.dailyPlan = dailyPlan; questionText = "문제 $i"; explanation = "풀이 $i"; chapterName = "${i}단원" }
             val correct = DailyQuizChoiceRow.new { this.question = question; choiceText = "정답"; isCorrect = true }
             val wrong = DailyQuizChoiceRow.new { this.question = question; choiceText = "오답"; isCorrect = false }
             question.id.value to (correct.id.value to wrong.id.value)
@@ -226,7 +226,7 @@ class QuizSubmitServiceTest : StringSpec({
         val review = ReviewService().listOpen(quiz.userId, cursor = null)
         review.totalCount shouldBe 1
         val copied = review.questions.single()
-        listOf(copied.source, copied.questionText) shouldBe listOf("DAILY_QUIZ", "문제 2")
+        listOf(copied.source, copied.questionText, copied.chapterName) shouldBe listOf("DAILY_QUIZ", "문제 2", "2단원")
         copied.choices.map { it.choiceText }.sorted() shouldBe listOf("오답", "정답")
         val answer = ReviewService().answer(quiz.userId, copied.id, copied.choices.first { it.choiceText == "정답" }.id)
         listOf(answer.isCorrect, answer.explanation, answer.cleared) shouldBe listOf(true, "풀이 2", true)
