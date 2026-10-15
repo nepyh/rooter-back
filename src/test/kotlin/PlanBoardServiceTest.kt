@@ -1117,6 +1117,88 @@ class PlanBoardServiceTest : StringSpec({
         // 미완료 → 완료는 퀴즈 통과로만 되므로 (TASK_QUIZ_REQUIRED) 완료 API 응답은 같은 값(false)으로 확인한다
         planTaskService.completeTask(userId, taskId, false).dailyPlanId shouldBe dailyPlanId
     }
+
+    // ---- 할일의 과목 귀속 (목록을 과목별로 분류하기 위한 제목) ----
+
+    "createTask: 교과서를 지정하면 과목이 저장되고 목록·단건 응답에 subjectId/subjectName 이 실린다" {
+        val userId = seedUser("task-subject@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("수학")
+        val textbookId = seedTextbook(subjectId, title = "수학 교과서")
+
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId, textbookId = textbookId))
+        val date = LocalDate.of(2026, 7, 15)
+
+        // 목록 3종(일간·보드 일간·주간) 모두 같은 과목이 실린다
+        listOf(
+            planTaskService.getDailyPlan(userId, date).tasks.single(),
+            planTaskService.getBoardDailyPlan(userId, boardId, date).tasks.single(),
+            planTaskService.getWeeklyPlan(userId, date).days.single { it.planDate == "2026-07-15" }.tasks.single()
+        ).forEach { task ->
+            task.subjectId shouldBe subjectId
+            task.subjectName shouldBe "수학"
+        }
+
+        // 수정·완료 단건 응답에도 같은 과목이 실린다
+        val taskId = planTaskService.getDailyPlan(userId, date).tasks.single().id
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수학 2단원 복습")).subjectName shouldBe "수학"
+        planTaskService.completeTask(userId, taskId, true).subjectId shouldBe subjectId
+    }
+
+    "createTask: 교과서를 안 보내면 과목이 붙지 않는다 (null)" {
+        val userId = seedUser("task-nosubject@test.com")
+        val boardId = seedBoard(userId)
+
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+
+        val task = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single()
+        task.subjectId shouldBe null
+        task.subjectName shouldBe null
+    }
+
+    "createTask: 존재하지 않는 교과서면 400 INVALID_TEXTBOOK 이고 할일도 만들어지지 않는다" {
+        val userId = seedUser("task-badtextbook@test.com")
+        val boardId = seedBoard(userId)
+
+        val e = shouldThrow<PlanTaskValidationException.InvalidTextbookException> {
+            planTaskService.createTask(userId, taskRequest(planBoardId = boardId, textbookId = 999))
+        }
+
+        e.status.value shouldBe 400
+        e.code shouldBe "INVALID_TEXTBOOK"
+        planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks shouldBe emptyList()
+    }
+
+    "plan-generation: LLM 이 준 subject_name 이 요청 과목과 맞으면 저장되고, 못 맞추면 null 이다" {
+        val userId = seedUser("gen-subject@test.com")
+        val subjectId = seedSubject("수학")
+        val math = seedTextbook(subjectId, title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient(
+            tasks = listOf(
+                GeneratedPlanTask("수학 개념", 60, "수학"),      // 요청 과목명과 정확히 일치
+                GeneratedPlanTask("수학 문제", 30, "  수학  "),  // 앞뒤 공백은 무시하고 일치
+                GeneratedPlanTask("국어 문법", 30, "국어")       // 요청에 없는 과목 → null
+            )
+        )
+
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(
+                title = "과목 귀속",
+                subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)),
+                startDate = "2026-07-04", // 토요일 — 06:30 부터 자리가 넉넉해 3개 다 배치된다
+                daysRemaining = 1
+            )
+        )
+
+        planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 4)).tasks
+            .map { it.taskName to it.subjectName } shouldBe listOf(
+            "수학 개념" to "수학",
+            "수학 문제" to "수학",
+            "국어 문법" to null
+        )
+    }
 })
 
 // context 의 "총 학습 기간: N일" 만큼 계획을 돌려준다. shortResponses 번째까지는 절반만 돌려준다.
@@ -1160,8 +1242,9 @@ private fun taskRequest(
     taskName: String = "수학 2단원",
     startTime: String = "17:30",
     endTime: String = "19:30",
-    estimatedMinutes: Int = 120
-) = PlanTaskCreateRequest(planBoardId, planDate, taskName, startTime, endTime, estimatedMinutes)
+    estimatedMinutes: Int = 120,
+    textbookId: Int? = null
+) = PlanTaskCreateRequest(planBoardId, planDate, taskName, startTime, endTime, estimatedMinutes, textbookId)
 
 private fun ensureTestDatabase(url: String, user: String, password: String) {
     val dbName = url.substringAfterLast("/")
