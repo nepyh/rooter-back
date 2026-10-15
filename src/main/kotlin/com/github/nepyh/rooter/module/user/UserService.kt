@@ -1,8 +1,11 @@
 package com.github.nepyh.rooter.module.user
 
+import com.github.nepyh.rooter.module.planboard.SleepTime
 import com.github.nepyh.rooter.module.storage.FileStorage
 import com.github.nepyh.rooter.module.storage.toUploadableFile
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
+import com.github.nepyh.rooter.module.user.dto.SleepTimeRequest
+import com.github.nepyh.rooter.module.user.dto.SleepTimeResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
@@ -27,6 +30,8 @@ import org.slf4j.LoggerFactory
 import java.io.ByteArrayOutputStream
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.time.format.ResolverStyle
 
 private val AVATAR_CONTENT_TYPES = mapOf(
     "jpg" to "image/jpeg",
@@ -35,6 +40,9 @@ private val AVATAR_CONTENT_TYPES = mapOf(
     "webp" to "image/webp",
 )
 private const val MAX_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024L // 5MB
+
+// STRICT: 기본(SMART)이면 "24:00" 이 00:00 으로 통과한다
+private val HOUR_MINUTE_FORMAT = DateTimeFormatter.ofPattern("HH:mm").withResolverStyle(ResolverStyle.STRICT)
 
 class UserService(
     private val userRepo: UserRepo,
@@ -247,6 +255,37 @@ class UserService(
             dayOfWeek = row.dayOfWeek,
             startTime = row.startTime.toString(),
             endTime = row.endTime.toString()
+        )
+    }
+
+    /** 저장한 수면시간. 저장하지 않았으면 기본값(23:00 / 06:30)과 isDefault=true */
+    fun getSleepTime(userId: Int): SleepTimeResponse {
+        val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
+        return sleepTimeResponseOf(user.sleepTime, user.wakeTime)
+    }
+
+    /** 수면시간 저장. 취침·기상은 HH:mm, 같은 시각은 안 됨. 자정 넘어 자는 경우(01:00 취침)도 그대로 저장한다 */
+    fun updateSleepTime(userId: Int, request: SleepTimeRequest): SleepTimeResponse {
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        val sleepTime = parseHourMinute(request.sleepTime)
+        val wakeTime = parseHourMinute(request.wakeTime)
+        if (sleepTime == wakeTime) throw UserValidationException.WrongSleepTimeException()
+
+        val user = userRepo.updateSleepTime(userId, sleepTime, wakeTime)
+        return sleepTimeResponseOf(user.sleepTime, user.wakeTime)
+    }
+
+    private fun parseHourMinute(value: String): LocalTime =
+        runCatching { LocalTime.parse(value, HOUR_MINUTE_FORMAT) }.getOrElse { throw UserValidationException.WrongTimeFormatException() }
+
+    private fun sleepTimeResponseOf(sleepTime: LocalTime?, wakeTime: LocalTime?): SleepTimeResponse {
+        val saved = if (sleepTime != null && wakeTime != null) SleepTime(sleepTime, wakeTime) else null
+        val effective = saved ?: SleepTime.DEFAULT
+        return SleepTimeResponse(
+            sleepTime = effective.sleepAt.format(HOUR_MINUTE_FORMAT),
+            wakeTime = effective.wakeAt.format(HOUR_MINUTE_FORMAT),
+            isDefault = saved == null
         )
     }
 

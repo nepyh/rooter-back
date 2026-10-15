@@ -7,6 +7,8 @@ import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
 import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
+import com.github.nepyh.rooter.module.user.dto.SleepTimeRequest
+import com.github.nepyh.rooter.module.user.dto.SleepTimeResponse
 import com.github.nepyh.rooter.module.user.dto.StreakResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
@@ -482,6 +484,104 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
                 }
                 HttpStatusCode.NotFound {
                     description = "존재하지 않거나 본인 소유가 아닌 불가능 시간"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        get("{id}/sleep-time") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 조회할 수 있습니다."))
+            }
+            val response = userService.getSleepTime(id)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("User")
+            summary = "수면시간 조회"
+            description = "저장한 취침·기상 시각(HH:mm). 아직 저장하지 않았으면 기본값 23:00 / 06:30 과 isDefault=true. 본인 정보만 조회 가능"
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "조회 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<SleepTimeResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 정보가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        put("{id}/sleep-time") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@put call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@put call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 수정할 수 있습니다."))
+            }
+            val request = call.receive<SleepTimeRequest>()
+            val response = userService.updateSleepTime(id, request)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("User")
+            summary = "수면시간 저장"
+            description = "취침·기상 시각(HH:mm)을 저장. 이후 AI 계획 생성·바쁜 시간 조회(SLEEP)·챗봇 재조정/미루기·복습 배치가 이 시간을 피해서 할일을 잡음. " +
+                "자정 전에 자면(23:30 취침, 07:00 기상) 00:00~07:00 과 23:30~24:00 을, 자정 넘어 자면(01:00 취침, 07:00 기상) 01:00~07:00 을 막음. " +
+                "이미 잡혀 있는 할일은 옮기지 않음. 본인 정보만 저장 가능"
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<SleepTimeRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "저장 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<SleepTimeResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID), 시각 형식 오류 (code=INVALID_TIME_FORMAT), 또는 취침·기상 시각이 같음 (code=INVALID_SLEEP_TIME)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 정보가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"

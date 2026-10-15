@@ -32,6 +32,8 @@ interface UserRepo {
 
     fun incrementTokenVersion(userId: Int): UserRow
 
+    fun updateSleepTime(userId: Int, sleepTime: LocalTime, wakeTime: LocalTime): UserRow
+
     fun findStudentProfileByUserId(userId: Int): StudentProfileRow?
 
     fun findUnavailableTimesByUserId(userId: Int): List<UnavailableTimeRow>

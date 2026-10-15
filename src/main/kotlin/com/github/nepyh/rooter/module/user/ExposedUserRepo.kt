@@ -76,6 +76,16 @@ class ExposedUserRepo : UserRepo {
         }
     }
 
+    override fun updateSleepTime(userId: Int, sleepTime: LocalTime, wakeTime: LocalTime): UserRow {
+        return transaction {
+            val user = UserRow.findById(userId)
+                ?: throw UserNotFoundException()
+            user.sleepTime = sleepTime
+            user.wakeTime = wakeTime
+            user
+        }
+    }
+
     override fun updatePassword(userId: Int, hashedPassword: String): UserRow {
         return transaction {
             val user = UserRow.findById(userId)
