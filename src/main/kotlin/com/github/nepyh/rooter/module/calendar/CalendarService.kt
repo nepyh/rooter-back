@@ -13,6 +13,7 @@ import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationExcep
 import com.github.nepyh.rooter.module.calendar.model.CalendarEventRow
 import com.github.nepyh.rooter.module.calendar.model.CalendarEventTable
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
@@ -97,7 +98,8 @@ class CalendarService {
                         startTime = it.startTime.toString(),
                         endTime = it.endTime.toString(),
                         estimatedMinutes = it.estimatedMinutes,
-                        isCompleted = it.isCompleted
+                        isCompleted = it.isCompleted,
+                        status = PlanTaskStatus.of(it.isCompleted, it.isFailed)
                     )
                 }
 

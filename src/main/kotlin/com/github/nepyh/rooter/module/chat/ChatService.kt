@@ -13,6 +13,7 @@ import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
@@ -242,7 +243,8 @@ class ChatService(
                             startTime = it.startTime.toString(),
                             endTime = it.endTime.toString(),
                             estimatedMinutes = it.estimatedMinutes,
-                            isCompleted = it.isCompleted
+                            isCompleted = it.isCompleted,
+                            status = PlanTaskStatus.of(it.isCompleted, it.isFailed)
                         )
                     }
             }
@@ -426,7 +428,8 @@ private fun PlanTaskRow.toResponse(dailyPlanId: Int) = PlanTaskResponse(
     startTime = startTime.toString(),
     endTime = endTime.toString(),
     estimatedMinutes = estimatedMinutes,
-    isCompleted = isCompleted
+    isCompleted = isCompleted,
+    status = PlanTaskStatus.of(isCompleted, isFailed)
 )
 
 internal fun noOverlapReply(window: Pair<LocalTime, LocalTime>): String =

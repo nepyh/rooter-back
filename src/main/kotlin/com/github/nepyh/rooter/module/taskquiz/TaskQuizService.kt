@@ -6,6 +6,7 @@ import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
 import com.github.nepyh.rooter.module.review.ReviewChoiceDraft
 import com.github.nepyh.rooter.module.review.copyWrongQuestionToReview
 import com.github.nepyh.rooter.module.review.model.ReviewSource
@@ -364,7 +365,8 @@ class TaskQuizService(
                 startTime = row.startTime.toString(),
                 endTime = row.endTime.toString(),
                 estimatedMinutes = row.estimatedMinutes,
-                isCompleted = row.isCompleted
+                isCompleted = row.isCompleted,
+                status = PlanTaskStatus.of(row.isCompleted, row.isFailed)
             )
         }
     }

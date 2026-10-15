@@ -3,6 +3,7 @@ package com.github.nepyh.rooter.module.planboard
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.WeeklyPlanResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
@@ -237,6 +238,7 @@ class PlanTaskService {
         startTime = startTime.format(timeFormat),
         endTime = endTime.format(timeFormat),
         estimatedMinutes = estimatedMinutes,
-    isCompleted = isCompleted
+    isCompleted = isCompleted,
+        status = PlanTaskStatus.of(isCompleted, isFailed)
     )
 }

@@ -18,6 +18,8 @@ object PlanTaskTable : IntIdTable("plan_tasks") {
     val isCompleted = bool("is_completed").default(false)
     // 챗봇으로 다른 날로 미뤘을 때 원래 날짜. null = 미룬 적 없음 (rooter-ddl #25)
     val postponedFromDate = date("postponed_from_date").nullable()
+    // 실패 여부 (사용자가 실패를 고름 / 태스크 퀴즈 3회 불합격). is_completed 와 동시에 true 가 되지 않게 서비스가 막는다 (rooter-ddl #28)
+    val isFailed = bool("is_failed").default(false)
 }
 
 class PlanTaskRow(id: EntityID<Int>) : IntEntity(id) {
@@ -30,4 +32,5 @@ class PlanTaskRow(id: EntityID<Int>) : IntEntity(id) {
     var estimatedMinutes by PlanTaskTable.estimatedMinutes
     var isCompleted by PlanTaskTable.isCompleted
     var postponedFromDate by PlanTaskTable.postponedFromDate
+    var isFailed by PlanTaskTable.isFailed
 }
