@@ -594,6 +594,17 @@ class PlanBoardServiceTest : StringSpec({
         saturday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("06:30~10:00", "11:00~23:00")
     }
 
+    "busy-times: 사용자가 저장한 수면시간(01:00 취침, 07:30 기상)을 SLEEP 으로 주고 기본 23:00~06:30 은 막지 않는다" {
+        val userId = seedUser("busy-sleep@test.com")
+        transaction(db) { UserRow[userId].apply { sleepTime = LocalTime.of(1, 0); wakeTime = LocalTime.of(7, 30) } }
+
+        // 2026-07-04 토요일
+        val saturday = BusyTimeService(noNiceSchoolDataFetcher()).getBusyTimes(userId, LocalDate.of(2026, 7, 4), LocalDate.of(2026, 7, 4)).days.single()
+
+        saturday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf("SLEEP 01:00~07:30")
+        saturday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("00:00~01:00", "07:30~24:00")
+    }
+
     "busy-times: endDate 가 startDate 보다 빠르거나 31일을 넘으면 InvalidDateRangeException" {
         val userId = seedUser("busy-range@test.com")
         val service = BusyTimeService(noNiceSchoolDataFetcher())
