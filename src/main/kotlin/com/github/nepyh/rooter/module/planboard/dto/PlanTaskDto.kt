@@ -10,7 +10,10 @@ data class PlanTaskResponse(
     val startTime: String,        // "17:30"
     val endTime: String,          // "19:30"
     val estimatedMinutes: Int,    // "2시간" 표시용
-    val isCompleted: Boolean
+    val isCompleted: Boolean,
+    // 할일 목록을 과목별로 분류해 제목으로 보여주기 위한 값. null = 과목 미지정(파생 할일·컬럼 추가 전 행)
+    val subjectId: Int? = null,
+    val subjectName: String? = null
 )
 
 @Serializable
@@ -36,7 +39,9 @@ data class PlanTaskCreateRequest(
     val taskName: String,
     val startTime: String,
     val endTime: String,
-    val estimatedMinutes: Int
+    val estimatedMinutes: Int,
+    // 수동 일정 생성에서 프론트가 고른 교과서. 오면 서버가 교과서로부터 과목을 유도해 할일에 붙인다
+    val textbookId: Int? = null
 )
 
 @Serializable
