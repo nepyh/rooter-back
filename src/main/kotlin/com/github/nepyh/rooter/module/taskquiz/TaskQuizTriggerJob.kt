@@ -11,6 +11,7 @@ import kotlinx.serialization.Serializable
 
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -54,7 +55,7 @@ class TaskQuizTriggerJob(
 
         return (PlanTaskTable innerJoin DailyPlanTable)
             .selectAll()
-            .where { DailyPlanTable.planDate eq today }
+            .where { (DailyPlanTable.planDate eq today) and (PlanTaskTable.isFailed eq false) } // 실패 처리한 태스크는 퀴즈를 만들지 않는다
             .mapNotNull { row ->
                 val planTaskId = row[PlanTaskTable.id].value
                 if (planTaskId in alreadyStarted) return@mapNotNull null
@@ -89,7 +90,9 @@ class TaskQuizTriggerJob(
             if (retryAt.isAfter(zonedNow)) return@mapNotNull null
 
             val planTaskId = row.planTaskId.value
-            val taskName = PlanTaskRow.findById(planTaskId)?.taskName ?: return@mapNotNull null
+            val task = PlanTaskRow.findById(planTaskId) ?: return@mapNotNull null
+            if (task.isFailed) return@mapNotNull null // 재시도 대기 중에 실패 처리했으면 더 만들지 않는다
+            val taskName = task.taskName
 
             val nextAttempt = attemptNumber + 1
             val payload = TaskQuizJobPayload(planTaskId, nextAttempt, taskName)
