@@ -11,6 +11,7 @@ import com.github.nepyh.rooter.module.chat.dto.AiChatTask
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.chat.planBoardSummaryOf
 import com.github.nepyh.rooter.module.chat.postponeBlockedReply
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
@@ -123,7 +124,7 @@ class ChatServiceTest : StringSpec({
 
     fun seedTask(
         dailyPlanId: Int, name: String, start: LocalTime, end: LocalTime, completed: Boolean,
-        postponedFrom: LocalDate? = null
+        postponedFrom: LocalDate? = null, failed: Boolean = false
     ): Int = transaction(db) {
         PlanTaskRow.new {
             postponedFromDate = postponedFrom
@@ -133,6 +134,7 @@ class ChatServiceTest : StringSpec({
             endTime = end
             estimatedMinutes = (end.toSecondOfDay() - start.toSecondOfDay()) / 60
             isCompleted = completed
+            isFailed = failed
         }.id.value
     }
 
@@ -172,6 +174,32 @@ class ChatServiceTest : StringSpec({
         )
         response.updatedTasks!!.map { it.endTime } shouldBe listOf("18:00", "18:50", "19:50")
     }
+    "채팅으로 계획을 재조정해도 실패한 태스크는 AI 에 보내지 않고, 지우거나 옮기지 않는다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val failedId = seedTask(dailyPlanId, "실패한 태스크", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false, failed = true)
+        seedTask(dailyPlanId, "남은 태스크", LocalTime.of(18, 10), LocalTime.of(19, 0), completed = false)
+
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "줄였어요",
+                plan_changed = true,
+                plan_update = AiChatPlanUpdate(tasks = listOf(AiChatTask("남은 태스크", 40)))
+            )
+        )
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "10분 줄여줘")
+
+        llm.lastCurrentTasksJson!! shouldNotContain "실패한 태스크"
+        transaction(db) {
+            val failed = PlanTaskRow.findById(failedId)!!
+            failed.isFailed shouldBe true
+            failed.startTime shouldBe LocalTime.of(17, 0)
+        }
+        response.updatedTasks!!.map { it.taskName to it.status } shouldBe listOf(
+            "실패한 태스크" to PlanTaskStatus.FAILED,
+            "남은 태스크" to PlanTaskStatus.PENDING
+        )
+    }
+
     "AI 에 보내는 현재 태스크에 시작·끝 시각이 들어간다 (새 일정과 겹치는지 판단용)" {
         val (userId, dailyPlanId) = seedDailyPlan()
         seedTask(dailyPlanId, "수학", LocalTime.of(16, 10), LocalTime.of(16, 50), completed = false)

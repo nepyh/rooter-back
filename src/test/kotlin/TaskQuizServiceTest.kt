@@ -2,6 +2,8 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
+import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.planboard.guessTaskSubject
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
@@ -24,6 +26,7 @@ import com.github.nepyh.rooter.module.review.model.ReviewQuestionTable
 import com.github.nepyh.rooter.module.taskquiz.GeneratedTaskQuizQuestion
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizLlmClient
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
+import com.github.nepyh.rooter.module.taskquiz.TaskQuizTriggerJob
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResponse
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceRow
 import com.github.nepyh.rooter.module.taskquiz.taskQuizPassCount
@@ -41,6 +44,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import java.time.ZoneId
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -597,6 +601,87 @@ class TaskQuizServiceTest : StringSpec({
 
         result.totalCount shouldBe 3
         result.passed shouldBe true
+    }
+
+    "failTask: 대기 중인 할일을 실패로 저장하고 status=FAILED 를 준다. 다시 눌러도 그대로 성공" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+
+        val failed = PlanTaskService().failTask(lastUserId, taskId)
+
+        failed.status shouldBe PlanTaskStatus.FAILED
+        failed.isCompleted shouldBe false
+        PlanTaskService().failTask(lastUserId, taskId).status shouldBe PlanTaskStatus.FAILED
+        transaction(db) { PlanTaskRow[taskId].isFailed } shouldBe true
+    }
+
+    "failTask: 완료된 할일은 실패로 바꿀 수 없다 (TASK_FINALIZED)" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        seedGradedAttempt(taskId, 1, passed = true)
+
+        shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
+            PlanTaskService().failTask(lastUserId, taskId)
+        }
+        transaction(db) { PlanTaskRow[taskId].isFailed } shouldBe false
+    }
+
+    "failTask: 다른 사람 할일이면 PlanTaskNotFoundException" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+
+        shouldThrow<PlanTaskNotFoundException> { PlanTaskService().failTask(lastUserId + 999, taskId) }
+        transaction(db) { PlanTaskRow[taskId].isFailed } shouldBe false
+    }
+
+    "completeTask: 실패한 할일은 완료로 되돌릴 수 없다 (같은 값은 그대로 성공)" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        PlanTaskService().failTask(lastUserId, taskId)
+
+        shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
+            PlanTaskService().completeTask(lastUserId, taskId, true)
+        }
+        PlanTaskService().completeTask(lastUserId, taskId, false).status shouldBe PlanTaskStatus.FAILED
+    }
+
+    "submitQuiz: 3차까지 모두 떨어지면 할일이 실패(FAILED)로 저장된다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val userId = lastUserId
+        (1..2).forEach { seedGradedAttempt(taskId, it, passed = false) }
+        val service = TaskQuizService(FakeTaskQuizLlmClient())
+        service.generateAttempt(taskId, 3, "수학 문제집 풀기")
+
+        failAll(service, userId, taskId)
+
+        transaction(db) { PlanTaskRow[taskId].let { it.isCompleted to it.isFailed } } shouldBe (false to true)
+    }
+
+    "TaskQuizTriggerJob: 실패 처리한 할일은 종료 시각이 지나도 퀴즈를 만들지 않고, 재시도도 만들지 않는다" {
+        val failedTask = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        val userId = lastUserId
+        val pendingTask = transaction(db) {
+            PlanTaskRow.new {
+                dailyPlan = PlanTaskRow[failedTask].dailyPlan; taskName = "영어 단어 외우기"
+                startTime = LocalTime.of(17, 0); endTime = LocalTime.of(17, 30); estimatedMinutes = 30
+            }.id.value
+        }
+        val retrying = transaction(db) {
+            PlanTaskRow.new {
+                dailyPlan = PlanTaskRow[failedTask].dailyPlan; taskName = "국어 복습"
+                startTime = LocalTime.of(18, 0); endTime = LocalTime.of(18, 30); estimatedMinutes = 30
+            }.id.value
+        }
+        transaction(db) {
+            TaskQuizAttemptTable.insert {
+                it[planTaskId] = retrying; it[attemptNumber] = 1; it[totalCount] = 5; it[correctCount] = 0
+                it[passed] = false; it[createdAt] = OffsetDateTime.now().minusHours(1)
+            }
+        }
+        PlanTaskService().failTask(userId, failedTask)
+        PlanTaskService().failTask(userId, retrying)
+
+        // 그날 밤 23:00 (KST) — 세 할일 모두 종료 시각이 지났다
+        val due = TaskQuizTriggerJob(TaskQuizService(FakeTaskQuizLlmClient()))
+            .findDue(day.atTime(23, 0).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime())
+
+        due.map { it.runKey } shouldBe listOf("task_quiz_${pendingTask}_1")
     }
 })
 
