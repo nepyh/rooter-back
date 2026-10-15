@@ -189,7 +189,9 @@ fun Application.configureAppModule() {
         exception<StudyStyleValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
-        exception<BadRequestException> { call, _ ->
+        exception<BadRequestException> { call, cause ->
+            // cause.cause 에 kotlinx.serialization 상세(누락 필드·문법 위치)가 들어 있다.
+            call.application.log.warn("Invalid request body: ${cause.cause?.message ?: cause.message}")
             call.respondError(HttpStatusCode.BadRequest, "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다.")
         }
         status(HttpStatusCode.NotFound) { _ ->
