@@ -52,6 +52,8 @@ import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
 import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.ContentTransformationException
+import io.ktor.server.plugins.PayloadTooLargeException
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 import io.ktor.server.routing.*
@@ -195,6 +197,29 @@ fun Application.configureAppModule() {
         }
     }
     
+    // Ktor 엔진이 ApplicationPhase.Plugins 에 기본 transformation checker 를 설치하고
+    // ContentTransformationException 을 직접 catch 해 415 + 내부 메시지(text/plain)로 응답한다.
+    // StatusPages 는 BeforeFallback 단계라 이 예외에 도달하지 못하므로 같은 Plugins 단계에서
+    // 먼저 잡아 에러 응답 계약(ErrorResponse)으로 정규화한다.
+    intercept(ApplicationCallPipeline.ApplicationPhase.Plugins) {
+        try {
+            proceed()
+        } catch (cause: ContentTransformationException) {
+            when (cause) {
+                is PayloadTooLargeException -> call.respondError(
+                    HttpStatusCode.PayloadTooLarge,
+                    "PAYLOAD_TOO_LARGE",
+                    "요청 본문이 너무 큽니다."
+                )
+                else -> call.respondError(
+                    HttpStatusCode.BadRequest,
+                    "INVALID_REQUEST_BODY",
+                    "요청 본문을 해석할 수 없습니다. Content-Type: application/json 인지 확인해 주세요."
+                )
+            }
+        }
+    }
+
     val schedulerEngine: SchedulerEngine by inject()
     schedulerEngine.start(this)
 }
