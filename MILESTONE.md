@@ -46,7 +46,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
 | M8 | AI 계획 생성·스케줄링 | 7/10 | doing |
-| M9 | 퀴즈 고도화 | 12/15 | doing |
+| M9 | 퀴즈 고도화 | 14/16 | doing |
 | M10 | 챗봇 재조정 | 5/5 | done |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
@@ -187,8 +187,9 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 - [x] done RB-129 퀴즈 문항 수 가변 (#243) — 공부 시간 기준 30분 이하 4·1시간 이하 5·초과 7문항 (태스크 퀴즈는 할일 estimatedMinutes, 일일 퀴즈는 완료 할일 합), 태스크 퀴즈 통과 70점 이상 (`passCount` 응답 추가). 문항이 덜 저장되면 통과 못 하던 문제도 수정 — PR #247 머지 (10-11) (`3a551e4`·`e4ac66c`·`0618633`) · `./gradlew test` 전체 통과 · main 반영 PR #255 (10-12) · 프론트(`rooter-front`)는 `questions.length`·서버 `passed` 기준이라 영향 없음 확인. DB 변경 없음
 - [x] done RB-131 복습 퀴즈 1단계 — 일일·태스크 퀴즈 오답 자동 수집(`review_questions`·`review_choices`), `GET /review-questions`(id 커서, 50개), `POST /review-questions/{id}/answer`(맞히면 cleared, 틀리면 wrongCount) — PR #250 (10-12, develop) · rooter-ddl #26 머지
 - [x] done RB-132 복습 퀴즈 2단계 — 일일 퀴즈 약점 단원마다 맞춤 문제 2개를 `CUSTOM` 으로 복습 목록에 추가(보기별 이유·풀이 포함, 복습 태스크 배치와 동시 실행, 실패해도 제출 성공), 응답에 `customReviewQuestionCount` (이슈 #251, PR #252 머지 (10-12), `1a842e5`·`f3bec2e`) · `./gradlew test` 224건 통과 · main 반영 PR #255 (10-12) · DB 변경 없음
-- [ ] doing RB-133 복습 퀴즈 3단계 — 문항 단원 저장 — 일일·태스크 퀴즈 문항에 학습 범위 단원(`chapter_name`) 저장(범위 단원과 글자 그대로 맞을 때만, 오답 복사분에도 전달) — 이슈 #261, PR #273 open (`0d12626`·`dcad80d`) · `./gradlew test` 퀴즈·복습 4개 스펙 63건 0 실패 · 응답 형식·스키마 변경 없음(값이 채워지기 시작할 뿐) · **DDL 선행: rooter-ddl #27 머지 → dev DB → 운영 DB** (컬럼 없이 배포되면 퀴즈 생성 실패)
-- [ ] doing RB-134 복습 퀴즈 3단계 — 단원별 오답률 리포트 — `GET /review-questions/report` 단원별 오답률(틀린 수 ÷ 푼 수)·남은 복습 수·단원 미상 수 — 이슈 #267, PR #274 open (`030aa3e`·`f47de4e`) · `./gradlew test` 퀴즈·복습 5개 스펙 65건 0 실패 · 문항 단원 값만 읽음(스키마 변경 없음) · PR #273(문항 단원 저장) 위에 얹은 브랜치
+- [x] done RB-133 복습 퀴즈 3단계 — 문항 단원 저장 — 일일·태스크 퀴즈 문항에 학습 범위 단원(`chapter_name`) 저장(범위 단원과 글자 그대로 맞을 때만, 오답 복사분에도 전달) — 이슈 #261, PR #273 머지 (10-15) (`0d12626`·`dcad80d`) · `./gradlew test` 퀴즈·복습 4개 스펙 63건 0 실패 · rooter-ddl #27 머지(10-12)
+- [x] done RB-134 복습 퀴즈 3단계 — 단원별 오답률 리포트 — `GET /review-questions/report` 단원별 오답률(틀린 수 ÷ 푼 수)·남은 복습 수·단원 미상 수 — 이슈 #267, PR #274 머지 (10-15) (`030aa3e`·`f47de4e`) · `./gradlew test` 퀴즈·복습 5개 스펙 65건 0 실패 · 문항 단원 값만 읽음(스키마 변경 없음)
+- [ ] doing RB-135 퀴즈 히스토리 목록 조회 — `GET /quiz-history` 차수 단위 최신순(id 커서 50개)·todo/done 필터, 항목에 제목(`plan_tasks.task_name`)·과목(문항 단원 → 교과서 → 과목, 실패 시 할일 이름 폴백)·시간 3종(생성/응시 예정/완료)·점수, 제출 시각(`submitted_at`) 기록 — 이슈 #275, PR #277 open (`a3bf5ee`) · `./gradlew test` 퀴즈·복습 6개 스펙 71건 0 실패 · 조회 전용(LLM 없음) · **DDL 선행: rooter-ddl #34 (PR #35) → dev DB → 운영 DB** (컬럼 없이 배포되면 퀴즈 제출 실패) · 일일 퀴즈·상세 조회는 범위 밖
 
 ## M10. 챗봇 재조정
 
