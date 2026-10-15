@@ -161,7 +161,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
             tag("PlanTask")
             summary = "태스크 완료 처리/취소"
             description = "isCompleted를 true/false로 보내 완료 상태를 토글. 본인 플랜보드 소유 태스크만 가능. " +
-                "태스크 퀴즈로 결과가 확정된 태스크(통과했거나, 3차까지 모두 불합격)는 완료 상태를 바꿀 수 없음 (지금과 같은 값은 그대로 성공)"
+                "태스크 퀴즈로 결과가 확정된 태스크(통과했거나, 3차까지 모두 불합격)와 실패 처리한 태스크(status=FAILED)는 완료 상태를 바꿀 수 없음 (지금과 같은 값은 그대로 성공)"
             parameters {
                 path("taskId") {
                     description = "태스크 ID"
@@ -182,7 +182,48 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 퀴즈로 결과가 확정된 태스크의 완료 상태 변경 (code=TASK_FINALIZED)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 퀴즈로 결과가 확정됐거나 실패 처리한 태스크의 완료 상태 변경 (code=TASK_FINALIZED)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않거나 본인 소유가 아닌 태스크"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        patch("{taskId}/fail") {
+            val taskId = call.parameters["taskId"]?.toIntOrNull()
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+
+            val response = planTaskService.failTask(call.userId(), taskId)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("PlanTask")
+            summary = "태스크 실패 처리"
+            description = "요청 본문 없음. 대기 상태의 태스크를 실패로 저장하고 status=FAILED 로 돌려줌 (isCompleted 는 false). " +
+                "이미 실패한 태스크는 그대로 성공. 완료된 태스크는 실패로 바꿀 수 없고, 실패한 태스크는 완료로 되돌릴 수 없음. " +
+                "실패한 태스크에는 태스크 퀴즈가 자동 생성되지 않음. 본인 플랜보드 소유 태스크만 가능"
+            parameters {
+                path("taskId") {
+                    description = "태스크 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "처리 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<PlanTaskResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 이미 완료된 태스크 (code=TASK_FINALIZED)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

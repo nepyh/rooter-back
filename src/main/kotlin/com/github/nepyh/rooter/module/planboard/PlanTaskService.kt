@@ -168,11 +168,31 @@ class PlanTaskService {
             throw PlanTaskNotFoundException()
         }
 
-        if (task.isCompleted != isCompleted && isFinalizedByQuiz(taskId)) {
+        if (task.isCompleted != isCompleted && (task.isFailed || isFinalizedByQuiz(taskId))) {
             throw PlanTaskValidationException.TaskFinalizedException()
         }
 
         task.isCompleted = isCompleted
+        task.toResponse()
+    }
+
+    /**
+     * 할일을 실패로 저장한다 (앱의 실패 버튼). 대기 상태의 할일만 실패로 바꿀 수 있고,
+     * 이미 실패한 할일은 그대로 돌려준다 (버튼을 두 번 눌러도 성공). 완료된 할일은 TASK_FINALIZED.
+     */
+    fun failTask(userId: Int, taskId: Int): PlanTaskResponse = transaction {
+        val task = PlanTaskRow.findById(taskId)
+            ?: throw PlanTaskNotFoundException()
+
+        if (task.dailyPlan.planBoard.user.id.value != userId) {
+            throw PlanTaskNotFoundException()
+        }
+
+        if (task.isCompleted) {
+            throw PlanTaskValidationException.TaskFinalizedException()
+        }
+
+        task.isFailed = true
         task.toResponse()
     }
 
