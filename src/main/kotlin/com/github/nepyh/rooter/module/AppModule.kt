@@ -51,6 +51,7 @@ import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
+import io.ktor.server.http.content.HttpStatusCodeContent
 import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.ContentTransformationException
 import io.ktor.server.plugins.PayloadTooLargeException
@@ -190,6 +191,13 @@ fun Application.configureAppModule() {
         }
         exception<BadRequestException> { call, _ ->
             call.respondError(HttpStatusCode.BadRequest, "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다.")
+        }
+        status(HttpStatusCode.NotFound) { _ ->
+            // 라우팅이 붙인 404 는 본문이 HttpStatusCodeContent 라 code 가 없다.
+            // 도메인 예외로 만든 404(JSON)는 그대로 둔다.
+            if (content is HttpStatusCodeContent) {
+                call.respondError(HttpStatusCode.NotFound, "NOT_FOUND", "요청한 경로를 찾을 수 없습니다.")
+            }
         }
         exception<Throwable> { call, cause ->
             call.application.log.error("Unhandled exception", cause)
