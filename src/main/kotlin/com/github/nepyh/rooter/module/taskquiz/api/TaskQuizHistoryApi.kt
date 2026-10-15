@@ -1,9 +1,11 @@
 package com.github.nepyh.rooter.module.taskquiz.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.taskquiz.QUIZ_HISTORY_PAGE_SIZE
 import com.github.nepyh.rooter.module.taskquiz.QuizHistoryStatus
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizHistoryService
+import com.github.nepyh.rooter.module.taskquiz.dto.QuizHistoryDetailResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.QuizHistoryListResponse
 import com.github.nepyh.rooter.module.taskquiz.exception.QuizHistoryValidationException
 import io.ktor.http.ContentType
@@ -72,6 +74,46 @@ fun TaskQuizHistoryApi(taskQuizHistoryService: TaskQuizHistoryService) = ApiRout
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        get("{quizId}") {
+            val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            val quizId = call.parameters["quizId"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+
+            call.respond(HttpStatusCode.OK, taskQuizHistoryService.detail(userId, quizId))
+        }.describe {
+            tag("QuizHistory")
+            summary = "퀴즈 히스토리 상세"
+            description = "목록에서 받은 quizId(차수 id) 하나의 문항별 내용을 돌려준다. 제출이 끝난 차수는 내가 고른 보기·정답·해설(문항 풀이, 보기별 풀이)을 채워서 주고, " +
+                "아직 채점 전(todo) 차수는 정답·해설을 null 로 숨긴다 (퀴즈를 풀기 전에 답이 새지 않게). 조회 전용이라 제출·채점·복습 배치가 일어나지 않는다"
+            parameters {
+                path("quizId") {
+                    description = "퀴즈 차수 ID (목록 응답의 quizId)"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "조회 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<QuizHistoryDetailResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "quizId 가 정수가 아님 (code=INVALID_ID)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않거나 본인 소유가 아닌 차수 (code=QUIZ_HISTORY_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
