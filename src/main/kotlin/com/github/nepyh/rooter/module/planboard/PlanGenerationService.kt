@@ -50,6 +50,7 @@ private data class PlanContext(
     val schoolId: String?,
     val classNumber: Int?,
     val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>,
+    val sleepTime: SleepTime,
     val existingTaskRanges: Map<LocalDate, List<Pair<Int, Int>>>
 )
 
@@ -109,6 +110,7 @@ class PlanGenerationService(
                 schoolId = profileRow?.schoolId,
                 classNumber = profileRow?.classNumber,
                 customUnavailableRows = customRows,
+                sleepTime = userSleepTime(userId),
                 existingTaskRanges = existingTaskRanges
             )
         }
@@ -124,7 +126,8 @@ class PlanGenerationService(
                 schoolId = planContext.schoolId,
                 classNumber = planContext.classNumber,
                 grade = planContext.grade,
-                customRows = planContext.customUnavailableRows
+                customRows = planContext.customUnavailableRows,
+                sleepTime = planContext.sleepTime
             ),
             planContext.existingTaskRanges
         )
