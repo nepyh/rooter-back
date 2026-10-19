@@ -10,8 +10,8 @@
 > (첫 작성 2026-09-17, 09-17 이후 머지된 PR 52건과 운영 작업을 반영)
 > 마일스톤 묶음과 진행 판정은 조정 대상이다. 상태를 바꿀 때는 아래 갱신 규칙을 따른다.
 
-**작업 흐름** — 기능 PR 은 `develop` 으로 올린다 → 머지하면 dev 서버에 자동 배포 → 확인 후 `develop` → `main` 머지로 운영 배포.
-DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgres`)에는 **코드 머지 전에** ALTER 한다. (자세한 서버 정보는 README "서버 두 개 (prod / dev)")
+**작업 흐름** — 기능 브랜치는 `main` 에서 자르고 PR 도 `main` 으로 올린다 → **머지하면 바로 운영에 자동 배포**된다 (dev 서버·`develop` 브랜치는 10-19 삭제, RB-135).
+DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같은 마스터 데이터)에서 먼저 검증하고, 운영 DB(`postgres`)에는 **코드 머지 전에** 적용한다.
 
 ## 상태 어휘
 
@@ -50,7 +50,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 | M10 | 챗봇 재조정 | 5/5 | done |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
-| M13 | 인프라·배포 | 6/9 | doing |
+| M13 | 인프라·배포 | 7/11 | doing |
 
 ## 블로커
 
@@ -221,7 +221,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 
 ## M13. 인프라·배포
 
-목표: 운영(prod)과 개발(dev) 서버가 분리되어 있고, 운영에 나가기 전에 dev 에서 확인할 수 있다.
+목표: 운영(prod) 서버 하나로 배포하고, 운영에 나가기 전 검증은 로컬(운영과 같은 스키마·마스터 데이터의 Postgres)에서 한다.
 
 - [x] done RB-120 배포에 쓰이지 않는 ECS task definition 스냅샷 제거 — PR #163 (09-27)
 - [x] done RB-121 컨테이너 기동에 필요한 LLM·oauth 환경변수 배선 누락 — PR #216 (09-30)
@@ -229,6 +229,8 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 - [x] done RB-123 운영을 `prod.conf` 로 전환 (Swagger 비공개, S3 저장) — ECS 태스크 정의 rev 129 (10-01) · health 200 / swagger 404 / 회원가입·로그인 / S3 아바타 / 계획 생성 확인, 되돌리기 = rev 128
 - [x] done RB-124 dev 서버 — ECS `rooter-dev` + 같은 RDS 의 `rooter_dev` DB(마스터 데이터만 복사) + `develop` 자동 배포 — PR #234 (10-04) · 첫 배포 성공, health·swagger 200
 - [x] done RB-125 dev 전용 DB 계정 `rooter_dev_app` — dev DB 소유, 운영 테이블 읽기 permission denied 확인 (10-04)
+- [x] done RB-135 dev 서버 삭제 (운영만 사용) — ECS Express 서비스 `rooter-dev`·태스크 정의 `default-rooter-dev` 18개·로그 그룹 `/ecs/rooter-dev` 삭제, 운영 health 200 확인 (10-19) · `develop` 브랜치 삭제 · `deploy-dev.yml` 제거·README 정리 (이 커밋들)
+- [ ] todo RB-136 같은 RDS 의 `rooter_dev` DB·`rooter_dev_app` 계정 DROP — DB 접속 권한이 있는 사람이 실행 (운영 `postgres` DB 가 아닌지 확인 후)
 - [ ] todo RB-126 고정 도메인 연결 (B-02) — 지금은 ECS 자동 주소. 도메인 결정 필요
 - [ ] todo RB-127 서버 DB 초기화 여부 (B-01) + 운영에 남은 테스트 계정 정리 — 결정 필요
 - [ ] todo RB-128 운영 `textbooks.file_url` 잔여 컬럼 정리 — DDL main 은 삭제했는데 운영 DB 에는 남아 있음 (10-04 확인)
@@ -241,7 +243,7 @@ DDL 이 바뀌면 dev DB(`rooter_dev`)에 먼저 ALTER 하고, 운영 DB(`postgr
 | 2 | RB-048 내 정보에 학교 이름 (B-17) | S | 없음 | NICE 조회, DB 변경 없음 |
 | 3 | RB-026 트랜잭션 스타일 통일 | S | 없음 | 41곳 / 8파일, 기계적 치환 |
 | 4 | RB-088 학습 범위 없는 날 퀴즈 (B-08) | M | 디자인 | 범위 없을 때 동작 정의 필요 |
-| 5 | RB-115 태스크 source 필드 (B-13) | M | rooter-ddl | DDL 선행, dev DB 먼저 |
+| 5 | RB-115 태스크 source 필드 (B-13) | M | rooter-ddl | DDL 선행, 로컬 검증 후 운영 DB 먼저 |
 | 6 | RB-060 Notification (B-12) | L | 브랜치 재정렬 | `feature/notification-settings` 를 main 위에 다시 얹기 |
 | 7 | RB-014 planboard 네이밍 | M | rooter-ddl #10 | DDL 선행 필요 (블로커) |
 | - | 정책 결정 대기 | - | 팀 결정 | RB-077 자정 넘김 · RB-116 JWT 만료 · RB-126 도메인 · RB-127 DB 초기화 |
