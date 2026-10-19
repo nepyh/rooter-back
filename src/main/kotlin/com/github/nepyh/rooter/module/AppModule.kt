@@ -51,7 +51,10 @@ import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
+import io.ktor.server.http.content.HttpStatusCodeContent
 import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.ContentTransformationException
+import io.ktor.server.plugins.PayloadTooLargeException
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 import io.ktor.server.routing.*
@@ -186,8 +189,17 @@ fun Application.configureAppModule() {
         exception<StudyStyleValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
-        exception<BadRequestException> { call, _ ->
+        exception<BadRequestException> { call, cause ->
+            // cause.cause 에 kotlinx.serialization 상세(누락 필드·문법 위치)가 들어 있다.
+            call.application.log.warn("Invalid request body: ${cause.cause?.message ?: cause.message}")
             call.respondError(HttpStatusCode.BadRequest, "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다.")
+        }
+        status(HttpStatusCode.NotFound) { _ ->
+            // 라우팅이 붙인 404 는 본문이 HttpStatusCodeContent 라 code 가 없다.
+            // 도메인 예외로 만든 404(JSON)는 그대로 둔다.
+            if (content is HttpStatusCodeContent) {
+                call.respondError(HttpStatusCode.NotFound, "NOT_FOUND", "요청한 경로를 찾을 수 없습니다.")
+            }
         }
         exception<Throwable> { call, cause ->
             call.application.log.error("Unhandled exception", cause)
@@ -195,6 +207,29 @@ fun Application.configureAppModule() {
         }
     }
     
+    // Ktor 엔진이 ApplicationPhase.Plugins 에 기본 transformation checker 를 설치하고
+    // ContentTransformationException 을 직접 catch 해 415 + 내부 메시지(text/plain)로 응답한다.
+    // StatusPages 는 BeforeFallback 단계라 이 예외에 도달하지 못하므로 같은 Plugins 단계에서
+    // 먼저 잡아 에러 응답 계약(ErrorResponse)으로 정규화한다.
+    intercept(ApplicationCallPipeline.ApplicationPhase.Plugins) {
+        try {
+            proceed()
+        } catch (cause: ContentTransformationException) {
+            when (cause) {
+                is PayloadTooLargeException -> call.respondError(
+                    HttpStatusCode.PayloadTooLarge,
+                    "PAYLOAD_TOO_LARGE",
+                    "요청 본문이 너무 큽니다."
+                )
+                else -> call.respondError(
+                    HttpStatusCode.BadRequest,
+                    "INVALID_REQUEST_BODY",
+                    "요청 본문을 해석할 수 없습니다. Content-Type: application/json 인지 확인해 주세요."
+                )
+            }
+        }
+    }
+
     val schedulerEngine: SchedulerEngine by inject()
     schedulerEngine.start(this)
 }
