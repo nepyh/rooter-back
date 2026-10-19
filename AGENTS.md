@@ -159,7 +159,9 @@ JWT Bearer 방식입니다. 보호가 필요한 라우트는 `authenticate("auth
 
 `.describe { }` 로 tag·summary·응답 코드를 적습니다. 특히 400 응답에는
 어떤 `code` 가 나갈 수 있는지 적어주세요. 프론트엔드가 이것을 보고 작업합니다.
-개발 모드에서 Swagger UI 가 함께 뜹니다.
+개발 모드에서 Swagger UI 가 함께 뜹니다 (로컬 `http://localhost:8080/api/swagger`, 운영은 꺼져 있음).
+`main` 에 머지되면 `.github/workflows/swagger-pages.yml` 이 같은 문서를 **https://nepyh.github.io/rooter-back/** 에 게시하므로,
+프론트엔드는 서버를 띄우지 않고 이 링크로 봅니다.
 
 ### 시각 값
 
