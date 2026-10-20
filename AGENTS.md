@@ -159,7 +159,9 @@ JWT Bearer 방식입니다. 보호가 필요한 라우트는 `authenticate("auth
 
 `.describe { }` 로 tag·summary·응답 코드를 적습니다. 특히 400 응답에는
 어떤 `code` 가 나갈 수 있는지 적어주세요. 프론트엔드가 이것을 보고 작업합니다.
-개발 모드에서 Swagger UI 가 함께 뜹니다.
+개발 모드에서 Swagger UI 가 함께 뜹니다 (로컬 `http://localhost:8080/api/swagger`, 운영은 꺼져 있음).
+`main` 에 머지되면 `.github/workflows/swagger-pages.yml` 이 같은 문서를 **https://nepyh.github.io/rooter-back/** 에 게시하므로,
+프론트엔드는 서버를 띄우지 않고 이 링크로 봅니다.
 
 ### 시각 값
 
@@ -172,6 +174,13 @@ JWT Bearer 방식입니다. 보호가 필요한 라우트는 `authenticate("auth
 
 **컬럼이나 제약을 바꾸면 `rooter-ddl` 에도 반영해야 합니다.** 한쪽만 바꾸면
 로컬 테스트는 통과하는데 배포하면 터집니다. (실제로 `daily_plans` 유니크 제약에서 겪었습니다.)
+
+dev 서버는 없습니다(2026-10-19 삭제). **`main` 에 머지하면 곧바로 운영에 배포**되므로 순서를 지킵니다.
+
+1. `rooter-ddl` PR 머지
+2. 로컬 Postgres(`schema.sql` + 운영과 같은 마스터 데이터)에서 DDL·데이터 SQL 을 실행해 검증
+3. 운영 DB 에 적용
+4. 그다음에 이 저장소 PR 을 `main` 에 머지 — 컬럼 없이 코드가 먼저 나가면 그 기능이 운영에서 바로 실패합니다
 
 ## 협업 규칙
 
