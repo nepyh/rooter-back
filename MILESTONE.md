@@ -38,7 +38,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 | # | 마일스톤 | 진행 | 상태 |
 |---|---|---|---|
-| M1 | 플랜보드 코어 | 10/11 | doing |
+| M1 | 플랜보드 코어 | 10/12 | doing |
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 6/8 | doing |
@@ -83,6 +83,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-009 DB 통합 테스트 (`PlanBoardServiceTest`, 18케이스) — `a5680c7`
 - [ ] todo RB-010 scheduler DAO 전환 — 미지시 항목
 - [x] done RB-130 퀴즈로 결과가 확정된 할일(통과 / 3차까지 불합격)은 완료 상태 변경 금지 (#244) — `completeTask` 에서 400 `TASK_FINALIZED`, 같은 값은 성공. PR #248 머지 (10-11) (`35f894b`·`b1bc488`) · `./gradlew test` 전체 통과 · 프론트는 `completeTask` 를 정의만 하고 호출하지 않아 영향 없음. DB 변경 없음
+- [ ] doing RB-138 할일 상태를 `status`(PENDING/DONE/FAILED) 하나로 통합 (#258) — `is_completed`·`is_failed` 를 `plan_tasks.status` 로 교체, 실패 처리·완료 취소는 `PATCH /plan-tasks/{taskId}` 의 `status` 로 (`/fail` 제거), →DONE 은 퀴즈 통과로만 (`TASK_QUIZ_REQUIRED`). PR #283 open (`f9a4f4f`·`a465bbd`) · `./gradlew test` 238건 0 실패 · rooter-ddl #36 / PR #37 (status 추가, 1단계) 선행 필요 · 구 컬럼 삭제는 배포 후 rooter-ddl 다음 PR
 
 ## M2. 컨벤션·구조 정비
 
