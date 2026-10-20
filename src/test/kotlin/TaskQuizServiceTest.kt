@@ -469,11 +469,13 @@ class TaskQuizServiceTest : StringSpec({
         transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe false
     }
 
-    "completeTask: 아직 재시도가 남았거나 퀴즈가 없는 태스크는 자유롭게 완료·취소할 수 있다" {
+    "completeTask: 퀴즈를 통과하지 않은 태스크는 완료로 바꿀 수 없다 (퀴즈 없음 / 재시도 남음, #259)" {
         val retrying = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
         seedGradedAttempt(retrying, 1, passed = false)
-        PlanTaskService().completeTask(lastUserId, retrying, true).isCompleted shouldBe true
-        PlanTaskService().completeTask(lastUserId, retrying, false).isCompleted shouldBe false
+        shouldThrow<PlanTaskValidationException.TaskQuizRequiredException> {
+            PlanTaskService().completeTask(lastUserId, retrying, true)
+        }
+        transaction(db) { PlanTaskRow[retrying].isCompleted } shouldBe false
 
         val noQuiz = transaction(db) {
             PlanTaskRow.new {
@@ -481,8 +483,24 @@ class TaskQuizServiceTest : StringSpec({
                 startTime = LocalTime.of(17, 0); endTime = LocalTime.of(17, 30); estimatedMinutes = 30
             }.id.value
         }
-        PlanTaskService().completeTask(lastUserId, noQuiz, true).isCompleted shouldBe true
+        shouldThrow<PlanTaskValidationException.TaskQuizRequiredException> {
+            PlanTaskService().completeTask(lastUserId, noQuiz, true)
+        }
+        transaction(db) { PlanTaskRow[noQuiz].isCompleted } shouldBe false
+        // 미완료를 그대로 미완료로 보내는 건 성공
         PlanTaskService().completeTask(lastUserId, noQuiz, false).isCompleted shouldBe false
+    }
+
+    "completeTask: 퀴즈 없이 이미 완료된 태스크(예전 데이터)는 같은 값은 성공하고 완료 취소도 된다" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        transaction(db) { PlanTaskRow[taskId].isCompleted = true }
+
+        PlanTaskService().completeTask(lastUserId, taskId, true).isCompleted shouldBe true
+        PlanTaskService().completeTask(lastUserId, taskId, false).isCompleted shouldBe false
+        // 한 번 취소하면 다시 완료하려면 퀴즈를 통과해야 한다
+        shouldThrow<PlanTaskValidationException.TaskQuizRequiredException> {
+            PlanTaskService().completeTask(lastUserId, taskId, true)
+        }
     }
 
     "generateAttempt: 정답 번호가 보기 범위를 벗어난 문제는 저장하지 않는다" {

@@ -157,6 +157,7 @@ class PlanTaskService {
     /**
      * 태스크 완료 처리/취소 (본인 플랜보드 소유권 확인).
      * 태스크 퀴즈로 결과가 확정된 태스크(통과, 또는 마지막 차수까지 불합격)는 완료 상태를 바꿀 수 없다.
+     * 미완료 → 완료는 태스크 퀴즈 통과로만 일어나므로 여기서는 막는다 (TASK_QUIZ_REQUIRED). 완료 취소는 그대로 된다.
      * 지금 상태와 같은 값을 보내는 건 막지 않는다.
      */
     fun completeTask(userId: Int, taskId: Int, isCompleted: Boolean): PlanTaskResponse = transaction {
@@ -169,6 +170,11 @@ class PlanTaskService {
 
         if (task.isCompleted != isCompleted && isFinalizedByQuiz(taskId)) {
             throw PlanTaskValidationException.TaskFinalizedException()
+        }
+
+        // 퀴즈를 통과하면 TaskQuizService.submitQuiz 가 완료로 바꾼다. 여기서 완료로 바꾸면 퀴즈 없이 잔디가 채워진다 (#259)
+        if (isCompleted && !task.isCompleted) {
+            throw PlanTaskValidationException.TaskQuizRequiredException()
         }
 
         task.isCompleted = isCompleted
