@@ -26,7 +26,10 @@ data class PlanGenerationTaskResponse(
     val taskName: String,
     val estimatedMinutes: Int,
     val startTime: String,
-    val endTime: String
+    val endTime: String,
+    // 할일 조회 API(PlanTaskResponse)와 같은 값. null = AI 가 요청 과목 중 하나로 표기하지 않음
+    val subjectId: Int? = null,
+    val subjectName: String? = null
 )
 
 @Serializable

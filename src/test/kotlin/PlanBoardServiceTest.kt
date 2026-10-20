@@ -1183,7 +1183,7 @@ class PlanBoardServiceTest : StringSpec({
             )
         )
 
-        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
             userId,
             PlanGenerationRequest(
                 title = "과목 귀속",
@@ -1198,6 +1198,12 @@ class PlanBoardServiceTest : StringSpec({
             "수학 개념" to "수학",
             "수학 문제" to "수학",
             "국어 문법" to null
+        )
+        // 계획 생성 응답에도 같은 과목이 실린다
+        response.dailyPlans.single().tasks.map { Triple(it.taskName, it.subjectId, it.subjectName) } shouldBe listOf(
+            Triple("수학 개념", subjectId, "수학"),
+            Triple("수학 문제", subjectId, "수학"),
+            Triple("국어 문법", null, null)
         )
     }
 })
