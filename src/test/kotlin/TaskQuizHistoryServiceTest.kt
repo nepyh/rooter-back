@@ -23,6 +23,7 @@ import com.github.nepyh.rooter.module.taskquiz.TaskQuizHistoryService
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizLlmClient
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResponse
+import com.github.nepyh.rooter.module.taskquiz.exception.QuizHistoryNotFoundException
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptRow
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceTable
@@ -30,6 +31,7 @@ import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestionTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -267,6 +269,77 @@ class TaskQuizHistoryServiceTest : StringSpec({
         item.status shouldBe "DONE"
         item.completedAt shouldBe null
         item.passed shouldBe false
+    }
+    "상세: 제출이 끝난 차수는 내가 고른 답·정답·해설(문항 풀이, 보기별 풀이)을 준다" {
+        val (userId, _, taskId) = seedTask("과학 문제집 30쪽 풀기", withScope = true)
+        val service = makeQuiz(taskId, "과학 문제집 30쪽 풀기")
+        val questions = service.getCurrentQuiz(userId, taskId).questions
+        service.answerQuestion(userId, taskId, questions[0].id, questions[0].choice("A").id) // 정답
+        service.answerQuestion(userId, taskId, questions[1].id, questions[1].choice("B").id) // 오답
+        questions.drop(2).forEach { service.answerQuestion(userId, taskId, it.id, it.choice("A").id) }
+        service.submitQuiz(userId, taskId)
+
+        val quizId = TaskQuizHistoryService(onDay).list(userId, null).quizzes.single().quizId
+        val detail = TaskQuizHistoryService(onDay).detail(userId, quizId)
+
+        detail.status shouldBe "DONE"
+        detail.title shouldBe "과학 문제집 30쪽 풀기"
+        detail.subjectName shouldBe "과학"
+        detail.attemptNumber shouldBe 1
+        detail.totalCount shouldBe 5
+        detail.passCount shouldBe 4       // 70점 이상
+        detail.correctCount shouldBe 4
+        detail.passed shouldBe true
+        detail.completedAt.shouldNotBeNull()
+
+        val first = detail.questions.first()
+        first.isCorrect shouldBe true
+        first.explanation shouldBe "자세한 풀이 1"    // 문항 풀이 = 정답 보기의 풀이
+        first.choices.first { it.choiceText == "A" }.selected shouldBe true
+        first.choices.first { it.choiceText == "B" }.selected shouldBe false
+        first.choices.all { it.isCorrect != null } shouldBe true
+
+        val second = detail.questions[1]
+        second.isCorrect shouldBe false
+        second.choices.first { it.choiceText == "A" }.isCorrect shouldBe true   // 실제 정답 보기
+        second.choices.first { it.choiceText == "B" }.isCorrect shouldBe false  // 내가 고른 오답
+        second.choices.first { it.choiceText == "B" }.reason shouldBe "B 가 틀린 이유"
+        second.choices.first { it.choiceText == "A" }.reason shouldBe null   // 정답 보기의 풀이는 문항 explanation 에만
+    }
+
+    "상세: 미응시 차수는 정답·해설을 숨긴다 (퀴즈를 풀기 전에 답이 새지 않게)" {
+        val (userId, _, taskId) = seedTask("수학 문제집 풀기", withScope = false)
+        makeQuiz(taskId, "수학 문제집 풀기") // 답을 하지 않는다
+
+        val quizId = TaskQuizHistoryService(onDay).list(userId, QuizHistoryStatus.TODO).quizzes.single().quizId
+        val detail = TaskQuizHistoryService(onDay).detail(userId, quizId)
+
+        detail.status shouldBe "TODO"
+        detail.correctCount shouldBe null
+        detail.completedAt shouldBe null
+        detail.questions.size shouldBe 5
+        detail.questions.all { it.isCorrect == null } shouldBe true
+        detail.questions.all { it.explanation == null } shouldBe true
+        detail.questions.all { question -> question.choices.all { it.isCorrect == null } } shouldBe true
+        detail.questions.all { question -> question.choices.all { it.reason == null } } shouldBe true
+
+        // 계획 날짜가 지나면 목록과 같이 MISSED 로 나오고, 여전히 정답은 숨긴다
+        val nextDayDetail = TaskQuizHistoryService(clockOn(day.plusDays(1))).detail(userId, quizId)
+        nextDayDetail.status shouldBe "MISSED"
+        nextDayDetail.questions.all { it.isCorrect == null } shouldBe true
+    }
+
+    "상세: 남의 차수는 조회되지 않는다" {
+        val (me, _, myTask) = seedTask("수학 문제집 풀기", withScope = false)
+        val (other, _, otherTask) = seedTask("영어 단어 30개 외우기", withScope = false)
+        makeQuiz(myTask, "수학 문제집 풀기")
+        makeQuiz(otherTask, "영어 단어 30개 외우기")
+
+        val othersQuizId = TaskQuizHistoryService(onDay).list(other, null).quizzes.single().quizId
+
+        shouldThrow<QuizHistoryNotFoundException> {
+            TaskQuizHistoryService(onDay).detail(me, othersQuizId)
+        }
     }
 })
 

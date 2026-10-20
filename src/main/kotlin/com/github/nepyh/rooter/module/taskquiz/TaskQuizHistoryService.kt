@@ -8,9 +8,16 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.taskquiz.dto.QuizHistoryChoiceResponse
+import com.github.nepyh.rooter.module.taskquiz.dto.QuizHistoryDetailResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.QuizHistoryItemResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.QuizHistoryListResponse
+import com.github.nepyh.rooter.module.taskquiz.dto.QuizHistoryQuestionResponse
+import com.github.nepyh.rooter.module.taskquiz.exception.QuizHistoryNotFoundException
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceRow
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceTable
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestionRow
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestionTable
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.ResultRow
@@ -110,31 +117,15 @@ class TaskQuizHistoryService(private val clock: Clock = Clock.systemUTC()) {
                 .groupBy({ it[TaskQuizQuestionTable.attemptId].value }, { it[TaskQuizQuestionTable.chapterName]!! })
         }
 
-        /**
-         * 과목 도출. 1) 문항 단원으로 찾고 2) 못 찾으면 할일 이름 추정 3) 보드 과목이 하나뿐이면 그것.
-         * 한 차수가 여러 과목에 걸치면 문항이 많은 과목을 대표로 쓴다 (동률이면 과목 id 가 작은 쪽).
-         */
+        /** 페이지에 걸린 보드의 단원·과목 정보로 항목마다 과목을 정한다 */
         fun subjectOf(row: ResultRow): Pair<Int, String>? {
             val boardId = row[PlanBoardTable.id].value
-            val chapterSubjects = chapterSubjectsByBoard[boardId].orEmpty()
-
-            val tally = HashMap<Int, Int>()
-            chapterNamesByAttempt[row[TaskQuizAttemptTable.id].value].orEmpty().forEach { chapter ->
-                chapterSubjects[chapter].orEmpty().forEach { subjectId ->
-                    tally[subjectId] = (tally[subjectId] ?: 0) + 1
-                }
-            }
-            val fromChapters = tally.entries
-                .sortedWith(compareByDescending<Map.Entry<Int, Int>> { it.value }.thenBy { it.key })
-                .firstOrNull()
-                ?.key
-
-            val subjects = boardSubjects[boardId].orEmpty()
-            val subjectId = fromChapters
-                ?: guessTaskSubject(row[PlanTaskTable.taskName], subjects)?.first
-                ?: subjects.singleOrNull()?.first
-
-            return subjects.firstOrNull { it.first == subjectId }
+            return pickSubject(
+                chapterNames = chapterNamesByAttempt[row[TaskQuizAttemptTable.id].value].orEmpty(),
+                chapterSubjects = chapterSubjectsByBoard[boardId].orEmpty(),
+                taskName = row[PlanTaskTable.taskName],
+                subjects = boardSubjects[boardId].orEmpty()
+            )
         }
 
         QuizHistoryListResponse(
@@ -163,6 +154,119 @@ class TaskQuizHistoryService(private val clock: Clock = Clock.systemUTC()) {
             nextCursor = if (rows.size > limit) page.last()[TaskQuizAttemptTable.id].value else null
         )
     }
+
+    /**
+     * 차수 하나의 상세. 본인 차수만 조회된다.
+     * 미응시(todo) 차수는 정답 여부·해설을 null 로 숨긴다 — 퀴즈 풀이 흐름이 답을 문항별로만 공개하는 규칙과 같게 둔다.
+     */
+    fun detail(userId: Int, quizId: Int): QuizHistoryDetailResponse = transaction {
+        // 소유자 확인 때문에 플랜보드까지 조인해야 해서 Table DSL 을 쓴다
+        val row = (TaskQuizAttemptTable innerJoin PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+            .selectAll()
+            .where { (TaskQuizAttemptTable.id eq quizId) and (PlanBoardTable.userId eq userId) }
+            .firstOrNull()
+            ?: throw QuizHistoryNotFoundException()
+
+        val attemptId = row[TaskQuizAttemptTable.id].value
+        val passed = row[TaskQuizAttemptTable.passed]
+        val submitted = passed != null
+        val totalCount = row[TaskQuizAttemptTable.totalCount]
+        val subject = resolveSubject(row[PlanTaskTable.taskName], row[PlanBoardTable.id].value, attemptId)
+
+        val questions = TaskQuizQuestionRow.find { TaskQuizQuestionTable.attemptId eq attemptId }
+            .orderBy(TaskQuizQuestionTable.id to SortOrder.ASC)
+            .toList()
+        val choicesByQuestion = TaskQuizChoiceRow.find { TaskQuizChoiceTable.questionId inList questions.map { it.id } }
+            .orderBy(TaskQuizChoiceTable.id to SortOrder.ASC)
+            .groupBy { it.question.id.value }
+
+        QuizHistoryDetailResponse(
+            quizId = attemptId,
+            type = "TASK",
+            status = statusOf(passed, row[DailyPlanTable.planDate], todayInAppZone(clock)).name,
+            planTaskId = row[TaskQuizAttemptTable.planTaskId].value,
+            attemptNumber = row[TaskQuizAttemptTable.attemptNumber],
+            title = row[PlanTaskTable.taskName],
+            subjectId = subject?.first,
+            subjectName = subject?.second,
+            createdAt = row[TaskQuizAttemptTable.createdAt].toString(),
+            scheduledAt = LocalDateTime.of(row[DailyPlanTable.planDate], row[PlanTaskTable.endTime]).toString(),
+            completedAt = row[TaskQuizAttemptTable.submittedAt]?.toString(),
+            correctCount = row[TaskQuizAttemptTable.correctCount],
+            totalCount = totalCount,
+            passCount = taskQuizPassCount(totalCount),
+            passed = passed,
+            questions = questions.map { question ->
+                val choices = choicesByQuestion[question.id.value].orEmpty()
+                val selected = choices.firstOrNull { it.id.value == question.selectedChoiceId }
+
+                QuizHistoryQuestionResponse(
+                    questionId = question.id.value,
+                    questionText = question.questionText,
+                    chapterName = question.chapterName,
+                    selectedChoiceId = question.selectedChoiceId,
+                    isCorrect = if (submitted) selected?.isCorrect else null,
+                    explanation = if (submitted) choices.firstOrNull { it.isCorrect }?.explanation else null,
+                    choices = choices.map { choice ->
+                        QuizHistoryChoiceResponse(
+                            id = choice.id.value,
+                            choiceText = choice.choiceText,
+                            selected = choice.id.value == question.selectedChoiceId,
+                            isCorrect = if (submitted) choice.isCorrect else null,
+                            // 답변 API(TaskQuizAnswerResponse.reason)와 같은 뜻: 오답 보기가 왜 틀렸는지. 정답 보기의 풀이는 문항 explanation 에 있다
+                            reason = if (submitted && !choice.isCorrect) choice.explanation else null
+                        )
+                    }
+                )
+            }
+        )
+    }
+
+    /** 차수 하나의 과목. 트랜잭션 안에서 부른다. */
+    private fun resolveSubject(taskName: String, boardId: Int, attemptId: Int): Pair<Int, String>? {
+        // 교과서 id 만 필요해 벌크 조회 (Row 로 읽으면 교과서마다 lazy SELECT 가 붙는다)
+        val textbookIds = PlanSubjectTable.select(PlanSubjectTable.textbookId)
+            .where { PlanSubjectTable.planBoardId eq boardId }
+            .map { it[PlanSubjectTable.textbookId].value }
+        val chapterNames = TaskQuizQuestionTable.select(TaskQuizQuestionTable.chapterName)
+            .where { (TaskQuizQuestionTable.attemptId eq attemptId) and TaskQuizQuestionTable.chapterName.isNotNull() }
+            .map { it[TaskQuizQuestionTable.chapterName]!! }
+
+        return pickSubject(
+            chapterNames = chapterNames,
+            chapterSubjects = chapterNameToSubjectIds(textbookIds),
+            taskName = taskName,
+            subjects = planBoardSubjects(boardId)
+        )
+    }
+}
+
+/**
+ * 과목 도출. 1) 문항 단원으로 찾고 2) 못 찾으면 할일 이름 추정 3) 보드 과목이 하나뿐이면 그것.
+ * 한 차수가 여러 과목에 걸치면 문항이 많은 과목을 대표로 쓴다 (동률이면 과목 id 가 작은 쪽).
+ */
+private fun pickSubject(
+    chapterNames: List<String>,
+    chapterSubjects: Map<String, List<Int>>,
+    taskName: String,
+    subjects: List<Pair<Int, String>>
+): Pair<Int, String>? {
+    val tally = HashMap<Int, Int>()
+    chapterNames.forEach { chapter ->
+        chapterSubjects[chapter].orEmpty().forEach { subjectId ->
+            tally[subjectId] = (tally[subjectId] ?: 0) + 1
+        }
+    }
+    val fromChapters = tally.entries
+        .sortedWith(compareByDescending<Map.Entry<Int, Int>> { it.value }.thenBy { it.key })
+        .firstOrNull()
+        ?.key
+
+    val subjectId = fromChapters
+        ?: guessTaskSubject(taskName, subjects)?.first
+        ?: subjects.singleOrNull()?.first
+
+    return subjects.firstOrNull { it.first == subjectId }
 }
 
 /** 차수 하나의 응시 상태. 목록 필터([QuizHistoryStatus])와 같은 기준이다 */
