@@ -13,11 +13,11 @@ import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
-import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.userTaskRanges
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
@@ -79,7 +79,7 @@ class ChatService(
             // 완료·실패 태스크의 시간대는 재배치할 때 막아둔다.
             val (completedTasks, pendingTasks) = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
                 .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
-                .partition { it.isCompleted || it.isFailed }
+                .partition { it.status != PlanTaskStatus.PENDING }
 
             val profileRow = StudentProfileRow.find { StudentProfileTable.user eq userId }
                 .firstOrNull()
@@ -223,7 +223,7 @@ class ChatService(
                 val keptIds = rescheduled.mapNotNull { it.existingId }.toSet()
                 // AI 가 뺐거나 자리가 없어 못 넣은 대기 태스크만 지운다 (완료·실패 태스크는 건드리지 않음)
                 PlanTaskRow.find {
-                    (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq false) and (PlanTaskTable.isFailed eq false)
+                    (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.status eq PlanTaskStatus.PENDING)
                 }
                     .filter { it.id.value !in keptIds }
                     .forEach { it.delete() }
@@ -245,8 +245,8 @@ class ChatService(
                             startTime = it.startTime.toString(),
                             endTime = it.endTime.toString(),
                             estimatedMinutes = it.estimatedMinutes,
-                            isCompleted = it.isCompleted,
-                            status = PlanTaskStatus.of(it.isCompleted, it.isFailed)
+                            isCompleted = it.status == PlanTaskStatus.DONE,
+                            status = it.status
                         )
                     }
             }
@@ -430,8 +430,8 @@ private fun PlanTaskRow.toResponse(dailyPlanId: Int) = PlanTaskResponse(
     startTime = startTime.toString(),
     endTime = endTime.toString(),
     estimatedMinutes = estimatedMinutes,
-    isCompleted = isCompleted,
-    status = PlanTaskStatus.of(isCompleted, isFailed)
+    isCompleted = status == PlanTaskStatus.DONE,
+    status = status
 )
 
 internal fun noOverlapReply(window: Pair<LocalTime, LocalTime>): String =

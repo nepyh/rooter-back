@@ -13,11 +13,11 @@ import com.github.nepyh.rooter.module.calendar.exception.CalendarValidationExcep
 import com.github.nepyh.rooter.module.calendar.model.CalendarEventRow
 import com.github.nepyh.rooter.module.calendar.model.CalendarEventTable
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
-import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
@@ -98,8 +98,8 @@ class CalendarService {
                         startTime = it.startTime.toString(),
                         endTime = it.endTime.toString(),
                         estimatedMinutes = it.estimatedMinutes,
-                        isCompleted = it.isCompleted,
-                        status = PlanTaskStatus.of(it.isCompleted, it.isFailed)
+                        isCompleted = it.status == PlanTaskStatus.DONE,
+                        status = it.status
                     )
                 }
 

@@ -1,20 +1,7 @@
 package com.github.nepyh.rooter.module.planboard.dto
 
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import kotlinx.serialization.Serializable
-
-/** 할일 상태. 앱은 이 값으로 대기·완료·실패를 그린다 (isCompleted 만으로는 대기와 실패를 구분할 수 없음) */
-@Serializable
-enum class PlanTaskStatus {
-    PENDING, DONE, FAILED;
-
-    companion object {
-        fun of(isCompleted: Boolean, isFailed: Boolean): PlanTaskStatus = when {
-            isFailed -> FAILED
-            isCompleted -> DONE
-            else -> PENDING
-        }
-    }
-}
 
 @Serializable
 data class PlanTaskResponse(
@@ -24,8 +11,8 @@ data class PlanTaskResponse(
     val startTime: String,        // "17:30"
     val endTime: String,          // "19:30"
     val estimatedMinutes: Int,    // "2시간" 표시용
-    val isCompleted: Boolean,
-    val status: PlanTaskStatus    // PENDING(대기) / DONE(완료) / FAILED(실패, isCompleted=false)
+    val isCompleted: Boolean,     // status == DONE. 예전 앱 호환용으로 남겨둠
+    val status: PlanTaskStatus    // PENDING(대기) / DONE(완료) / FAILED(실패) — 앱은 이 값으로 그린다
 )
 
 @Serializable
@@ -69,5 +56,7 @@ data class PlanTaskUpdateRequest(
     val taskName: String? = null,
     val startTime: String? = null,
     val endTime: String? = null,
-    val estimatedMinutes: Int? = null
+    val estimatedMinutes: Int? = null,
+    // 상태 변경. PENDING → FAILED(실패 처리), DONE → PENDING(완료 취소)만 된다. DONE 은 태스크 퀴즈 통과로만 된다
+    val status: PlanTaskStatus? = null
 )

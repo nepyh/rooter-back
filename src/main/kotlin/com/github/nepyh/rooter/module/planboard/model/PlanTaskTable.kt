@@ -15,11 +15,10 @@ object PlanTaskTable : IntIdTable("plan_tasks") {
     val startTime = time("start_time")
     val endTime = time("end_time")
     val estimatedMinutes = integer("estimated_minutes")
-    val isCompleted = bool("is_completed").default(false)
     // 챗봇으로 다른 날로 미뤘을 때 원래 날짜. null = 미룬 적 없음 (rooter-ddl #25)
     val postponedFromDate = date("postponed_from_date").nullable()
-    // 실패 여부 (사용자가 실패를 고름 / 태스크 퀴즈 3회 불합격). is_completed 와 동시에 true 가 되지 않게 서비스가 막는다 (rooter-ddl #28)
-    val isFailed = bool("is_failed").default(false)
+    // 대기·완료·실패 (rooter-ddl #36). 예전 is_completed·is_failed 를 대체한다
+    val status = enumerationByName("status", 20, PlanTaskStatus::class).default(PlanTaskStatus.PENDING)
 }
 
 class PlanTaskRow(id: EntityID<Int>) : IntEntity(id) {
@@ -30,7 +29,6 @@ class PlanTaskRow(id: EntityID<Int>) : IntEntity(id) {
     var startTime by PlanTaskTable.startTime
     var endTime by PlanTaskTable.endTime
     var estimatedMinutes by PlanTaskTable.estimatedMinutes
-    var isCompleted by PlanTaskTable.isCompleted
     var postponedFromDate by PlanTaskTable.postponedFromDate
-    var isFailed by PlanTaskTable.isFailed
+    var status by PlanTaskTable.status
 }

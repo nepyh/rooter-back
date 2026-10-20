@@ -3,7 +3,6 @@ package com.github.nepyh.rooter.module.planboard
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
-import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.WeeklyPlanResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
@@ -15,16 +14,14 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
-import com.github.nepyh.rooter.module.taskquiz.MAX_ATTEMPTS
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.between
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.core.greaterEq
-import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -156,9 +153,9 @@ class PlanTaskService {
     }
 
     /**
-     * 태스크 완료 처리/취소 (본인 플랜보드 소유권 확인).
-     * 태스크 퀴즈로 결과가 확정된 태스크(통과, 또는 마지막 차수까지 불합격)는 완료 상태를 바꿀 수 없다.
-     * 지금 상태와 같은 값을 보내는 건 막지 않는다.
+     * 태스크 완료 처리/취소 (본인 플랜보드 소유권 확인). 예전 앱 호환용 — 상태 변경은 [updateTask] 의 status 로 한다.
+     * isCompleted=true 는 DONE, false 는 PENDING 으로 바꾸는 것과 같고 규칙은 [changeStatus] 를 따른다.
+     * 지금 상태와 같은 값을 보내는 건 막지 않는다 (실패한 할일에 false 를 보내도 그대로 성공).
      */
     fun completeTask(userId: Int, taskId: Int, isCompleted: Boolean): PlanTaskResponse = transaction {
         val task = PlanTaskRow.findById(taskId)
@@ -168,44 +165,37 @@ class PlanTaskService {
             throw PlanTaskNotFoundException()
         }
 
-        if (task.isCompleted != isCompleted && (task.isFailed || isFinalizedByQuiz(taskId))) {
-            throw PlanTaskValidationException.TaskFinalizedException()
+        if ((task.status == PlanTaskStatus.DONE) != isCompleted) {
+            task.changeStatus(if (isCompleted) PlanTaskStatus.DONE else PlanTaskStatus.PENDING)
         }
-
-        task.isCompleted = isCompleted
         task.toResponse()
     }
 
     /**
-     * 할일을 실패로 저장한다 (앱의 실패 버튼). 대기 상태의 할일만 실패로 바꿀 수 있고,
-     * 이미 실패한 할일은 그대로 돌려준다 (버튼을 두 번 눌러도 성공). 완료된 할일은 TASK_FINALIZED.
+     * 사용자가 바꿀 수 있는 상태 전환만 허용한다. 지금과 같은 상태면 아무것도 하지 않는다.
+     * - PENDING → FAILED: 실패 처리
+     * - DONE → PENDING: 완료 취소. 태스크 퀴즈를 통과해 완료된 할일은 TASK_FINALIZED
+     * - → DONE: 태스크 퀴즈 통과(TaskQuizService.submitQuiz)로만 되므로 TASK_QUIZ_REQUIRED (#259)
+     * - FAILED → 그 외, DONE → FAILED: TASK_FINALIZED
      */
-    fun failTask(userId: Int, taskId: Int): PlanTaskResponse = transaction {
-        val task = PlanTaskRow.findById(taskId)
-            ?: throw PlanTaskNotFoundException()
-
-        if (task.dailyPlan.planBoard.user.id.value != userId) {
-            throw PlanTaskNotFoundException()
+    private fun PlanTaskRow.changeStatus(target: PlanTaskStatus) {
+        if (status == target) return
+        when {
+            status == PlanTaskStatus.FAILED -> throw PlanTaskValidationException.TaskFinalizedException()
+            target == PlanTaskStatus.DONE -> throw PlanTaskValidationException.TaskQuizRequiredException()
+            status == PlanTaskStatus.DONE && (target == PlanTaskStatus.FAILED || hasPassedQuiz(id.value)) ->
+                throw PlanTaskValidationException.TaskFinalizedException()
         }
-
-        if (task.isCompleted) {
-            throw PlanTaskValidationException.TaskFinalizedException()
-        }
-
-        task.isFailed = true
-        task.toResponse()
+        status = target
     }
 
-    /** 태스크 퀴즈를 통과했거나, 마지막 차수(MAX_ATTEMPTS)까지 불합격해 결과가 확정된 태스크인지 */
-    private fun isFinalizedByQuiz(taskId: Int): Boolean =
+    /** 태스크 퀴즈를 통과한 태스크인지 */
+    private fun hasPassedQuiz(taskId: Int): Boolean =
         !TaskQuizAttemptTable.selectAll().where {
-            (TaskQuizAttemptTable.planTaskId eq taskId) and (
-                (TaskQuizAttemptTable.passed eq true) or
-                    ((TaskQuizAttemptTable.passed eq false) and (TaskQuizAttemptTable.attemptNumber greaterEq MAX_ATTEMPTS))
-                )
+            (TaskQuizAttemptTable.planTaskId eq taskId) and (TaskQuizAttemptTable.passed eq true)
         }.empty()
 
-    /** taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정 (본인 플랜보드 소유권 확인) */
+    /** taskName/startTime/endTime/estimatedMinutes/status 중 전달된 필드만 수정 (본인 플랜보드 소유권 확인) */
     fun updateTask(userId: Int, taskId: Int, request: PlanTaskUpdateRequest): PlanTaskResponse = transaction {
         val task = PlanTaskRow.findById(taskId)
             ?: throw PlanTaskNotFoundException()
@@ -236,6 +226,8 @@ class PlanTaskService {
             task.estimatedMinutes = it
         }
 
+        request.status?.let { task.changeStatus(it) }
+
         task.toResponse()
     }
 
@@ -258,7 +250,7 @@ class PlanTaskService {
         startTime = startTime.format(timeFormat),
         endTime = endTime.format(timeFormat),
         estimatedMinutes = estimatedMinutes,
-    isCompleted = isCompleted,
-        status = PlanTaskStatus.of(isCompleted, isFailed)
+        isCompleted = status == PlanTaskStatus.DONE,
+        status = status
     )
 }

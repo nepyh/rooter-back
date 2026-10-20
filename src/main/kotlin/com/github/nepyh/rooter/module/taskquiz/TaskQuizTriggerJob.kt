@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module.taskquiz
 
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.scheduler.DueJob
 import com.github.nepyh.rooter.module.scheduler.SchedulerJob
@@ -13,6 +14,7 @@ import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
@@ -55,7 +57,7 @@ class TaskQuizTriggerJob(
 
         return (PlanTaskTable innerJoin DailyPlanTable)
             .selectAll()
-            .where { (DailyPlanTable.planDate eq today) and (PlanTaskTable.isFailed eq false) } // 실패 처리한 태스크는 퀴즈를 만들지 않는다
+            .where { (DailyPlanTable.planDate eq today) and (PlanTaskTable.status neq PlanTaskStatus.FAILED) } // 실패 처리한 태스크는 퀴즈를 만들지 않는다
             .mapNotNull { row ->
                 val planTaskId = row[PlanTaskTable.id].value
                 if (planTaskId in alreadyStarted) return@mapNotNull null
@@ -91,7 +93,7 @@ class TaskQuizTriggerJob(
 
             val planTaskId = row.planTaskId.value
             val task = PlanTaskRow.findById(planTaskId) ?: return@mapNotNull null
-            if (task.isFailed) return@mapNotNull null // 재시도 대기 중에 실패 처리했으면 더 만들지 않는다
+            if (task.status == PlanTaskStatus.FAILED) return@mapNotNull null // 재시도 대기 중에 실패 처리했으면 더 만들지 않는다
             val taskName = task.taskName
 
             val nextAttempt = attemptNumber + 1

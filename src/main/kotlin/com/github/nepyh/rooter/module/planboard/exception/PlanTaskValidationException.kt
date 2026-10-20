@@ -47,4 +47,9 @@ sealed class PlanTaskValidationException(
         "TASK_FINALIZED",
         "결과가 확정된 할일(퀴즈 통과·3회 불합격·실패 처리)은 상태를 바꿀 수 없습니다."
     )
+    class TaskQuizRequiredException : PlanTaskValidationException(
+        HttpStatusCode.BadRequest,
+        "TASK_QUIZ_REQUIRED",
+        "할일은 태스크 퀴즈를 통과해야 완료됩니다."
+    )
 }

@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.user
 
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.storage.FileStorage
 import com.github.nepyh.rooter.module.storage.toUploadableFile
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
@@ -141,7 +142,7 @@ class UserService(
             .map { date ->
                 val rows = tasksByDate[date].orEmpty()
                 val totalTasks = rows.size
-                val completedTasks = rows.count { it[PlanTaskTable.isCompleted] }
+                val completedTasks = rows.count { it[PlanTaskTable.status] == PlanTaskStatus.DONE }
                 val completionRate = if (totalTasks == 0) 0.0 else (completedTasks.toDouble() / totalTasks) * 100
 
                 StreakDayResponse(date = date.toString(), completionRate = completionRate)

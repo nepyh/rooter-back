@@ -159,9 +159,11 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
             call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("PlanTask")
-            summary = "태스크 완료 처리/취소"
-            description = "isCompleted를 true/false로 보내 완료 상태를 토글. 본인 플랜보드 소유 태스크만 가능. " +
-                "태스크 퀴즈로 결과가 확정된 태스크(통과했거나, 3차까지 모두 불합격)와 실패 처리한 태스크(status=FAILED)는 완료 상태를 바꿀 수 없음 (지금과 같은 값은 그대로 성공)"
+            summary = "태스크 완료 취소 (예전 앱 호환용)"
+            description = "상태 변경은 PATCH /plan-tasks/{taskId} 의 status 를 쓸 것. 이 API 는 예전 앱 호환용으로 남겨둠. " +
+                "isCompleted=false 는 status=PENDING(완료 취소), true 는 status=DONE 으로 바꾸는 것과 같고 규칙도 같음 — " +
+                "완료는 태스크 퀴즈 통과(POST .../quiz/submit)로만 되므로 true 는 이미 완료된 태스크에만 성공. " +
+                "지금과 같은 값은 그대로 성공 (실패한 태스크에 false 를 보내도 성공). 본인 플랜보드 소유 태스크만 가능"
             parameters {
                 path("taskId") {
                     description = "태스크 ID"
@@ -182,48 +184,8 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 퀴즈로 결과가 확정됐거나 실패 처리한 태스크의 완료 상태 변경 (code=TASK_FINALIZED)"
-                }
-                HttpStatusCode.Unauthorized {
-                    description = "인증되지 않음"
-                }
-                HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 태스크"
-                }
-                HttpStatusCode.InternalServerError {
-                    description = "서버 오류"
-                }
-            }
-        }
-
-        patch("{taskId}/fail") {
-            val taskId = call.parameters["taskId"]?.toIntOrNull()
-                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
-
-            val response = planTaskService.failTask(call.userId(), taskId)
-            call.respond(HttpStatusCode.OK, response)
-        }.describe {
-            tag("PlanTask")
-            summary = "태스크 실패 처리"
-            description = "요청 본문 없음. 대기 상태의 태스크를 실패로 저장하고 status=FAILED 로 돌려줌 (isCompleted 는 false). " +
-                "이미 실패한 태스크는 그대로 성공. 완료된 태스크는 실패로 바꿀 수 없고, 실패한 태스크는 완료로 되돌릴 수 없음. " +
-                "실패한 태스크에는 태스크 퀴즈가 자동 생성되지 않음. 본인 플랜보드 소유 태스크만 가능"
-            parameters {
-                path("taskId") {
-                    description = "태스크 ID"
-                    required = true
-                    schema = jsonSchema<Int>()
-                }
-            }
-            responses {
-                HttpStatusCode.OK {
-                    description = "처리 성공"
-                    ContentType.Application.Json {
-                        schema = jsonSchema<PlanTaskResponse>()
-                    }
-                }
-                HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 이미 완료된 태스크 (code=TASK_FINALIZED)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 미완료 태스크를 완료로 변경 (code=TASK_QUIZ_REQUIRED), " +
+                        "또는 퀴즈를 통과했거나 실패한 태스크의 완료 상태 변경 (code=TASK_FINALIZED)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -246,8 +208,11 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
             call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("PlanTask")
-            summary = "태스크 수정"
-            description = "taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정. 본인 플랜보드 소유 태스크만 가능"
+            summary = "태스크 수정 · 상태 변경"
+            description = "taskName/startTime/endTime/estimatedMinutes/status 중 전달된 필드만 수정. 본인 플랜보드 소유 태스크만 가능. " +
+                "status 는 사용자가 할 수 있는 전환만 됨: PENDING → FAILED(실패 처리), DONE → PENDING(완료 취소, 태스크 퀴즈로 완료된 태스크는 불가). " +
+                "DONE 은 태스크 퀴즈 통과(POST .../quiz/submit)로만 됨. FAILED 는 되돌릴 수 없고, 실패한 태스크에는 태스크 퀴즈가 자동 생성되지 않음. " +
+                "지금과 같은 status 는 그대로 성공. 하나라도 거부되면 다른 필드도 바뀌지 않음"
             parameters {
                 path("taskId") {
                     description = "태스크 ID"
@@ -269,7 +234,9 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 태스크 이름 오류 (code=INVALID_TASK_NAME), 시간 형식 오류 (code=INVALID_TIME_FORMAT), " +
-                        "종료 시간이 시작 시간보다 빠르거나 같음 (code=INVALID_TIME_RANGE), 또는 예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES)"
+                        "종료 시간이 시작 시간보다 빠르거나 같음 (code=INVALID_TIME_RANGE), 예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES), " +
+                        "status 를 DONE 으로 변경 (code=TASK_QUIZ_REQUIRED), " +
+                        "또는 실패한 태스크·퀴즈로 완료된 태스크의 status 변경이나 DONE → FAILED (code=TASK_FINALIZED)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
