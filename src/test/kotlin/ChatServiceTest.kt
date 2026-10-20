@@ -19,6 +19,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerRow
 import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
@@ -86,6 +87,7 @@ class ChatServiceTest : StringSpec({
             PlanTaskTable.deleteAll()
             DailyPlanTable.deleteAll()
             PlanBoardTable.deleteAll()
+            StudyStyleAnswerTable.deleteAll()
             UserTable.deleteAll()
         }
     }
@@ -296,6 +298,19 @@ class ChatServiceTest : StringSpec({
         llm.lastPlanBoardSummary!!.lines().last() shouldBe "시험일: 등록되지 않음"
     }
 
+    "공부 스타일 설문은 숫자가 아니라 학생이 고른 보기 문구로 AI 에 넘긴다" {
+        val (userId, dailyPlanId) = seedDailyPlan(examDate = null)
+        transaction(db) {
+            StudyStyleAnswerRow.new { user = UserRow[userId]; questionNumber = 2; answerOption = 1 }
+            StudyStyleAnswerRow.new { user = UserRow[userId]; questionNumber = 7; answerOption = 4 } // 모르겠어요 → 빠짐
+        }
+        val llm = FakeChatLlmClient(AiChatResult(reply_message = "좋아요", plan_changed = false))
+
+        ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "안녕")
+
+        llm.lastStudyStyleSummary shouldBe "공부가 잘 되는 시간대: 아침 (등교 전)"
+    }
+
     fun postponeLlm(names: List<String>, toDate: String? = null, reply: String = "미룰게요") = FakeChatLlmClient(
         AiChatResult(reply_message = reply, plan_changed = true, postpone = AiChatPostpone(task_names = names, to_date = toDate))
     )
@@ -383,6 +398,7 @@ private class FakeChatLlmClient(private val result: AiChatResult?) : ChatLlmClie
     var lastCurrentTasksJson: String? = null
     var lastPlanBoardSummary: String? = null
     var lastToday: String? = null
+    var lastStudyStyleSummary: String? = null
 
     override suspend fun adjustPlan(
         grade: Int,
@@ -395,6 +411,7 @@ private class FakeChatLlmClient(private val result: AiChatResult?) : ChatLlmClie
         userMessage: String
     ): AiChatResult? {
         lastToday = today
+        lastStudyStyleSummary = studyStyleSummary
         lastCurrentTasksJson = currentTasksJson
         lastPlanBoardSummary = planBoardSummary
         return result
