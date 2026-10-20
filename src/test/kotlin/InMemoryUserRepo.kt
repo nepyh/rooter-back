@@ -1,3 +1,4 @@
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.user.UserRepo
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
@@ -212,6 +213,6 @@ class InMemoryUserRepo : UserRepo {
         }
 
     private fun StoredTask.toRow(): ResultRow = ResultRow.createAndFillValues(
-        mapOf(PlanTaskTable.isCompleted to isCompleted)
+        mapOf(PlanTaskTable.status to if (isCompleted) PlanTaskStatus.DONE else PlanTaskStatus.PENDING)
     )
 }

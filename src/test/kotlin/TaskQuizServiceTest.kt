@@ -2,7 +2,7 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
-import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.planboard.guessTaskSubject
@@ -15,6 +15,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
@@ -24,6 +25,7 @@ import com.github.nepyh.rooter.module.review.ReviewService
 import com.github.nepyh.rooter.module.review.model.ReviewChoiceTable
 import com.github.nepyh.rooter.module.review.model.ReviewQuestionTable
 import com.github.nepyh.rooter.module.taskquiz.GeneratedTaskQuizQuestion
+import com.github.nepyh.rooter.module.taskquiz.MAX_ATTEMPTS
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizLlmClient
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizTriggerJob
@@ -399,7 +401,7 @@ class TaskQuizServiceTest : StringSpec({
         result.correctCount shouldBe 5
         result.passed shouldBe true
         result.results.all { it.isCorrect } shouldBe true
-        transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe true
+        transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.DONE
     }
 
     "submitQuiz: 이미 채점된 퀴즈를 다시 제출하면 AlreadySubmittedException" {
@@ -443,13 +445,17 @@ class TaskQuizServiceTest : StringSpec({
         questions.drop(1).map { it.selectedChoiceId } shouldBe List(4) { null }
     }
 
-    /** 채점이 끝난 퀴즈 차수를 넣고 태스크 완료 상태를 퀴즈 결과대로 맞춘다 */
+    /** 채점이 끝난 퀴즈 차수를 넣고 태스크 상태를 퀴즈 결과대로 맞춘다 (통과 DONE, 마지막 차수 불합격 FAILED) */
     fun seedGradedAttempt(taskId: Int, attemptNumber: Int, passed: Boolean) = transaction(db) {
         TaskQuizAttemptTable.insert {
             it[planTaskId] = taskId; it[this.attemptNumber] = attemptNumber; it[totalCount] = 5
             it[correctCount] = if (passed) 5 else 0; it[this.passed] = passed; it[createdAt] = OffsetDateTime.now()
         }
-        PlanTaskRow[taskId].isCompleted = passed
+        PlanTaskRow[taskId].status = when {
+            passed -> PlanTaskStatus.DONE
+            attemptNumber >= MAX_ATTEMPTS -> PlanTaskStatus.FAILED
+            else -> PlanTaskStatus.PENDING
+        }
     }
 
     "completeTask: 퀴즈를 통과한 태스크는 미완료로 되돌릴 수 없다 (같은 값은 그대로 성공)" {
@@ -460,7 +466,7 @@ class TaskQuizServiceTest : StringSpec({
             PlanTaskService().completeTask(lastUserId, taskId, false)
         }
         PlanTaskService().completeTask(lastUserId, taskId, true).isCompleted shouldBe true
-        transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe true
+        transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.DONE
     }
 
     "completeTask: 3차까지 모두 떨어져 실패가 확정된 태스크는 완료로 바꿀 수 없다" {
@@ -470,14 +476,16 @@ class TaskQuizServiceTest : StringSpec({
         shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
             PlanTaskService().completeTask(lastUserId, taskId, true)
         }
-        transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe false
+        transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.FAILED
     }
 
-    "completeTask: 아직 재시도가 남았거나 퀴즈가 없는 태스크는 자유롭게 완료·취소할 수 있다" {
+    "completeTask: 퀴즈를 통과하지 않은 태스크는 완료로 바꿀 수 없다 (퀴즈 없음 / 재시도 남음, #259)" {
         val retrying = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
         seedGradedAttempt(retrying, 1, passed = false)
-        PlanTaskService().completeTask(lastUserId, retrying, true).isCompleted shouldBe true
-        PlanTaskService().completeTask(lastUserId, retrying, false).isCompleted shouldBe false
+        shouldThrow<PlanTaskValidationException.TaskQuizRequiredException> {
+            PlanTaskService().completeTask(lastUserId, retrying, true)
+        }
+        transaction(db) { PlanTaskRow[retrying].status } shouldBe PlanTaskStatus.PENDING
 
         val noQuiz = transaction(db) {
             PlanTaskRow.new {
@@ -485,8 +493,24 @@ class TaskQuizServiceTest : StringSpec({
                 startTime = LocalTime.of(17, 0); endTime = LocalTime.of(17, 30); estimatedMinutes = 30
             }.id.value
         }
-        PlanTaskService().completeTask(lastUserId, noQuiz, true).isCompleted shouldBe true
+        shouldThrow<PlanTaskValidationException.TaskQuizRequiredException> {
+            PlanTaskService().completeTask(lastUserId, noQuiz, true)
+        }
+        transaction(db) { PlanTaskRow[noQuiz].status } shouldBe PlanTaskStatus.PENDING
+        // 미완료를 그대로 미완료로 보내는 건 성공
         PlanTaskService().completeTask(lastUserId, noQuiz, false).isCompleted shouldBe false
+    }
+
+    "completeTask: 퀴즈 없이 이미 완료된 태스크(예전 데이터)는 같은 값은 성공하고 완료 취소도 된다" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        transaction(db) { PlanTaskRow[taskId].status = PlanTaskStatus.DONE }
+
+        PlanTaskService().completeTask(lastUserId, taskId, true).isCompleted shouldBe true
+        PlanTaskService().completeTask(lastUserId, taskId, false).status shouldBe PlanTaskStatus.PENDING
+        // 한 번 취소하면 다시 완료하려면 퀴즈를 통과해야 한다
+        shouldThrow<PlanTaskValidationException.TaskQuizRequiredException> {
+            PlanTaskService().completeTask(lastUserId, taskId, true)
+        }
     }
 
     "generateAttempt: 정답 번호가 보기 범위를 벗어난 문제는 저장하지 않는다" {
@@ -603,37 +627,65 @@ class TaskQuizServiceTest : StringSpec({
         result.passed shouldBe true
     }
 
-    "failTask: 대기 중인 할일을 실패로 저장하고 status=FAILED 를 준다. 다시 눌러도 그대로 성공" {
+    fun failRequest() = PlanTaskUpdateRequest(status = PlanTaskStatus.FAILED)
+
+    "updateTask(status=FAILED): 대기 중인 할일을 실패로 저장하고 status=FAILED 를 준다. 다시 보내도 그대로 성공" {
         val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
 
-        val failed = PlanTaskService().failTask(lastUserId, taskId)
+        val failed = PlanTaskService().updateTask(lastUserId, taskId, failRequest())
 
         failed.status shouldBe PlanTaskStatus.FAILED
         failed.isCompleted shouldBe false
-        PlanTaskService().failTask(lastUserId, taskId).status shouldBe PlanTaskStatus.FAILED
-        transaction(db) { PlanTaskRow[taskId].isFailed } shouldBe true
+        PlanTaskService().updateTask(lastUserId, taskId, failRequest()).status shouldBe PlanTaskStatus.FAILED
+        transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.FAILED
     }
 
-    "failTask: 완료된 할일은 실패로 바꿀 수 없다 (TASK_FINALIZED)" {
+    "updateTask(status=FAILED): 완료된 할일은 실패로 바꿀 수 없다 (TASK_FINALIZED)" {
         val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
         seedGradedAttempt(taskId, 1, passed = true)
 
         shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
-            PlanTaskService().failTask(lastUserId, taskId)
+            PlanTaskService().updateTask(lastUserId, taskId, failRequest())
         }
-        transaction(db) { PlanTaskRow[taskId].isFailed } shouldBe false
+        transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.DONE
     }
 
-    "failTask: 다른 사람 할일이면 PlanTaskNotFoundException" {
+    "updateTask(status=FAILED): 다른 사람 할일이면 PlanTaskNotFoundException" {
         val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
 
-        shouldThrow<PlanTaskNotFoundException> { PlanTaskService().failTask(lastUserId + 999, taskId) }
-        transaction(db) { PlanTaskRow[taskId].isFailed } shouldBe false
+        shouldThrow<PlanTaskNotFoundException> { PlanTaskService().updateTask(lastUserId + 999, taskId, failRequest()) }
+        transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.PENDING
+    }
+
+    "updateTask(status=DONE): 완료는 퀴즈 통과로만 되므로 TASK_QUIZ_REQUIRED, 같이 보낸 다른 필드도 바뀌지 않는다" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+
+        shouldThrow<PlanTaskValidationException.TaskQuizRequiredException> {
+            PlanTaskService().updateTask(lastUserId, taskId, PlanTaskUpdateRequest(taskName = "바뀐 이름", status = PlanTaskStatus.DONE))
+        }
+        transaction(db) { PlanTaskRow[taskId].let { it.taskName to it.status } } shouldBe ("과학 문제집 30쪽 풀기" to PlanTaskStatus.PENDING)
+    }
+
+    "updateTask(status=PENDING): 퀴즈로 완료된 할일은 취소할 수 없고, 퀴즈 없이 완료된 예전 할일은 취소된다" {
+        val passed = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        seedGradedAttempt(passed, 1, passed = true)
+        shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
+            PlanTaskService().updateTask(lastUserId, passed, PlanTaskUpdateRequest(status = PlanTaskStatus.PENDING))
+        }
+
+        val legacy = transaction(db) {
+            PlanTaskRow.new {
+                dailyPlan = PlanTaskRow[passed].dailyPlan; taskName = "영어 단어 외우기"; status = PlanTaskStatus.DONE
+                startTime = LocalTime.of(17, 0); endTime = LocalTime.of(17, 30); estimatedMinutes = 30
+            }.id.value
+        }
+        PlanTaskService().updateTask(lastUserId, legacy, PlanTaskUpdateRequest(status = PlanTaskStatus.PENDING))
+            .status shouldBe PlanTaskStatus.PENDING
     }
 
     "completeTask: 실패한 할일은 완료로 되돌릴 수 없다 (같은 값은 그대로 성공)" {
         val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
-        PlanTaskService().failTask(lastUserId, taskId)
+        PlanTaskService().updateTask(lastUserId, taskId, failRequest())
 
         shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
             PlanTaskService().completeTask(lastUserId, taskId, true)
@@ -650,7 +702,7 @@ class TaskQuizServiceTest : StringSpec({
 
         failAll(service, userId, taskId)
 
-        transaction(db) { PlanTaskRow[taskId].let { it.isCompleted to it.isFailed } } shouldBe (false to true)
+        transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.FAILED
     }
 
     "TaskQuizTriggerJob: 실패 처리한 할일은 종료 시각이 지나도 퀴즈를 만들지 않고, 재시도도 만들지 않는다" {
@@ -674,8 +726,8 @@ class TaskQuizServiceTest : StringSpec({
                 it[passed] = false; it[createdAt] = OffsetDateTime.now().minusHours(1)
             }
         }
-        PlanTaskService().failTask(userId, failedTask)
-        PlanTaskService().failTask(userId, retrying)
+        PlanTaskService().updateTask(userId, failedTask, failRequest())
+        PlanTaskService().updateTask(userId, retrying, failRequest())
 
         // 그날 밤 23:00 (KST) — 세 할일 모두 종료 시각이 지났다
         val due = TaskQuizTriggerJob(TaskQuizService(FakeTaskQuizLlmClient()))

@@ -11,12 +11,12 @@ import com.github.nepyh.rooter.module.chat.dto.AiChatTask
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.chat.planBoardSummaryOf
 import com.github.nepyh.rooter.module.chat.postponeBlockedReply
-import com.github.nepyh.rooter.module.planboard.dto.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
@@ -133,8 +133,11 @@ class ChatServiceTest : StringSpec({
             startTime = start
             endTime = end
             estimatedMinutes = (end.toSecondOfDay() - start.toSecondOfDay()) / 60
-            isCompleted = completed
-            isFailed = failed
+            status = when {
+                failed -> PlanTaskStatus.FAILED
+                completed -> PlanTaskStatus.DONE
+                else -> PlanTaskStatus.PENDING
+            }
         }.id.value
     }
 
@@ -159,7 +162,7 @@ class ChatServiceTest : StringSpec({
         // 완료 태스크는 id·시각·완료 상태가 그대로 유지된다
         transaction(db) {
             val done = PlanTaskRow.findById(doneId)!!
-            done.isCompleted shouldBe true
+            done.status shouldBe PlanTaskStatus.DONE
             done.startTime shouldBe LocalTime.of(17, 0)
             done.endTime shouldBe LocalTime.of(18, 0)
             PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.count() shouldBe 3L
@@ -191,7 +194,7 @@ class ChatServiceTest : StringSpec({
         llm.lastCurrentTasksJson!! shouldNotContain "실패한 태스크"
         transaction(db) {
             val failed = PlanTaskRow.findById(failedId)!!
-            failed.isFailed shouldBe true
+            failed.status shouldBe PlanTaskStatus.FAILED
             failed.startTime shouldBe LocalTime.of(17, 0)
         }
         response.updatedTasks!!.map { it.taskName to it.status } shouldBe listOf(

@@ -2,6 +2,7 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
@@ -130,7 +131,7 @@ class QuizServiceTest : StringSpec({
         }
         repeat(completedTasks) { i ->
             PlanTaskRow.new {
-                this.dailyPlan = dailyPlan; taskName = "할일 $i"; isCompleted = true
+                this.dailyPlan = dailyPlan; taskName = "할일 $i"; status = PlanTaskStatus.DONE
                 startTime = LocalTime.of(16 + i, 0); endTime = LocalTime.of(16 + i, 30); estimatedMinutes = 30
             }
         }
