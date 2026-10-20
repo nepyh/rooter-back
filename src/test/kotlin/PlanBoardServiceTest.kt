@@ -5,6 +5,8 @@ import com.github.nepyh.rooter.module.planboard.GeneratedPlan
 import com.github.nepyh.rooter.module.planboard.GeneratedPlanTask
 import com.github.nepyh.rooter.module.planboard.PlanGenerationLlmClient
 import com.github.nepyh.rooter.module.planboard.PlanGenerationService
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerRow
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerTable
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationSubjectInput
 import com.github.nepyh.rooter.module.school.NiceApiClient
@@ -112,7 +114,7 @@ class PlanBoardServiceTest : StringSpec({
             SchemaUtils.create(
                 UserTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable,
                 // plan-generation 이 등급·프로필·불가 시간을 조회한다
-                LevelTestResultTable, StudentProfileTable, UnavailableTimeTable,
+                LevelTestResultTable, StudentProfileTable, UnavailableTimeTable, StudyStyleAnswerTable,
                 // 태스크 완료 처리가 퀴즈로 확정된 태스크인지 조회한다
                 TaskQuizAttemptTable
             )
@@ -125,6 +127,7 @@ class PlanBoardServiceTest : StringSpec({
     beforeEach {
         transaction(db) {
             LevelTestResultTable.deleteAll()
+            StudyStyleAnswerTable.deleteAll()
             StudentProfileTable.deleteAll()
             UnavailableTimeTable.deleteAll()
             TaskQuizAttemptTable.deleteAll()
@@ -640,6 +643,35 @@ class PlanBoardServiceTest : StringSpec({
         )
 
         response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("07:40~08:40", "08:50~09:20")
+    }
+
+    "plan-generation: 공부 스타일 설문(밤·짧고 굵게)이 있으면 잠들기 전부터 5분씩 쉬며 배치한다" {
+        val userId = seedUser("gen-style@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        transaction(db) {
+            // Q1 = 1 (짧고 굵게, 5분 휴식), Q2 = 3 (밤)
+            listOf(1 to 1, 2 to 3).forEach { (question, option) ->
+                StudyStyleAnswerRow.new {
+                    user = UserRow[userId]
+                    questionNumber = question.toShort()
+                    answerOption = option.toShort()
+                }
+            }
+        }
+        val llm = FakePlanGenerationLlmClient(tasks = listOf(GeneratedPlanTask("수학 개념", 60), GeneratedPlanTask("수학 문제", 30)))
+
+        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(
+                title = "밤 공부",
+                subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)),
+                startDate = "2026-07-01", // 수요일 등교일: 빈 시간 16:30~23:00
+                daysRemaining = 1
+            )
+        )
+
+        response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("21:25~22:25", "22:30~23:00")
     }
 
     // 2026-10-05 은 월요일(등교일, 학교 정보 없음 → 하교 16:30), 2026-10-03 은 토요일

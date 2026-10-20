@@ -21,6 +21,22 @@ data class PlacedTask(
 )
 
 /**
+ * [PlanTaskScheduler.placeTasks] 의 배치 방식. 공부 스타일 설문으로 정한다 (planboard/StudyStylePlacement.kt).
+ * @property breakMinutes 태스크 사이 쉬는 시간
+ * @property fromLate true 면 가장 늦은 빈 시간(잠들기 전)부터 채운다
+ * @property avoidRanges 다른 빈 시간이 충분하면 피할 구간 (분)
+ */
+data class PlacementOptions(
+    val breakMinutes: Int = DEFAULT_BREAK_MINUTES,
+    val fromLate: Boolean = false,
+    val avoidRanges: List<Pair<Int, Int>> = emptyList()
+) {
+    companion object {
+        val DEFAULT = PlacementOptions()
+    }
+}
+
+/**
  * 하루치 태스크를 빈 시간대에 순서대로 채워 넣는 결정론적 스케줄러.
  * AI 는 태스크 이름/소요시간만 정하고, 실제 시각 배정은 항상 여기서 계산한다
  * (plan-generation, chat 기반 계획 재조정 둘 다 이 로직을 공유).
@@ -173,34 +189,78 @@ object PlanTaskScheduler {
         return free
     }
 
-    fun placeTasks(items: List<Pair<String, Int>>, freeIntervals: List<Pair<Int, Int>>): List<PlacedTask> {
+    /**
+     * 태스크를 빈 시간에 순서대로 채운다. [options] 를 생략하면 가장 이른 빈 시간부터, 사이에 10분씩 쉬며 채운다.
+     * - [PlacementOptions.avoidRanges]: 이 구간을 뺀 빈 시간에 전부 들어가면 그렇게 배치하고, 안 들어가면 무시한다
+     * - [PlacementOptions.fromLate]: 가장 늦은 빈 시간(잠들기 전)부터 거꾸로 채운다 (태스크 순서는 유지).
+     *   전부 들어가지 않으면 앞쪽 태스크가 빠지지 않게 원래대로 이른 시간부터 채운다
+     * 빈 시간이 모자라면 뒤쪽 태스크는 배치하지 않는다.
+     */
+    fun placeTasks(
+        items: List<Pair<String, Int>>,
+        freeIntervals: List<Pair<Int, Int>>,
+        options: PlacementOptions = PlacementOptions.DEFAULT
+    ): List<PlacedTask> {
+        val candidates = listOfNotNull(
+            subtractRanges(freeIntervals, options.avoidRanges).takeIf { options.avoidRanges.isNotEmpty() },
+            freeIntervals
+        )
+        for (intervals in candidates) {
+            val placed = placeInOrder(items, intervals, options)
+            if (placed.size == items.size) return placed
+        }
+        return placeInOrder(items, freeIntervals, options.copy(fromLate = false))
+    }
+
+    private fun placeInOrder(items: List<Pair<String, Int>>, freeIntervals: List<Pair<Int, Int>>, options: PlacementOptions): List<PlacedTask> {
+        val slots = if (options.fromLate) {
+            // 하루를 거꾸로 뒤집어 앞에서부터 채운 뒤 다시 뒤집는다 → 가장 늦은 빈 시간부터, 마지막 태스크가 가장 늦게
+            val mirrored = freeIntervals.map { (start, end) -> (DAY_MINUTES - end) to (DAY_MINUTES - start) }.reversed()
+            fillFromEarly(items.reversed(), mirrored, options.breakMinutes)
+                .map { (start, end) -> (DAY_MINUTES - end) to (DAY_MINUTES - start) }
+                .reversed()
+        } else {
+            fillFromEarly(items, freeIntervals, options.breakMinutes)
+        }
+        val placedItems = if (options.fromLate) items.takeLast(slots.size) else items.take(slots.size)
+        return placedItems.zip(slots) { (taskName, minutes), (start, end) ->
+            PlacedTask(
+                taskName = taskName.take(150),
+                estimatedMinutes = minutes,
+                startTime = minutesToLocalTime(start),
+                endTime = minutesToLocalTime(end)
+            )
+        }
+    }
+
+    /** 앞에서부터 채운 각 태스크의 (시작분, 끝분). 빈 시간이 모자라면 거기서 멈춰 앞쪽 태스크만 돌려준다. */
+    private fun fillFromEarly(items: List<Pair<String, Int>>, freeIntervals: List<Pair<Int, Int>>, breakMinutes: Int): List<Pair<Int, Int>> {
         if (items.isEmpty() || freeIntervals.isEmpty()) return emptyList()
 
         var intervalIndex = 0
         var cursor = freeIntervals.getOrNull(0)?.first ?: 0
 
-        val result = mutableListOf<PlacedTask>()
-        for ((taskName, minutes) in items) {
+        val result = mutableListOf<Pair<Int, Int>>()
+        for ((_, minutes) in items) {
             while (intervalIndex < freeIntervals.size && cursor + minutes > freeIntervals[intervalIndex].second) {
                 intervalIndex++
                 cursor = freeIntervals.getOrNull(intervalIndex)?.first ?: cursor
             }
             if (intervalIndex >= freeIntervals.size) break // 남은 빈 시간이 없으면 이후 task는 배치하지 않음
 
-            val start = cursor
-            val end = start + minutes
-            cursor = end + DEFAULT_BREAK_MINUTES
-            result.add(
-                PlacedTask(
-                    taskName = taskName.take(150),
-                    estimatedMinutes = minutes,
-                    startTime = minutesToLocalTime(start),
-                    endTime = minutesToLocalTime(end)
-                )
-            )
+            result.add(cursor to cursor + minutes)
+            cursor += minutes + breakMinutes
         }
         return result
     }
+
+    /** [intervals] 에서 [ranges] 와 겹치는 부분을 잘라낸 구간 목록 */
+    private fun subtractRanges(intervals: List<Pair<Int, Int>>, ranges: List<Pair<Int, Int>>): List<Pair<Int, Int>> =
+        ranges.fold(intervals) { remaining, (cutStart, cutEnd) ->
+            remaining.flatMap { (start, end) ->
+                listOf(start to minOf(end, cutStart), maxOf(start, cutEnd) to end).filter { (s, e) -> s < e }
+            }
+        }
 
     private fun minutesToLocalTime(totalMinutes: Int): LocalTime {
         val clamped = totalMinutes.coerceIn(0, DAY_MINUTES - 1)

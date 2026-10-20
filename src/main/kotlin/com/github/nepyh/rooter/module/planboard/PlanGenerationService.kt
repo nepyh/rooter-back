@@ -21,6 +21,8 @@ import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import com.github.nepyh.rooter.module.studystyle.StudyStyleProfile
+import com.github.nepyh.rooter.module.studystyle.userStudyStyle
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
@@ -51,7 +53,8 @@ private data class PlanContext(
     val classNumber: Int?,
     val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>,
     val sleepTime: SleepTime,
-    val existingTaskRanges: Map<LocalDate, List<Pair<Int, Int>>>
+    val existingTaskRanges: Map<LocalDate, List<Pair<Int, Int>>>,
+    val studyStyle: StudyStyleProfile
 )
 
 class PlanGenerationService(
@@ -111,26 +114,35 @@ class PlanGenerationService(
                 classNumber = profileRow?.classNumber,
                 customUnavailableRows = customRows,
                 sleepTime = userSleepTime(userId),
-                existingTaskRanges = existingTaskRanges
+                existingTaskRanges = existingTaskRanges,
+                studyStyle = userStudyStyle(userId)
             )
         }
         val resolvedSubjects = planContext.resolvedSubjects
         val levelTiers = planContext.levelTiers
         val grade = planContext.grade
 
+        val typedUnavailableRanges = PlanTaskScheduler.buildTypedUnavailableRanges(
+            schoolDataFetcher = schoolDataFetcher,
+            startDate = startDate,
+            endDate = endDate,
+            schoolId = planContext.schoolId,
+            classNumber = planContext.classNumber,
+            grade = planContext.grade,
+            customRows = planContext.customUnavailableRows,
+            sleepTime = planContext.sleepTime
+        )
         val baseUnavailableRanges = PlanTaskScheduler.withExistingTasks(
-            PlanTaskScheduler.buildUnavailableRanges(
-                schoolDataFetcher = schoolDataFetcher,
-                startDate = startDate,
-                endDate = endDate,
-                schoolId = planContext.schoolId,
-                classNumber = planContext.classNumber,
-                grade = planContext.grade,
-                customRows = planContext.customUnavailableRows,
-                sleepTime = planContext.sleepTime
-            ),
+            typedUnavailableRanges.mapValues { (_, ranges) -> ranges.map { it.start to it.end } },
             planContext.existingTaskRanges
         )
+        // 공부 스타일 설문에 따른 날짜별 배치 방식 (쉬는 시간, 밤부터 채우기, 피할 시간대)
+        val placementByDate = typedUnavailableRanges.mapValues { (_, ranges) ->
+            planContext.studyStyle.placementOptions(
+                isSchoolDay = ranges.any { it.type == UnavailableType.SCHOOL },
+                sleepTime = planContext.sleepTime
+            )
+        }
         // 오늘부터 시작하는 계획이면 지금 이전 시간에는 배치하지 않는다 (챗봇 재조정과 같은 기준, 10분 단위 올림).
         // 예전엔 저녁에 만들어도 오늘 할일이 하교 시각(주말은 06:30)부터 잡혀 만들자마자 지난 할일이 됐다.
         val today = todayInAppZone(clock)
@@ -230,7 +242,11 @@ class PlanGenerationService(
                     }
 
                     val freeIntervals = PlanTaskScheduler.freeIntervalsFromBusyRanges(unavailableRanges[date].orEmpty())
-                    val placedTasks = PlanTaskScheduler.placeTasks(day.tasks.map { it.task_name to it.estimated_minutes }, freeIntervals)
+                    val placedTasks = PlanTaskScheduler.placeTasks(
+                        day.tasks.map { it.task_name to it.estimated_minutes },
+                        freeIntervals,
+                        placementByDate[date] ?: PlacementOptions.DEFAULT
+                    )
 
                     placedTasks.forEach { task ->
                         PlanTaskRow.new {
