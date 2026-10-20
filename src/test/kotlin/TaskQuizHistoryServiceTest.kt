@@ -1,3 +1,4 @@
+import com.github.nepyh.rooter.common.APP_ZONE
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
@@ -40,6 +41,7 @@ import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
+import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -99,6 +101,10 @@ class TaskQuizHistoryServiceTest : StringSpec({
 
     val day = LocalDate.of(2026, 9, 29)
 
+    /** 그 날짜 저녁 8시(한국 시각)로 고정한 시계 — 응시 상태(TODO/MISSED)가 오늘 날짜에 따라 갈린다 */
+    fun clockOn(date: LocalDate): Clock = Clock.fixed(date.atTime(20, 0).atZone(APP_ZONE).toInstant(), APP_ZONE)
+    val onDay = clockOn(day)
+
     /** 같은 일일계획에 할일을 하나 더 만든다 (한 유저에 여러 퀴즈를 만들 때) */
     fun newTask(dailyPlanId: Int, taskName: String, minutes: Int = 45): Int = transaction(db) {
         PlanTaskRow.new {
@@ -145,7 +151,7 @@ class TaskQuizHistoryServiceTest : StringSpec({
         }
         service.submitQuiz(userId, taskId)
 
-        val done = TaskQuizHistoryService().list(userId, QuizHistoryStatus.DONE)
+        val done = TaskQuizHistoryService(onDay).list(userId, QuizHistoryStatus.DONE)
         val item = done.quizzes.single()
 
         item.type shouldBe "TASK"
@@ -161,14 +167,14 @@ class TaskQuizHistoryServiceTest : StringSpec({
         (item.createdAt.isNotBlank()) shouldBe true
         done.totalCount shouldBe 1
 
-        TaskQuizHistoryService().list(userId, QuizHistoryStatus.TODO).quizzes shouldBe emptyList()
+        TaskQuizHistoryService(onDay).list(userId, QuizHistoryStatus.TODO).quizzes shouldBe emptyList()
     }
 
     "목록: 아직 채점 전이면 todo 로 나오고 완료 시간·정답 수가 null" {
         val (userId, _, taskId) = seedTask("수학 문제집 풀기", withScope = false)
         makeQuiz(taskId, "수학 문제집 풀기")
 
-        val item = TaskQuizHistoryService().list(userId, QuizHistoryStatus.TODO).quizzes.single()
+        val item = TaskQuizHistoryService(onDay).list(userId, QuizHistoryStatus.TODO).quizzes.single()
 
         item.status shouldBe "TODO"
         item.completedAt shouldBe null
@@ -177,7 +183,27 @@ class TaskQuizHistoryServiceTest : StringSpec({
         item.totalCount shouldBe 5
         item.subjectId shouldBe null   // 학습 범위도 단원 기록도 없어 과목을 못 찾는다
 
-        TaskQuizHistoryService().list(userId, QuizHistoryStatus.DONE).quizzes shouldBe emptyList()
+        TaskQuizHistoryService(onDay).list(userId, QuizHistoryStatus.DONE).quizzes shouldBe emptyList()
+    }
+
+    "목록: 계획 날짜가 지나도록 안 푼 퀴즈는 todo 가 아니라 missed 로 나오고, 지금 풀어 제출하면 done 이 된다" {
+        val (userId, _, taskId) = seedTask("수학 문제집 풀기", withScope = false)
+        val service = makeQuiz(taskId, "수학 문제집 풀기")
+        val nextDay = TaskQuizHistoryService(clockOn(day.plusDays(1)))
+
+        nextDay.list(userId, QuizHistoryStatus.TODO).quizzes shouldBe emptyList()
+        val missed = nextDay.list(userId, QuizHistoryStatus.MISSED)
+        missed.quizzes.single().status shouldBe "MISSED"
+        missed.totalCount shouldBe 1
+        nextDay.list(userId, null).quizzes.single().status shouldBe "MISSED"
+
+        service.getCurrentQuiz(userId, taskId).questions.forEach { question ->
+            service.answerQuestion(userId, taskId, question.id, question.choice("A").id)
+        }
+        service.submitQuiz(userId, taskId)
+
+        nextDay.list(userId, QuizHistoryStatus.MISSED).quizzes shouldBe emptyList()
+        nextDay.list(userId, QuizHistoryStatus.DONE).quizzes.single().status shouldBe "DONE"
     }
 
     "목록: 남의 퀴즈는 나오지 않는다" {
@@ -186,7 +212,7 @@ class TaskQuizHistoryServiceTest : StringSpec({
         makeQuiz(myTask, "수학 문제집 풀기")
         makeQuiz(otherTask, "영어 단어 30개 외우기")
 
-        val mine = TaskQuizHistoryService().list(me, null)
+        val mine = TaskQuizHistoryService(onDay).list(me, null)
 
         mine.quizzes.map { it.title } shouldBe listOf("수학 문제집 풀기")
         mine.totalCount shouldBe 1
@@ -198,7 +224,7 @@ class TaskQuizHistoryServiceTest : StringSpec({
         makeQuiz(firstTask, "수학 문제집 풀기")
         makeQuiz(secondTask, "영어 단어 30개 외우기")
 
-        val history = TaskQuizHistoryService()
+        val history = TaskQuizHistoryService(onDay)
         val firstPage = history.list(userId, null, cursor = null, limit = 1)
         firstPage.quizzes.map { it.title } shouldBe listOf("영어 단어 30개 외우기")
         firstPage.totalCount shouldBe 2
@@ -217,7 +243,7 @@ class TaskQuizHistoryServiceTest : StringSpec({
         )
         makeQuiz(taskId, "과학 문제집 30쪽 풀기", llm)
 
-        val item = TaskQuizHistoryService().list(userId, null).quizzes.single()
+        val item = TaskQuizHistoryService(onDay).list(userId, null).quizzes.single()
 
         item.subjectName shouldBe "과학"   // 폴백: 할일 이름에 과목명이 들어 있다
     }
@@ -236,7 +262,7 @@ class TaskQuizHistoryServiceTest : StringSpec({
             }
         }
 
-        val item = TaskQuizHistoryService().list(userId, QuizHistoryStatus.DONE).quizzes.single()
+        val item = TaskQuizHistoryService(onDay).list(userId, QuizHistoryStatus.DONE).quizzes.single()
 
         item.status shouldBe "DONE"
         item.completedAt shouldBe null

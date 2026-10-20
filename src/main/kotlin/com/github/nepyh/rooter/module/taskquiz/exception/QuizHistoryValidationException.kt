@@ -12,7 +12,7 @@ sealed class QuizHistoryValidationException(
     message: String
 ) : Exception(message) {
     class InvalidStatusException : QuizHistoryValidationException(
-        HttpStatusCode.BadRequest, "QUIZ_HISTORY_INVALID_STATUS", "status 는 todo 또는 done 이어야 합니다."
+        HttpStatusCode.BadRequest, "QUIZ_HISTORY_INVALID_STATUS", "status 는 todo, missed, done 중 하나여야 합니다."
     )
     class InvalidPageException : QuizHistoryValidationException(
         HttpStatusCode.BadRequest, "QUIZ_HISTORY_INVALID_PAGE", "cursor 값이 정수가 아니거나 limit 이 1~50 밖입니다."

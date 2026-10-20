@@ -25,6 +25,7 @@ fun TaskQuizHistoryApi(taskQuizHistoryService: TaskQuizHistoryService) = ApiRout
             val status = when (call.request.queryParameters["status"]?.lowercase()) {
                 null, "" -> null
                 "todo" -> QuizHistoryStatus.TODO
+                "missed" -> QuizHistoryStatus.MISSED
                 "done" -> QuizHistoryStatus.DONE
                 else -> throw QuizHistoryValidationException.InvalidStatusException()
             }
@@ -39,13 +40,14 @@ fun TaskQuizHistoryApi(taskQuizHistoryService: TaskQuizHistoryService) = ApiRout
             tag("QuizHistory")
             summary = "퀴즈 히스토리 목록"
             description = "본인 퀴즈를 차수 단위로 최신순으로 돌려준다. 지금은 태스크 완료 확인 퀴즈만 담고(type=TASK), 일일 퀴즈는 사양이 확정되면 같은 목록에 합류한다. " +
-                "status 로 todo(미응시)·done(응시 완료) 섹션을 나눠 받고, 생략하면 둘 다 나온다 (화면이 섹션이므로 보통 섹션마다 한 번씩 부른다). " +
+                "status 로 todo(오늘 풀 퀴즈)·missed(계획 날짜가 지나도록 안 푼 퀴즈)·done(응시 완료) 을 나눠 받고, 생략하면 모두 나온다 (화면이 섹션이므로 보통 섹션마다 한 번씩 부른다). " +
+                "퀴즈는 할일이 끝나면 한 일·안 한 일 가리지 않고 자동 생성되므로, 안 푼 퀴즈는 계획 날짜 자정이 지나면 todo 에서 missed 로 넘어간다. missed 도 지금 풀어 제출할 수 있고 제출하면 done 이 된다. " +
                 "항목에는 제목(할일 이름)·과목·시간 3종(생성/응시 예정/완료)·점수가 담긴다 — 응시 예정 시간은 할일이 끝나는 시각(퀴즈가 열리는 시각)이고, " +
                 "완료 시간과 정답 수는 아직 채점 전이면 null 이다. 다음 페이지는 응답의 nextCursor 를 cursor 로 넘겨 받는다 (nextCursor=null 이면 마지막). " +
                 "totalCount 는 같은 status 조건의 전체 수이고, 퀴즈가 아직 만들어지지 않은 일정은 목록에 나오지 않는다"
             parameters {
                 query("status") {
-                    description = "todo(미응시) / done(응시 완료). 생략 시 전체"
+                    description = "todo(오늘 풀 퀴즈) / missed(놓친 퀴즈) / done(응시 완료). 생략 시 전체"
                     required = false
                     schema = jsonSchema<String>()
                 }
@@ -68,7 +70,7 @@ fun TaskQuizHistoryApi(taskQuizHistoryService: TaskQuizHistoryService) = ApiRout
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "status 값이 todo/done 이 아님 (code=QUIZ_HISTORY_INVALID_STATUS), cursor 가 정수가 아니거나 limit 이 1~50 밖 (code=QUIZ_HISTORY_INVALID_PAGE)"
+                    description = "status 값이 todo/missed/done 이 아님 (code=QUIZ_HISTORY_INVALID_STATUS), cursor 가 정수가 아니거나 limit 이 1~50 밖 (code=QUIZ_HISTORY_INVALID_PAGE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

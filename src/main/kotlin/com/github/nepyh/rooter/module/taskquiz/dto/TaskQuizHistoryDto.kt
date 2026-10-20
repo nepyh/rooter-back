@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
 data class QuizHistoryItemResponse(
     val quizId: Int,            // 차수 id (task_quiz_attempts.id). 상세 조회에 그대로 쓴다
     val type: String,           // TASK (일일 퀴즈는 추후 DAILY)
-    val status: String,         // TODO(미응시) / DONE(응시 완료)
+    val status: String,         // TODO(오늘 풀 퀴즈) / MISSED(계획 날짜가 지나도록 안 푼 퀴즈, 지금 풀어도 됨) / DONE(응시 완료)
     val planTaskId: Int,
     val attemptNumber: Int,     // 차수 (최초 1, 재시도 2~3)
     val title: String,          // 할일 이름 (plan_tasks.task_name)
