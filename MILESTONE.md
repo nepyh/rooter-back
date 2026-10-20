@@ -45,7 +45,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M5 | 사용자 기능 | 7/9 | doing |
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
-| M8 | AI 계획 생성·스케줄링 | 7/10 | doing |
+| M8 | AI 계획 생성·스케줄링 | 7/11 | doing |
 | M9 | 퀴즈 고도화 | 14/17 | doing |
 | M10 | 챗봇 재조정 | 5/5 | done |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
@@ -169,6 +169,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] todo RB-077 자정을 넘기는 할일 (B-09) — 지금은 `INVALID_TIME_RANGE` 로 거부. 정책 결정 필요
 - [ ] doing RB-078 같은 날 dailyPlanId 가 여러 개(보드 여러 개)일 때 챗봇·퀴즈 기준 (B-07) — 일일 퀴즈 생성에 `planBoardId` 추가, 생략 시 학습 범위 있는 보드 우선 (이슈 #241, PR #246 open, 테스트 199건 통과). 챗봇은 경로의 dailyPlanId 로 이미 보드가 정해짐. 프론트가 `planBoardId` 를 보내야 완결
 - [ ] todo RB-079 일일 퀴즈 복습 할일·챗봇 재조정·퀴즈 실패 밀기도 다른 보드 할일을 피하도록 — 지금은 같은 보드의 그날 할일만 봄
+- [ ] doing RB-140 DeepSeek(`deepseek-flash`) 전환 후 AI 기능이 15초에 끊기고 로그도 안 남던 문제 — thinking disabled(계획 생성 16.9초 → 6~7초), LLM 요청 타임아웃 50초(Ktor CIO 기본 15초, ALB idle 60초 안쪽), 호출·파싱 실패 warn 로그 — 이슈 #289, PR #290 open (`7f0c56c` `60bbe44` `1bd868e`) · `./gradlew test` 248건 0 실패 · 실제 DeepSeek 로 7일 계획 생성 6.4초 성공, 잘못된 키는 401 본문이 로그에 남는 것 확인
 
 ## M9. 퀴즈 고도화
 
