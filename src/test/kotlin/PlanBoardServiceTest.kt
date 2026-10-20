@@ -1029,7 +1029,8 @@ class PlanBoardServiceTest : StringSpec({
         val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
 
         planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).dailyPlanId shouldBe dailyPlanId
-        planTaskService.completeTask(userId, taskId, true).dailyPlanId shouldBe dailyPlanId
+        // 미완료 → 완료는 퀴즈 통과로만 되므로 (TASK_QUIZ_REQUIRED) 완료 API 응답은 같은 값(false)으로 확인한다
+        planTaskService.completeTask(userId, taskId, false).dailyPlanId shouldBe dailyPlanId
     }
 })
 
