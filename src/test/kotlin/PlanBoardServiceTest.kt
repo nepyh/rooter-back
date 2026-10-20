@@ -1142,7 +1142,8 @@ class PlanBoardServiceTest : StringSpec({
         // 수정·완료 단건 응답에도 같은 과목이 실린다
         val taskId = planTaskService.getDailyPlan(userId, date).tasks.single().id
         planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수학 2단원 복습")).subjectName shouldBe "수학"
-        planTaskService.completeTask(userId, taskId, true).subjectId shouldBe subjectId
+        // 퀴즈 없이 완료로는 못 바꾸므로(#288) 지금 상태(미완료) 그대로 보내 단건 응답만 확인한다
+        planTaskService.completeTask(userId, taskId, false).subjectId shouldBe subjectId
     }
 
     "createTask: 교과서를 안 보내면 과목이 붙지 않는다 (null)" {
