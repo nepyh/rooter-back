@@ -16,7 +16,7 @@ object UserTable : IntIdTable("users") {
     val bio = varchar("bio", 500).nullable()
     val createdAt = timestampWithTimeZone("created_at")
     val tokenVersion = integer("token_version").default(0)
-    // 수면시간 (취침·기상). 둘 다 null = 설정 안 함 → 기본 23:00 / 06:30 (rooter-ddl #29)
+    // 수면시간 (취침·기상). 둘 다 null = 설정 안 함 → 기본 23:00 / 06:30 (rooter-ddl 이슈 #29, PR #31 — nullable, 기본값 없음)
     val sleepTime = time("sleep_time").nullable()
     val wakeTime = time("wake_time").nullable()
 }
