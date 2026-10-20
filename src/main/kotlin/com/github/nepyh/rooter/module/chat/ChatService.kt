@@ -12,12 +12,14 @@ import com.github.nepyh.rooter.module.chat.exception.DailyPlanNotFoundException
 import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
+import com.github.nepyh.rooter.module.planboard.SleepTime
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.userSleepTime
 import com.github.nepyh.rooter.module.planboard.userTaskRanges
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerRow
@@ -124,6 +126,7 @@ class ChatService(
                 schoolId = schoolId,
                 classNumber = classNumber,
                 customUnavailableRows = customUnavailableRows,
+                sleepTime = userSleepTime(userId),
                 studyStyleSummary = studyStyleSummary,
                 planBoardSummary = planBoardSummaryOf(board.title, board.startDate, board.endDate, board.examDate, planDate),
                 history = history,
@@ -167,7 +170,8 @@ class ChatService(
                 schoolId = context.schoolId,
                 classNumber = context.classNumber,
                 grade = context.grade,
-                customRows = context.customUnavailableRows
+                customRows = context.customUnavailableRows,
+                sleepTime = context.sleepTime
             )[planDate].orEmpty()
             val extraBusy = if (update!!.busy_window_start != null && update.busy_window_end != null) {
                 listOf(
@@ -313,7 +317,8 @@ class ChatService(
                 schoolId = context.schoolId,
                 classNumber = context.classNumber,
                 grade = context.grade,
-                customRows = context.customUnavailableRows
+                customRows = context.customUnavailableRows,
+                sleepTime = context.sleepTime
             ),
             existingOnTarget
         )[toDate].orEmpty()
@@ -459,6 +464,7 @@ private data class ChatContext(
     val schoolId: String?,
     val classNumber: Int?,
     val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>,
+    val sleepTime: SleepTime,
     val studyStyleSummary: String,
     val planBoardSummary: String,
     val history: List<AiChatTurn>,

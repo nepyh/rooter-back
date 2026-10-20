@@ -1,4 +1,5 @@
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
+import com.github.nepyh.rooter.module.planboard.SleepTime
 import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import io.kotest.core.spec.style.StringSpec
@@ -24,7 +25,7 @@ class PlanTaskSchedulerTest : StringSpec({
     val sunday = LocalDate.of(2026, 10, 4)
     val mondayEvening = 1 to ((18 * 60) to (20 * 60)) // 월 18:00~20:00
 
-    suspend fun buildRanges(customRows: List<Pair<Int, Pair<Int, Int>>>) =
+    suspend fun buildRanges(customRows: List<Pair<Int, Pair<Int, Int>>>, sleepTime: SleepTime = SleepTime.DEFAULT) =
         PlanTaskScheduler.buildUnavailableRanges(
             schoolDataFetcher = schoolDataFetcher,
             startDate = monday,
@@ -32,8 +33,31 @@ class PlanTaskSchedulerTest : StringSpec({
             schoolId = null,
             classNumber = null,
             grade = 1,
-            customRows = customRows
+            customRows = customRows,
+            sleepTime = sleepTime
         )
+
+    "사용자 수면시간: 자정 전에 자면 00:00~기상, 취침~24:00 두 구간을 막고 주말엔 기상 시각부터 잡힌다" {
+        val ranges = buildRanges(emptyList(), SleepTime(LocalTime.of(22, 30), LocalTime.of(8, 0)))
+        val saturday = ranges.getValue(monday.plusDays(5))
+
+        saturday shouldBe listOf(0 to (8 * 60), (22 * 60 + 30) to (24 * 60))
+        PlanTaskScheduler.placeTasks(listOf("A" to 60), PlanTaskScheduler.freeIntervalsFromBusyRanges(saturday))
+            .single().startTime shouldBe LocalTime.of(8, 0)
+    }
+
+    "사용자 수면시간: 자정 넘어 자면 취침~기상 한 구간만 막아, 전날 밤 23시대에도 할일이 들어갈 수 있다" {
+        val ranges = buildRanges(emptyList(), SleepTime(LocalTime.of(1, 0), LocalTime.of(7, 0)))
+        val saturday = ranges.getValue(monday.plusDays(5))
+
+        saturday shouldBe listOf(60 to (7 * 60))
+        PlanTaskScheduler.freeIntervalsFromBusyRanges(saturday).last().second shouldBe 24 * 60
+    }
+
+    "SleepTime.ranges: 00:00 기상이면 빈 앞 구간을 넣지 않는다, 기본값은 예전 고정값과 같다" {
+        SleepTime(LocalTime.of(22, 0), LocalTime.MIDNIGHT).ranges() shouldBe listOf((22 * 60) to (24 * 60))
+        SleepTime.DEFAULT.ranges() shouldBe listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60))
+    }
 
     "학교가 있으면 계획 기간의 시간표만 조회해서, 그날 마지막 교시로 하교 시각을 계산한다" {
         val requestedRanges = mutableListOf<Pair<String?, String?>>()

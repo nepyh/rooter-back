@@ -5,7 +5,6 @@ import java.time.LocalDate
 import java.time.LocalTime
 
 private const val DAY_MINUTES = 24 * 60
-private val DEFAULT_UNAVAILABLE_RANGES = listOf(0 to (6 * 60 + 30), (23 * 60) to DAY_MINUTES) // 00:00~06:30, 23:00~24:00
 private const val DEFAULT_DISMISSAL_MINUTES = 16 * 60 + 30 // NICE 시간표를 못 가져올 때 쓰는 하교시각 폴백값 (16:30)
 private const val DEFAULT_BREAK_MINUTES = 10
 
@@ -32,8 +31,8 @@ object PlanTaskScheduler {
      * 날짜별 학습 불가 시간대를 만든다 (plan-generation 의 여러 날짜 생성, chat 재조정의
      * 하루짜리 범위 둘 다 이 함수로 통일해서 씀 — 재조정은 startDate == endDate 로 호출).
      *
-     * 취침시간 기본값을 항상 채우고, 평일(학교 가는 날)은 **자정부터 하교 시각까지 통째로** 막는다.
-     * → 평일에는 하교 후에만, 주말에는 아침(06:30)부터 계획이 잡힌다.
+     * 사용자 수면시간([sleepTime], 설정 안 했으면 23:00~06:30)을 항상 채우고, 평일(학교 가는 날)은 **자정부터 하교 시각까지 통째로** 막는다.
+     * → 평일에는 하교 후에만, 주말에는 아침(기상 시각)부터 계획이 잡힌다.
      *   공휴일·방학·재량휴업일처럼 학교를 안 가는 날(NICE 학사일정, [SchoolDataFetcher.getNoSchoolDays])은 평일이어도 주말처럼 취급한다.
      *   (예전엔 등교 준비 07:00~08:00 · 학교 08:30~ 만 막아서 06:30~07:00, 08:00~08:30 틈에 짧은 태스크가 들어갔음)
      * 사용자가 직접 등록한 시간대(customRows)는 그 위에 더한다. 하교시각은 NICE 실시간 시간표로 그날의
@@ -46,9 +45,10 @@ object PlanTaskScheduler {
         schoolId: String?,
         classNumber: Int?,
         grade: Int,
-        customRows: List<Pair<Int, Pair<Int, Int>>>
+        customRows: List<Pair<Int, Pair<Int, Int>>>,
+        sleepTime: SleepTime = SleepTime.DEFAULT
     ): Map<LocalDate, List<Pair<Int, Int>>> =
-        buildTypedUnavailableRanges(schoolDataFetcher, startDate, endDate, schoolId, classNumber, grade, customRows)
+        buildTypedUnavailableRanges(schoolDataFetcher, startDate, endDate, schoolId, classNumber, grade, customRows, sleepTime)
             .mapValues { (_, ranges) -> ranges.map { it.start to it.end } }
 
     /** [buildUnavailableRanges] 와 같은 계산이지만 각 시간이 수면·등교·사용자 등록 중 무엇인지 함께 돌려준다. */
@@ -59,7 +59,8 @@ object PlanTaskScheduler {
         schoolId: String?,
         classNumber: Int?,
         grade: Int,
-        customRows: List<Pair<Int, Pair<Int, Int>>>
+        customRows: List<Pair<Int, Pair<Int, Int>>>,
+        sleepTime: SleepTime = SleepTime.DEFAULT
     ): Map<LocalDate, List<TypedRange>> {
         val dates = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
         val customByWeekday = customRows.groupBy({ it.first }, { it.second })
@@ -77,7 +78,7 @@ object PlanTaskScheduler {
         }
 
         return dates.associateWith { date ->
-            val ranges = DEFAULT_UNAVAILABLE_RANGES.map { (start, end) -> TypedRange(UnavailableType.SLEEP, start, end) }.toMutableList()
+            val ranges = sleepTime.ranges().map { (start, end) -> TypedRange(UnavailableType.SLEEP, start, end) }.toMutableList()
             // 등교일(평일이면서 공휴일·방학 등이 아닌 날): 등교 전 시간을 포함해 하교 시각까지 전부 막는다
             if (date.dayOfWeek.value <= 5 && date !in noSchoolDays) {
                 ranges.add(TypedRange(UnavailableType.SCHOOL, 0, dismissalMinutesByDate[date] ?: DEFAULT_DISMISSAL_MINUTES))

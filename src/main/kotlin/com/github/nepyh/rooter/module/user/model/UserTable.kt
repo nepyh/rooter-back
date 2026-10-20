@@ -4,6 +4,7 @@ import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
 import org.jetbrains.exposed.v1.dao.IntEntity
 import org.jetbrains.exposed.v1.dao.IntEntityClass
+import org.jetbrains.exposed.v1.javatime.time
 import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
 
 
@@ -15,6 +16,9 @@ object UserTable : IntIdTable("users") {
     val bio = varchar("bio", 500).nullable()
     val createdAt = timestampWithTimeZone("created_at")
     val tokenVersion = integer("token_version").default(0)
+    // 수면시간 (취침·기상). 둘 다 null = 설정 안 함 → 기본 23:00 / 06:30 (rooter-ddl 이슈 #29, PR #31 — nullable, 기본값 없음)
+    val sleepTime = time("sleep_time").nullable()
+    val wakeTime = time("wake_time").nullable()
 }
 
 class UserRow(id: EntityID<Int>) : IntEntity(id) {
@@ -27,4 +31,6 @@ class UserRow(id: EntityID<Int>) : IntEntity(id) {
     var bio by UserTable.bio
     var createdAt by UserTable.createdAt
     var tokenVersion by UserTable.tokenVersion
+    var sleepTime by UserTable.sleepTime
+    var wakeTime by UserTable.wakeTime
 }
