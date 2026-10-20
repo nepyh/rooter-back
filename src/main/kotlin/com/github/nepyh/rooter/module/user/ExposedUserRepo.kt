@@ -16,6 +16,7 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
@@ -165,6 +166,12 @@ class ExposedUserRepo : UserRepo {
             }.toList()
             targets.forEach { it.delete() }
             targets.size
+        }
+    }
+
+    override fun deleteUser(userId: Int): Int {
+        return transaction {
+            UserTable.deleteWhere { UserTable.id eq userId }
         }
     }
 }

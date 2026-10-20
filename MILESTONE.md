@@ -42,7 +42,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 6/8 | doing |
-| M5 | 사용자 기능 | 7/9 | doing |
+| M5 | 사용자 기능 | 7/10 | doing |
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
 | M8 | AI 계획 생성·스케줄링 | 7/10 | doing |
@@ -134,6 +134,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-046 로그인 응답에 userId 추가 (토큰 디코드 의존 제거) — PR #180 (09-28)
 - [x] done RB-047 아바타 다운로드 링크(avatarUrl) 응답 — PR #151 (09-26)
 - [ ] todo RB-048 내 정보 응답에 학교 이름 (프론트 요청 B-17) — 지금은 `schoolId` 만 나감. NICE 조회로 DB 변경 없이 가능
+- [ ] doing RB-139 회원 탈퇴 `DELETE /users/{id}` (앱스토어 제출 필수) — 본인만, `users` 행 삭제로 하위 기록은 DDL cascade(rooter-ddl 스키마에서 users 에서 닿는 FK 25개 전부 CASCADE·막는 FK 0 확인), 아바타 S3 오브젝트 삭제(실패해도 탈퇴 성공), 이후 토큰은 유저가 없어 401 · `./gradlew test` 240건 0 실패 · DDL 변경 없음 · 남은 것: 애플 로그인 토큰 철회(`.p8` 키 필요)·약관 동의 기록
 
 ## M6. 파일 저장·S3
 

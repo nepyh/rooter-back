@@ -230,6 +230,50 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
             }
         }
 
+        delete("{id}") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@delete call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 계정만 탈퇴할 수 있습니다."))
+            }
+            userService.deleteUser(id)
+            call.respond(HttpStatusCode.NoContent)
+        }.describe {
+            tag("User")
+            summary = "회원 탈퇴"
+            description = "본인 계정을 삭제한다. 프로필·학교 정보·불가능 시간·플랜보드·할일·퀴즈·복습·캘린더 등 이 유저의 기록이 모두 함께 지워지고 되돌릴 수 없다. " +
+                "아바타 이미지도 스토리지에서 지운다. 탈퇴 후에는 기존 토큰이 401 로 막히므로 앱은 저장된 토큰을 버리고 로그인 화면으로 보내야 한다. " +
+                "같은 이메일로 다시 가입하면 새 계정이 된다"
+            parameters {
+                path("id") {
+                    description = "유저 ID (본인)"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            responses {
+                HttpStatusCode.NoContent {
+                    description = "탈퇴 성공"
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 계정이 아님 (code=FORBIDDEN)"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
         put("{id}/password") {
             val id = call.parameters["id"]?.toIntOrNull()
                 ?: return@put call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
