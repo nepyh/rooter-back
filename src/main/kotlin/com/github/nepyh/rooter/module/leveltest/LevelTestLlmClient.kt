@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.leveltest
 
+import com.github.nepyh.rooter.common.LlmThinking
 import com.github.nepyh.rooter.common.PromptLoader
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.module.leveltest.exception.LevelTestValidationException
@@ -32,7 +33,7 @@ private data class GeneratedLevelTest(val questions: List<GeneratedLevelTestQues
 private data class ChatMessage(val role: String, val content: String)
 
 @Serializable
-private data class ChatCompletionRequest(val model: String, val messages: List<ChatMessage>)
+private data class ChatCompletionRequest(val model: String, val messages: List<ChatMessage>, val thinking: LlmThinking)
 
 @Serializable
 private data class ChatCompletionChoice(val message: ChatMessage)
@@ -71,7 +72,8 @@ class LevelTestLlmClient(private val appConfig: AppConfig) {
                 setBody(
                     ChatCompletionRequest(
                         model = appConfig.llmModel,
-                        messages = listOf(ChatMessage(role = "user", content = prompt))
+                        messages = listOf(ChatMessage(role = "user", content = prompt)),
+                        thinking = LlmThinking.DISABLED
                     )
                 )
             }.body<ChatCompletionResponse>()

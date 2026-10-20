@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.quiz
 
+import com.github.nepyh.rooter.common.LlmThinking
 import com.github.nepyh.rooter.common.PromptLoader
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
@@ -48,7 +49,8 @@ private data class ChatMessage(val role: String, val content: String)
 @Serializable
 private data class ChatCompletionRequest(
     val model: String,
-    val messages: List<ChatMessage>
+    val messages: List<ChatMessage>,
+    val thinking: LlmThinking
 )
 
 @Serializable
@@ -118,7 +120,8 @@ open class QuizLlmClient(private val appConfig: AppConfig) {
                 setBody(
                     ChatCompletionRequest(
                         model = appConfig.llmModel,
-                        messages = listOf(ChatMessage(role = "user", content = prompt))
+                        messages = listOf(ChatMessage(role = "user", content = prompt)),
+                        thinking = LlmThinking.DISABLED
                     )
                 )
             }.body<ChatCompletionResponse>()
