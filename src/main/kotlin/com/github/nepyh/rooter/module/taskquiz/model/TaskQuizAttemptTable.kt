@@ -16,6 +16,7 @@ object TaskQuizAttemptTable : IntIdTable("task_quiz_attempts") {
     val correctCount = integer("correct_count").nullable() // null = 아직 채점 전(미제출)
     val passed = bool("passed").nullable() // null = 미제출, true/false = 채점 결과 (70점 이상 = 문항의 70% 이상 정답 = true, PASS_PERCENT)
     val createdAt = timestampWithTimeZone("created_at")
+    val submittedAt = timestampWithTimeZone("submitted_at").nullable() // 채점(제출) 시각. null = 미제출. 이 컬럼 추가 전에 푼 퀴즈는 null (rooter-ddl #34)
 }
 
 class TaskQuizAttemptRow(id: EntityID<Int>) : IntEntity(id) {
@@ -28,4 +29,5 @@ class TaskQuizAttemptRow(id: EntityID<Int>) : IntEntity(id) {
     var correctCount by TaskQuizAttemptTable.correctCount
     var passed by TaskQuizAttemptTable.passed
     var createdAt by TaskQuizAttemptTable.createdAt
+    var submittedAt by TaskQuizAttemptTable.submittedAt
 }

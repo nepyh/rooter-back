@@ -286,6 +286,7 @@ class TaskQuizService(
         }) {
             it[TaskQuizAttemptTable.correctCount] = correctCount
             it[TaskQuizAttemptTable.passed] = passed
+            it[TaskQuizAttemptTable.submittedAt] = OffsetDateTime.now() // 퀴즈 히스토리의 완료 시간 (rooter-ddl #34)
         }
         if (graded == 0) throw TaskQuizValidationException.AlreadySubmittedException()
 
