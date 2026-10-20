@@ -31,14 +31,14 @@ data class QuizHistoryListResponse(
     val nextCursor: Int?                        // 다음 페이지에 넘길 cursor. null 이면 마지막 페이지
 )
 
-/** 상세 화면의 보기. 제출이 끝난 차수만 정답 여부·풀이를 채우고, 미응시 차수는 null 로 숨긴다 */
+/** 상세 화면의 보기. 제출이 끝난 차수만 정답 여부·틀린 이유를 채우고, 미응시 차수는 null 로 숨긴다 */
 @Serializable
 data class QuizHistoryChoiceResponse(
     val id: Int,
     val choiceText: String,
     val selected: Boolean,      // 내가 고른 보기
     val isCorrect: Boolean?,    // 미응시 차수는 null (정답 노출 금지)
-    val explanation: String?    // 미응시 차수는 null
+    val reason: String?         // 이 보기가 왜 틀렸는지 (답변 API 의 reason 과 같은 뜻). 정답 보기·미응시 차수는 null
 )
 
 /** 상세 화면의 문항 하나 */

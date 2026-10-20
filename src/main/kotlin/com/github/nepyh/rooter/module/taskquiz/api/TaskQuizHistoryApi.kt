@@ -92,8 +92,8 @@ fun TaskQuizHistoryApi(taskQuizHistoryService: TaskQuizHistoryService) = ApiRout
         }.describe {
             tag("QuizHistory")
             summary = "퀴즈 히스토리 상세"
-            description = "목록에서 받은 quizId(차수 id) 하나의 문항별 내용을 돌려준다. 제출이 끝난 차수는 내가 고른 보기·정답·해설(문항 풀이, 보기별 풀이)을 채워서 주고, " +
-                "아직 채점 전(todo) 차수는 정답·해설을 null 로 숨긴다 (퀴즈를 풀기 전에 답이 새지 않게). 조회 전용이라 제출·채점·복습 배치가 일어나지 않는다"
+            description = "목록에서 받은 quizId(차수 id) 하나의 문항별 내용을 돌려준다. 제출이 끝난 차수는 내가 고른 보기·정답·문항 풀이(questions[].explanation)·오답 보기별 틀린 이유(choices[].reason, 정답 보기는 null)를 채워서 주고, " +
+                "아직 채점 전(todo·missed) 차수는 정답·풀이·이유를 null 로 숨긴다 (퀴즈를 풀기 전에 답이 새지 않게). 조회 전용이라 제출·채점·복습 배치가 일어나지 않는다"
             parameters {
                 path("quizId") {
                     description = "퀴즈 차수 ID (목록 응답의 quizId)"

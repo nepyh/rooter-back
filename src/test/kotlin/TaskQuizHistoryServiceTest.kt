@@ -279,8 +279,8 @@ class TaskQuizHistoryServiceTest : StringSpec({
         questions.drop(2).forEach { service.answerQuestion(userId, taskId, it.id, it.choice("A").id) }
         service.submitQuiz(userId, taskId)
 
-        val quizId = TaskQuizHistoryService().list(userId, null).quizzes.single().quizId
-        val detail = TaskQuizHistoryService().detail(userId, quizId)
+        val quizId = TaskQuizHistoryService(onDay).list(userId, null).quizzes.single().quizId
+        val detail = TaskQuizHistoryService(onDay).detail(userId, quizId)
 
         detail.status shouldBe "DONE"
         detail.title shouldBe "과학 문제집 30쪽 풀기"
@@ -303,15 +303,16 @@ class TaskQuizHistoryServiceTest : StringSpec({
         second.isCorrect shouldBe false
         second.choices.first { it.choiceText == "A" }.isCorrect shouldBe true   // 실제 정답 보기
         second.choices.first { it.choiceText == "B" }.isCorrect shouldBe false  // 내가 고른 오답
-        second.choices.first { it.choiceText == "B" }.explanation shouldBe "B 가 틀린 이유"
+        second.choices.first { it.choiceText == "B" }.reason shouldBe "B 가 틀린 이유"
+        second.choices.first { it.choiceText == "A" }.reason shouldBe null   // 정답 보기의 풀이는 문항 explanation 에만
     }
 
     "상세: 미응시 차수는 정답·해설을 숨긴다 (퀴즈를 풀기 전에 답이 새지 않게)" {
         val (userId, _, taskId) = seedTask("수학 문제집 풀기", withScope = false)
         makeQuiz(taskId, "수학 문제집 풀기") // 답을 하지 않는다
 
-        val quizId = TaskQuizHistoryService().list(userId, QuizHistoryStatus.TODO).quizzes.single().quizId
-        val detail = TaskQuizHistoryService().detail(userId, quizId)
+        val quizId = TaskQuizHistoryService(onDay).list(userId, QuizHistoryStatus.TODO).quizzes.single().quizId
+        val detail = TaskQuizHistoryService(onDay).detail(userId, quizId)
 
         detail.status shouldBe "TODO"
         detail.correctCount shouldBe null
@@ -320,7 +321,12 @@ class TaskQuizHistoryServiceTest : StringSpec({
         detail.questions.all { it.isCorrect == null } shouldBe true
         detail.questions.all { it.explanation == null } shouldBe true
         detail.questions.all { question -> question.choices.all { it.isCorrect == null } } shouldBe true
-        detail.questions.all { question -> question.choices.all { it.explanation == null } } shouldBe true
+        detail.questions.all { question -> question.choices.all { it.reason == null } } shouldBe true
+
+        // 계획 날짜가 지나면 목록과 같이 MISSED 로 나오고, 여전히 정답은 숨긴다
+        val nextDayDetail = TaskQuizHistoryService(clockOn(day.plusDays(1))).detail(userId, quizId)
+        nextDayDetail.status shouldBe "MISSED"
+        nextDayDetail.questions.all { it.isCorrect == null } shouldBe true
     }
 
     "상세: 남의 차수는 조회되지 않는다" {
@@ -329,10 +335,10 @@ class TaskQuizHistoryServiceTest : StringSpec({
         makeQuiz(myTask, "수학 문제집 풀기")
         makeQuiz(otherTask, "영어 단어 30개 외우기")
 
-        val othersQuizId = TaskQuizHistoryService().list(other, null).quizzes.single().quizId
+        val othersQuizId = TaskQuizHistoryService(onDay).list(other, null).quizzes.single().quizId
 
         shouldThrow<QuizHistoryNotFoundException> {
-            TaskQuizHistoryService().detail(me, othersQuizId)
+            TaskQuizHistoryService(onDay).detail(me, othersQuizId)
         }
     }
 })

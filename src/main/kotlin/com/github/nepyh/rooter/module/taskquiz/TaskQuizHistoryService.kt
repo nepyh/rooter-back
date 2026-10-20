@@ -183,7 +183,7 @@ class TaskQuizHistoryService(private val clock: Clock = Clock.systemUTC()) {
         QuizHistoryDetailResponse(
             quizId = attemptId,
             type = "TASK",
-            status = if (submitted) "DONE" else "TODO",
+            status = statusOf(passed, row[DailyPlanTable.planDate], todayInAppZone(clock)).name,
             planTaskId = row[TaskQuizAttemptTable.planTaskId].value,
             attemptNumber = row[TaskQuizAttemptTable.attemptNumber],
             title = row[PlanTaskTable.taskName],
@@ -213,7 +213,8 @@ class TaskQuizHistoryService(private val clock: Clock = Clock.systemUTC()) {
                             choiceText = choice.choiceText,
                             selected = choice.id.value == question.selectedChoiceId,
                             isCorrect = if (submitted) choice.isCorrect else null,
-                            explanation = if (submitted) choice.explanation else null
+                            // 답변 API(TaskQuizAnswerResponse.reason)와 같은 뜻: 오답 보기가 왜 틀렸는지. 정답 보기의 풀이는 문항 explanation 에 있다
+                            reason = if (submitted && !choice.isCorrect) choice.explanation else null
                         )
                     }
                 )

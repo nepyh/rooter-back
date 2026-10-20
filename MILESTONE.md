@@ -190,7 +190,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-133 복습 퀴즈 3단계 — 문항 단원 저장 — 일일·태스크 퀴즈 문항에 학습 범위 단원(`chapter_name`) 저장(범위 단원과 글자 그대로 맞을 때만, 오답 복사분에도 전달) — 이슈 #261, PR #273 머지 (10-15) (`0d12626`·`dcad80d`) · `./gradlew test` 퀴즈·복습 4개 스펙 63건 0 실패 · rooter-ddl #27 머지(10-12)
 - [x] done RB-134 복습 퀴즈 3단계 — 단원별 오답률 리포트 — `GET /review-questions/report` 단원별 오답률(틀린 수 ÷ 푼 수)·남은 복습 수·단원 미상 수 — 이슈 #267, PR #274 머지 (10-15) (`030aa3e`·`f47de4e`) · `./gradlew test` 퀴즈·복습 5개 스펙 65건 0 실패 · 문항 단원 값만 읽음(스키마 변경 없음)
 - [ ] doing RB-137 퀴즈 히스토리 목록 조회 — `GET /quiz-history` 차수 단위 최신순(id 커서 50개)·todo/missed/done 필터(자동 생성된 채 안 푼 퀴즈는 계획 날짜 자정이 지나면 missed, 풀면 done), 항목에 제목(`plan_tasks.task_name`)·과목(문항 단원 → 교과서 → 과목, 실패 시 할일 이름 폴백)·시간 3종(생성/응시 예정/완료)·점수, 제출 시각(`submitted_at`) 기록 — 이슈 #275, PR #277 open (`a3bf5ee`) · `./gradlew test` 퀴즈·복습 6개 스펙 71건 0 실패 · 조회 전용(LLM 없음) · **DDL 선행: rooter-ddl #34 (PR #35 머지) → 운영 DB 에 `submitted_at` 컬럼 적용 → 이 PR 머지** (main 머지가 곧 운영 배포라 컬럼 없이 나가면 퀴즈 제출 실패) · 일일 퀴즈·상세 조회는 범위 밖
-- [ ] doing RB-138 퀴즈 히스토리 상세 조회 — `GET /quiz-history/{quizId}` 문항별 내가 고른 답·정답·해설(문항 풀이·보기별 풀이), 미응시 차수는 정답·해설 null 로 숨김, 본인 차수만(아니면 404) — 이슈 #276, PR #278 open (`68fb2dd`) · `./gradlew test` 퀴즈·복습 6개 스펙 74건 0 실패 · 조회 전용 · RB-137(목록) 위에 얹은 브랜치
+- [ ] doing RB-138 퀴즈 히스토리 상세 조회 — `GET /quiz-history/{quizId}` 문항별 내가 고른 답·정답·문항 풀이(`explanation`)·오답 보기별 틀린 이유(`reason`, 답변 API 와 같은 이름), 상태는 목록과 같은 TODO/MISSED/DONE, 채점 전 차수는 정답·풀이 null 로 숨김, 본인 차수만(아니면 404) — 이슈 #276, PR #278 open (`68fb2dd`) · `./gradlew test` 퀴즈·복습 6개 스펙 74건 0 실패 → RB-137 MISSED 반영 후 태스크 퀴즈 3개 스펙 51건 0 실패 · 조회 전용 · RB-137(목록) 위에 얹은 브랜치
 
 ## M10. 챗봇 재조정
 
