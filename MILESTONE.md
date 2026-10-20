@@ -38,7 +38,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 | # | 마일스톤 | 진행 | 상태 |
 |---|---|---|---|
-| M1 | 플랜보드 코어 | 10/12 | doing |
+| M1 | 플랜보드 코어 | 11/13 | doing |
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 6/8 | doing |
@@ -46,7 +46,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
 | M8 | AI 계획 생성·스케줄링 | 7/10 | doing |
-| M9 | 퀴즈 고도화 | 14/15 | doing |
+| M9 | 퀴즈 고도화 | 14/17 | doing |
 | M10 | 챗봇 재조정 | 5/5 | done |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
@@ -83,7 +83,8 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-009 DB 통합 테스트 (`PlanBoardServiceTest`, 18케이스) — `a5680c7`
 - [ ] todo RB-010 scheduler DAO 전환 — 미지시 항목
 - [x] done RB-130 퀴즈로 결과가 확정된 할일(통과 / 3차까지 불합격)은 완료 상태 변경 금지 (#244) — `completeTask` 에서 400 `TASK_FINALIZED`, 같은 값은 성공. PR #248 머지 (10-11) (`35f894b`·`b1bc488`) · `./gradlew test` 전체 통과 · 프론트는 `completeTask` 를 정의만 하고 호출하지 않아 영향 없음. DB 변경 없음
-- [ ] doing RB-138 할일 상태를 `status`(PENDING/DONE/FAILED) 하나로 통합 (#258) — `is_completed`·`is_failed` 를 `plan_tasks.status` 로 교체, 실패 처리·완료 취소는 `PATCH /plan-tasks/{taskId}` 의 `status` 로 (`/fail` 제거), →DONE 은 퀴즈 통과로만 (`TASK_QUIZ_REQUIRED`). PR #283 open (`f9a4f4f`·`a465bbd`) · `./gradlew test` 238건 0 실패 · rooter-ddl #36 / PR #37 (status 추가, 1단계) 선행 필요 · 구 컬럼 삭제는 배포 후 rooter-ddl 다음 PR
+- [x] done RB-137 퀴즈를 통과하지 않은 할일은 `PATCH .../complete` 로 완료 금지 (#259, #231 미구현분) — `completeTask` 에서 미완료 → 완료면 400 `TASK_QUIZ_REQUIRED`, 완료 취소·같은 값은 성공. PR #288 머지 (10-20, 리뷰 전 선머지) (`8746c39`·`abecd4a`) · `./gradlew test` 229건 0 실패 · 프론트 `main` 은 퀴즈 통과 뒤에만 `completeTask(id, true)` 를 불러(같은 값이라 성공) 영향 없음. DB 변경 없음. #259 의 원인(퀴즈 통과 / 10-07 이전 빌드의 체크박스 완료)은 운영 DB 미조회로 확정 안 함
+- [ ] doing RB-138 할일 상태를 `status`(PENDING/DONE/FAILED) 하나로 통합 (#258) — `is_completed`·`is_failed` 를 `plan_tasks.status` 로 교체, 실패 처리·완료 취소는 `PATCH /plan-tasks/{taskId}` 의 `status` 로 (`/fail` 제거), →DONE 은 퀴즈 통과로만 (`TASK_QUIZ_REQUIRED`). PR #283 open (`f9a4f4f`·`a465bbd`, #288 병합 후 `changeStatus` 가 그 규칙을 포함) · `./gradlew test` 238건 0 실패 · rooter-ddl #36 / PR #37 (status 추가, 1단계) 선행 필요 · 구 컬럼 삭제는 배포 후 rooter-ddl 다음 PR
 
 ## M2. 컨벤션·구조 정비
 
@@ -188,8 +189,10 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-129 퀴즈 문항 수 가변 (#243) — 공부 시간 기준 30분 이하 4·1시간 이하 5·초과 7문항 (태스크 퀴즈는 할일 estimatedMinutes, 일일 퀴즈는 완료 할일 합), 태스크 퀴즈 통과 70점 이상 (`passCount` 응답 추가). 문항이 덜 저장되면 통과 못 하던 문제도 수정 — PR #247 머지 (10-11) (`3a551e4`·`e4ac66c`·`0618633`) · `./gradlew test` 전체 통과 · main 반영 PR #255 (10-12) · 프론트(`rooter-front`)는 `questions.length`·서버 `passed` 기준이라 영향 없음 확인. DB 변경 없음
 - [x] done RB-131 복습 퀴즈 1단계 — 일일·태스크 퀴즈 오답 자동 수집(`review_questions`·`review_choices`), `GET /review-questions`(id 커서, 50개), `POST /review-questions/{id}/answer`(맞히면 cleared, 틀리면 wrongCount) — PR #250 (10-12, develop) · rooter-ddl #26 머지
 - [x] done RB-132 복습 퀴즈 2단계 — 일일 퀴즈 약점 단원마다 맞춤 문제 2개를 `CUSTOM` 으로 복습 목록에 추가(보기별 이유·풀이 포함, 복습 태스크 배치와 동시 실행, 실패해도 제출 성공), 응답에 `customReviewQuestionCount` (이슈 #251, PR #252 머지 (10-12), `1a842e5`·`f3bec2e`) · `./gradlew test` 224건 통과 · main 반영 PR #255 (10-12) · DB 변경 없음
-- [x] done RB-133 복습 퀴즈 3단계 — 문항 단원 저장 — 일일·태스크 퀴즈 문항에 학습 범위 단원(`chapter_name`) 저장(범위 단원과 글자 그대로 맞을 때만, 오답 복사분에도 전달) — 이슈 #261, PR #273 머지 (10-15) (`0d12626`·`dcad80d`) · `./gradlew test` 퀴즈·복습 4개 스펙 63건 0 실패 · 응답 형식·스키마 변경 없음(값이 채워지기 시작할 뿐) · **DDL 선행: rooter-ddl #27 머지 → dev DB → 운영 DB** (컬럼 없이 배포되면 퀴즈 생성 실패)
-- [x] done RB-134 복습 퀴즈 3단계 — 단원별 오답률 리포트 — `GET /review-questions/report` 단원별 오답률(틀린 수 ÷ 푼 수)·남은 복습 수·단원 미상 수 — 이슈 #267, PR #274 머지 (10-15) (`030aa3e`·`f47de4e`) · `./gradlew test` 퀴즈·복습 5개 스펙 65건 0 실패 · 문항 단원 값만 읽음(스키마 변경 없음) · PR #273(문항 단원 저장) 위에 얹은 브랜치
+- [x] done RB-133 복습 퀴즈 3단계 — 문항 단원 저장 — 일일·태스크 퀴즈 문항에 학습 범위 단원(`chapter_name`) 저장(범위 단원과 글자 그대로 맞을 때만, 오답 복사분에도 전달) — 이슈 #261, PR #273 머지 (10-15) (`0d12626`·`dcad80d`) · `./gradlew test` 퀴즈·복습 4개 스펙 63건 0 실패 · rooter-ddl #27 머지(10-12)
+- [x] done RB-134 복습 퀴즈 3단계 — 단원별 오답률 리포트 — `GET /review-questions/report` 단원별 오답률(틀린 수 ÷ 푼 수)·남은 복습 수·단원 미상 수 — 이슈 #267, PR #274 머지 (10-15) (`030aa3e`·`f47de4e`) · `./gradlew test` 퀴즈·복습 5개 스펙 65건 0 실패 · 문항 단원 값만 읽음(스키마 변경 없음)
+- [ ] doing RB-137 퀴즈 히스토리 목록 조회 — `GET /quiz-history` 차수 단위 최신순(id 커서 50개)·todo/missed/done 필터(자동 생성된 채 안 푼 퀴즈는 계획 날짜 자정이 지나면 missed, 풀면 done), 항목에 제목(`plan_tasks.task_name`)·과목(문항 단원 → 교과서 → 과목, 실패 시 할일 이름 폴백)·시간 3종(생성/응시 예정/완료)·점수, 제출 시각(`submitted_at`) 기록 — 이슈 #275, PR #277 open (`a3bf5ee`) · `./gradlew test` 퀴즈·복습 6개 스펙 71건 0 실패 · 조회 전용(LLM 없음) · **DDL 선행: rooter-ddl #34 (PR #35 머지) → 운영 DB 에 `submitted_at` 컬럼 적용 → 이 PR 머지** (main 머지가 곧 운영 배포라 컬럼 없이 나가면 퀴즈 제출 실패) · 일일 퀴즈·상세 조회는 범위 밖
+- [ ] doing RB-138 퀴즈 히스토리 상세 조회 — `GET /quiz-history/{quizId}` 문항별 내가 고른 답·정답·문항 풀이(`explanation`)·오답 보기별 틀린 이유(`reason`, 답변 API 와 같은 이름), 상태는 목록과 같은 TODO/MISSED/DONE, 채점 전 차수는 정답·풀이 null 로 숨김, 본인 차수만(아니면 404) — 이슈 #276, PR #278 open (`68fb2dd`) · `./gradlew test` 퀴즈·복습 6개 스펙 74건 0 실패 → RB-137 MISSED 반영 후 태스크 퀴즈 3개 스펙 51건 0 실패 · 조회 전용 · RB-137(목록) 위에 얹은 브랜치
 
 ## M10. 챗봇 재조정
 
