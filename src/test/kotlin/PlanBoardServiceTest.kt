@@ -57,6 +57,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -672,6 +673,47 @@ class PlanBoardServiceTest : StringSpec({
         )
 
         response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("21:25~22:25", "22:30~23:00")
+        llm.studyStyleRules.single() shouldContain "task 하나의 estimated_minutes 는 30분을 넘기지 마라"
+        llm.studyStyleRules.single() shouldContain "공부가 잘 되는 시간대: 밤 (자기 전)"
+    }
+
+    "plan-generation: 설문이 없으면 AI 에 공부 스타일 지시를 넘기지 않는다" {
+        val userId = seedUser("gen-no-style@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient()
+
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "설문 없음", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 1)
+        )
+
+        llm.studyStyleRules.single() shouldBe ""
+    }
+
+    "plan-generation: 주말이 변수인 학생에게는 구간마다 그 구간 기준 주말 day 번호를 알려준다" {
+        val userId = seedUser("gen-weekend@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        transaction(db) {
+            StudyStyleAnswerRow.new {
+                user = UserRow[userId]
+                questionNumber = 4
+                answerOption = 3 // 주말 전체
+            }
+        }
+        val llm = FakePlanGenerationLlmClient()
+
+        // 2026-07-01(수) 부터 30일 → 10일씩 3구간. 1구간 주말 = 07-04·05 (day 4, 5)
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "주말", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 30)
+        )
+
+        llm.studyStyleRules.size shouldBe 3
+        llm.studyStyleRules.any { it.contains("주말(day 4, 5)") } shouldBe true
+        // 2구간(07-11~07-20) 주말 = 07-11·12·18·19 → day 1, 2, 8, 9
+        llm.studyStyleRules.any { it.contains("주말(day 1, 2, 8, 9)") } shouldBe true
     }
 
     // 2026-10-05 은 월요일(등교일, 학교 정보 없음 → 하교 16:30), 2026-10-03 은 토요일
@@ -1083,9 +1125,11 @@ private class FakePlanGenerationLlmClient(
     private val tasks: List<GeneratedPlanTask> = emptyList()
 ) : PlanGenerationLlmClient(dummyAppConfig()) {
     val contexts = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val studyStyleRules = java.util.Collections.synchronizedList(mutableListOf<String>())
 
-    override suspend fun generatePlan(context: String): GeneratedPlan {
+    override suspend fun generatePlan(context: String, studyStyleRules: String): GeneratedPlan {
         contexts += context
+        this.studyStyleRules += studyStyleRules
         val days = Regex("총 학습 기간: (\\d+)일").find(context)!!.groupValues[1].toInt()
         val returned = synchronized(this) { if (shortResponses > 0) { shortResponses--; days / 2 } else days }
         return GeneratedPlan(

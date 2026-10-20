@@ -38,6 +38,7 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.Clock
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -195,7 +196,12 @@ class PlanGenerationService(
                                 if (index == chunks.lastIndex) appendLine("마지막 구간이므로 끝부분에 전체 범위 총복습을 넣어라.")
                             }
                         }
-                        generateChunk(context, days.count())
+                        // 주말이 변수인 학생에게 이 구간의 토·일요일 day 번호를 알려준다
+                        val weekendDays = days.mapIndexedNotNull { dayIndex, day ->
+                            val date = startDate.plusDays((day - 1).toLong())
+                            if (date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY) dayIndex + 1 else null
+                        }
+                        generateChunk(context, planContext.studyStyle.planRules(weekendDays), days.count())
                     }
                 }
             }.awaitAll()
@@ -289,9 +295,9 @@ class PlanGenerationService(
 
     // 한 구간을 생성하고, 요청한 일수만큼 빠짐없이 왔는지 확인한다.
     // 모자라면 한 번 더 요청하고, 그래도 모자라면 일부만 저장하지 않고 실패로 끝낸다.
-    private suspend fun generateChunk(context: String, chunkDays: Int): GeneratedPlan {
+    private suspend fun generateChunk(context: String, studyStyleRules: String, chunkDays: Int): GeneratedPlan {
         repeat(MAX_ATTEMPTS) {
-            val plan = runCatching { llmClient.generatePlan(context) }
+            val plan = runCatching { llmClient.generatePlan(context, studyStyleRules) }
                 .getOrElse { e -> if (e is PlanBoardValidationException.GenerationFailedException) null else throw e }
                 ?: return@repeat
             val days = plan.daily_plans

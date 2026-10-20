@@ -65,8 +65,13 @@ open class PlanGenerationLlmClient(private val appConfig: AppConfig) {
         }
     }
 
-    open suspend fun generatePlan(context: String): GeneratedPlan {
-        val prompt = PromptLoader.load("prompts/plan-generation.md", "CONTEXT" to context)
+    /** [studyStyleRules]: 공부 스타일 설문으로 만든 계획 지시 ([com.github.nepyh.rooter.module.studystyle.StudyStyleProfile.planRules]). 설문이 없으면 빈 문자열 */
+    open suspend fun generatePlan(context: String, studyStyleRules: String = ""): GeneratedPlan {
+        val prompt = PromptLoader.load(
+            "prompts/plan-generation.md",
+            "CONTEXT" to context,
+            "STUDY_STYLE" to studyStyleRules.ifBlank { "응답 없음" }
+        )
 
         val content = requestChatCompletion(prompt)
             ?: throw PlanBoardValidationException.GenerationFailedException()
