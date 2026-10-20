@@ -1,11 +1,13 @@
 package com.github.nepyh.rooter.module.taskquiz
 
+import com.github.nepyh.rooter.common.LLM_REQUEST_TIMEOUT_MILLIS
 import com.github.nepyh.rooter.common.LlmThinking
 import com.github.nepyh.rooter.common.PromptLoader
 import com.github.nepyh.rooter.common.config.AppConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -48,6 +50,9 @@ open class TaskQuizLlmClient(private val appConfig: AppConfig) {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(json)
+        }
+        install(HttpTimeout) {
+            requestTimeoutMillis = LLM_REQUEST_TIMEOUT_MILLIS
         }
     }
 

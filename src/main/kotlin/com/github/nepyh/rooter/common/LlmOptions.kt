@@ -14,3 +14,10 @@ data class LlmThinking(val type: String) {
         val DISABLED = LlmThinking("disabled")
     }
 }
+
+/**
+ * LLM 호출 한 번의 요청 타임아웃.
+ * Ktor CIO 엔진의 기본 요청 타임아웃은 15초라, 그대로 두면 15초를 넘는 계획 생성 응답이 HttpRequestTimeoutException 으로 끊긴다.
+ * 앱 앞의 ALB idle timeout 이 60초라서, 호출 한 번이 그 안에 끝나도록 50초로 둔다.
+ */
+const val LLM_REQUEST_TIMEOUT_MILLIS = 50_000L
