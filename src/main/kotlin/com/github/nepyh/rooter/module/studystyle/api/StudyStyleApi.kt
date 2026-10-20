@@ -1,7 +1,14 @@
 package com.github.nepyh.rooter.module.studystyle.api
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.module.studystyle.BestTime
+import com.github.nepyh.rooter.module.studystyle.DailyStudyHabit
+import com.github.nepyh.rooter.module.studystyle.Distraction
+import com.github.nepyh.rooter.module.studystyle.FocusSpan
+import com.github.nepyh.rooter.module.studystyle.LearningMethod
 import com.github.nepyh.rooter.module.studystyle.StudyStyleService
+import com.github.nepyh.rooter.module.studystyle.UnfinishedHabit
+import com.github.nepyh.rooter.module.studystyle.VolatileTime
 import com.github.nepyh.rooter.module.studystyle.dto.StudyStyleResponse
 import com.github.nepyh.rooter.module.studystyle.dto.StudyStyleSubmitRequest
 import io.ktor.http.ContentType
@@ -29,7 +36,9 @@ fun StudyStyleApi(studyStyleService: StudyStyleService) = ApiRoute("study-style"
         }.describe {
             tag("StudyStyle")
             summary = "공부스타일 설문 제출"
-            description = "questionNumber(1~7)별 answerOption(1~3, 4=모르겠어요)을 제출. 제출한 문항만 기존 답변을 덮어씀, 전체 재제출 불필요"
+            description = "questionNumber(1~7)별 answerOption(1~3, 4=모르겠어요)을 제출. 제출한 문항만 기존 답변을 덮어씀, 전체 재제출 불필요.\n\n" +
+                "AI 계획 생성(할일 길이·내용·tips)과 할일 배치 시각, 챗봇에 반영되므로 **문항·보기 순서는 아래와 같이 고정**이다 (바꾸면 엉뚱하게 해석됨).\n\n" +
+                STUDY_STYLE_SURVEY_GUIDE
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<StudyStyleSubmitRequest>()
@@ -79,3 +88,16 @@ fun StudyStyleApi(studyStyleService: StudyStyleService) = ApiRoute("study-style"
         }
     }
 }
+
+// 문항·보기 의미를 해석 로직(StudyStyleProfile)의 enum 에서 그대로 만들어, 문서와 해석이 어긋나지 않게 한다
+private val STUDY_STYLE_SURVEY_GUIDE: String = listOf(
+    "한 번에 최대로 집중할 수 있는 시간" to FocusSpan.entries.map { it.label },
+    "하루 중 공부가 가장 잘 되는 시간대" to BestTime.entries.map { it.label },
+    "새로운 내용을 공부할 때 선호하는 방식" to LearningMethod.entries.map { it.label },
+    "하루 공부 스케줄에서 가장 변수가 많은 시간대" to VolatileTime.entries.map { it.label },
+    "시험 기간이 아닐 때 평소 하루 자습 시간" to DailyStudyHabit.entries.map { it.label },
+    "계획한 공부를 다 못 끝냈을 때" to UnfinishedHabit.entries.map { it.label },
+    "공부할 때 가장 크게 방해가 되는 요소" to Distraction.entries.map { it.label }
+).mapIndexed { index, (question, options) ->
+    "${index + 1}. $question — " + (options + "모르겠어요").mapIndexed { i, option -> "${i + 1}) $option" }.joinToString(" / ")
+}.joinToString("\n\n") // Swagger 마크다운에서 줄마다 끊기게 빈 줄로 나눈다

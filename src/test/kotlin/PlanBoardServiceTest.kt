@@ -5,6 +5,8 @@ import com.github.nepyh.rooter.module.planboard.GeneratedPlan
 import com.github.nepyh.rooter.module.planboard.GeneratedPlanTask
 import com.github.nepyh.rooter.module.planboard.PlanGenerationLlmClient
 import com.github.nepyh.rooter.module.planboard.PlanGenerationService
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerRow
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerTable
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationSubjectInput
 import com.github.nepyh.rooter.module.school.NiceApiClient
@@ -55,6 +57,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -112,7 +115,7 @@ class PlanBoardServiceTest : StringSpec({
             SchemaUtils.create(
                 UserTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable,
                 // plan-generation 이 등급·프로필·불가 시간을 조회한다
-                LevelTestResultTable, StudentProfileTable, UnavailableTimeTable,
+                LevelTestResultTable, StudentProfileTable, UnavailableTimeTable, StudyStyleAnswerTable,
                 // 태스크 완료 처리가 퀴즈로 확정된 태스크인지 조회한다
                 TaskQuizAttemptTable
             )
@@ -125,6 +128,7 @@ class PlanBoardServiceTest : StringSpec({
     beforeEach {
         transaction(db) {
             LevelTestResultTable.deleteAll()
+            StudyStyleAnswerTable.deleteAll()
             StudentProfileTable.deleteAll()
             UnavailableTimeTable.deleteAll()
             TaskQuizAttemptTable.deleteAll()
@@ -642,6 +646,76 @@ class PlanBoardServiceTest : StringSpec({
         response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("07:40~08:40", "08:50~09:20")
     }
 
+    "plan-generation: 공부 스타일 설문(밤·짧고 굵게)이 있으면 잠들기 전부터 5분씩 쉬며 배치한다" {
+        val userId = seedUser("gen-style@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        transaction(db) {
+            // Q1 = 1 (짧고 굵게, 5분 휴식), Q2 = 3 (밤)
+            listOf(1 to 1, 2 to 3).forEach { (question, option) ->
+                StudyStyleAnswerRow.new {
+                    user = UserRow[userId]
+                    questionNumber = question.toShort()
+                    answerOption = option.toShort()
+                }
+            }
+        }
+        val llm = FakePlanGenerationLlmClient(tasks = listOf(GeneratedPlanTask("수학 개념", 60), GeneratedPlanTask("수학 문제", 30)))
+
+        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(
+                title = "밤 공부",
+                subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)),
+                startDate = "2026-07-01", // 수요일 등교일: 빈 시간 16:30~23:00
+                daysRemaining = 1
+            )
+        )
+
+        response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("21:25~22:25", "22:30~23:00")
+        llm.studyStyleRules.single() shouldContain "task 하나의 estimated_minutes 는 30분을 넘기지 마라"
+        llm.studyStyleRules.single() shouldContain "공부가 잘 되는 시간대: 밤 (자기 전)"
+    }
+
+    "plan-generation: 설문이 없으면 AI 에 공부 스타일 지시를 넘기지 않는다" {
+        val userId = seedUser("gen-no-style@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient()
+
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "설문 없음", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 1)
+        )
+
+        llm.studyStyleRules.single() shouldBe ""
+    }
+
+    "plan-generation: 주말이 변수인 학생에게는 구간마다 그 구간 기준 주말 day 번호를 알려준다" {
+        val userId = seedUser("gen-weekend@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        transaction(db) {
+            StudyStyleAnswerRow.new {
+                user = UserRow[userId]
+                questionNumber = 4
+                answerOption = 3 // 주말 전체
+            }
+        }
+        val llm = FakePlanGenerationLlmClient()
+
+        // 2026-07-01(수) 부터 30일 → 10일씩 3구간. 1구간 주말 = 07-04·05 (day 4, 5)
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "주말", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 30)
+        )
+
+        llm.studyStyleRules.size shouldBe 3
+        llm.studyStyleRules.any { it.contains("주말(day 4, 5)") } shouldBe true
+        // 2구간(07-11~07-20) 주말 = 07-11·12·18·19 → day 1, 2, 8, 9
+        llm.studyStyleRules.any { it.contains("주말(day 1, 2, 8, 9)") } shouldBe true
+    }
+
     // 2026-10-05 은 월요일(등교일, 학교 정보 없음 → 하교 16:30), 2026-10-03 은 토요일
     fun kstClock(dateTime: String): Clock = Clock.fixed(java.time.LocalDateTime.parse(dateTime).atZone(java.time.ZoneId.of("Asia/Seoul")).toInstant(), java.time.ZoneOffset.UTC)
 
@@ -1051,9 +1125,11 @@ private class FakePlanGenerationLlmClient(
     private val tasks: List<GeneratedPlanTask> = emptyList()
 ) : PlanGenerationLlmClient(dummyAppConfig()) {
     val contexts = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val studyStyleRules = java.util.Collections.synchronizedList(mutableListOf<String>())
 
-    override suspend fun generatePlan(context: String): GeneratedPlan {
+    override suspend fun generatePlan(context: String, studyStyleRules: String): GeneratedPlan {
         contexts += context
+        this.studyStyleRules += studyStyleRules
         val days = Regex("총 학습 기간: (\\d+)일").find(context)!!.groupValues[1].toInt()
         val returned = synchronized(this) { if (shortResponses > 0) { shortResponses--; days / 2 } else days }
         return GeneratedPlan(

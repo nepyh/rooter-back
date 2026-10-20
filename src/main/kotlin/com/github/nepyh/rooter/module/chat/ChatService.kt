@@ -22,8 +22,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.userSleepTime
 import com.github.nepyh.rooter.module.planboard.userTaskRanges
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
-import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerRow
-import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerTable
+import com.github.nepyh.rooter.module.studystyle.userStudyStyle
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
@@ -93,11 +92,8 @@ class ChatService(
                         (PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime))
                 }
 
-            val studyStyleSummary = StudyStyleAnswerRow.find { StudyStyleAnswerTable.userId eq userId }
-                .orderBy(StudyStyleAnswerTable.questionNumber to SortOrder.ASC)
-                .map { "문항${it.questionNumber}=${it.answerOption}" }
-                .joinToString(", ")
-                .ifBlank { "응답 없음" }
+            // 숫자(문항1=2)가 아니라 학생이 고른 보기 문구로 넘겨야 AI 가 뜻을 안다
+            val studyStyleSummary = userStudyStyle(userId).summary()
 
             val history = ChatTurnRow.find { ChatTurnTable.dailyPlanId eq dailyPlanId }
                 .orderBy(ChatTurnTable.createdAt to SortOrder.ASC)

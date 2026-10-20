@@ -21,6 +21,8 @@ import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import com.github.nepyh.rooter.module.studystyle.StudyStyleProfile
+import com.github.nepyh.rooter.module.studystyle.userStudyStyle
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
@@ -36,6 +38,7 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.Clock
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -51,7 +54,8 @@ private data class PlanContext(
     val classNumber: Int?,
     val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>,
     val sleepTime: SleepTime,
-    val existingTaskRanges: Map<LocalDate, List<Pair<Int, Int>>>
+    val existingTaskRanges: Map<LocalDate, List<Pair<Int, Int>>>,
+    val studyStyle: StudyStyleProfile
 )
 
 class PlanGenerationService(
@@ -111,26 +115,35 @@ class PlanGenerationService(
                 classNumber = profileRow?.classNumber,
                 customUnavailableRows = customRows,
                 sleepTime = userSleepTime(userId),
-                existingTaskRanges = existingTaskRanges
+                existingTaskRanges = existingTaskRanges,
+                studyStyle = userStudyStyle(userId)
             )
         }
         val resolvedSubjects = planContext.resolvedSubjects
         val levelTiers = planContext.levelTiers
         val grade = planContext.grade
 
+        val typedUnavailableRanges = PlanTaskScheduler.buildTypedUnavailableRanges(
+            schoolDataFetcher = schoolDataFetcher,
+            startDate = startDate,
+            endDate = endDate,
+            schoolId = planContext.schoolId,
+            classNumber = planContext.classNumber,
+            grade = planContext.grade,
+            customRows = planContext.customUnavailableRows,
+            sleepTime = planContext.sleepTime
+        )
         val baseUnavailableRanges = PlanTaskScheduler.withExistingTasks(
-            PlanTaskScheduler.buildUnavailableRanges(
-                schoolDataFetcher = schoolDataFetcher,
-                startDate = startDate,
-                endDate = endDate,
-                schoolId = planContext.schoolId,
-                classNumber = planContext.classNumber,
-                grade = planContext.grade,
-                customRows = planContext.customUnavailableRows,
-                sleepTime = planContext.sleepTime
-            ),
+            typedUnavailableRanges.mapValues { (_, ranges) -> ranges.map { it.start to it.end } },
             planContext.existingTaskRanges
         )
+        // 공부 스타일 설문에 따른 날짜별 배치 방식 (쉬는 시간, 밤부터 채우기, 피할 시간대)
+        val placementByDate = typedUnavailableRanges.mapValues { (_, ranges) ->
+            planContext.studyStyle.placementOptions(
+                isSchoolDay = ranges.any { it.type == UnavailableType.SCHOOL },
+                sleepTime = planContext.sleepTime
+            )
+        }
         // 오늘부터 시작하는 계획이면 지금 이전 시간에는 배치하지 않는다 (챗봇 재조정과 같은 기준, 10분 단위 올림).
         // 예전엔 저녁에 만들어도 오늘 할일이 하교 시각(주말은 06:30)부터 잡혀 만들자마자 지난 할일이 됐다.
         val today = todayInAppZone(clock)
@@ -183,7 +196,12 @@ class PlanGenerationService(
                                 if (index == chunks.lastIndex) appendLine("마지막 구간이므로 끝부분에 전체 범위 총복습을 넣어라.")
                             }
                         }
-                        generateChunk(context, days.count())
+                        // 주말이 변수인 학생에게 이 구간의 토·일요일 day 번호를 알려준다
+                        val weekendDays = days.mapIndexedNotNull { dayIndex, day ->
+                            val date = startDate.plusDays((day - 1).toLong())
+                            if (date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY) dayIndex + 1 else null
+                        }
+                        generateChunk(context, planContext.studyStyle.planRules(weekendDays), days.count())
                     }
                 }
             }.awaitAll()
@@ -230,7 +248,11 @@ class PlanGenerationService(
                     }
 
                     val freeIntervals = PlanTaskScheduler.freeIntervalsFromBusyRanges(unavailableRanges[date].orEmpty())
-                    val placedTasks = PlanTaskScheduler.placeTasks(day.tasks.map { it.task_name to it.estimated_minutes }, freeIntervals)
+                    val placedTasks = PlanTaskScheduler.placeTasks(
+                        day.tasks.map { it.task_name to it.estimated_minutes },
+                        freeIntervals,
+                        placementByDate[date] ?: PlacementOptions.DEFAULT
+                    )
 
                     placedTasks.forEach { task ->
                         PlanTaskRow.new {
@@ -273,9 +295,9 @@ class PlanGenerationService(
 
     // 한 구간을 생성하고, 요청한 일수만큼 빠짐없이 왔는지 확인한다.
     // 모자라면 한 번 더 요청하고, 그래도 모자라면 일부만 저장하지 않고 실패로 끝낸다.
-    private suspend fun generateChunk(context: String, chunkDays: Int): GeneratedPlan {
+    private suspend fun generateChunk(context: String, studyStyleRules: String, chunkDays: Int): GeneratedPlan {
         repeat(MAX_ATTEMPTS) {
-            val plan = runCatching { llmClient.generatePlan(context) }
+            val plan = runCatching { llmClient.generatePlan(context, studyStyleRules) }
                 .getOrElse { e -> if (e is PlanBoardValidationException.GenerationFailedException) null else throw e }
                 ?: return@repeat
             val days = plan.daily_plans
