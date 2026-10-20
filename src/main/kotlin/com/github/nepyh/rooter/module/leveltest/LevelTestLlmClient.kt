@@ -13,11 +13,14 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.slf4j.LoggerFactory
 
 @Serializable
 data class GeneratedLevelTestQuestion(
@@ -46,6 +49,7 @@ private data class ChatCompletionResponse(val choices: List<ChatCompletionChoice
 class LevelTestLlmClient(private val appConfig: AppConfig) {
 
     private val json = Json { ignoreUnknownKeys = true }
+    private val logger = LoggerFactory.getLogger(LevelTestLlmClient::class.java)
 
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
@@ -66,12 +70,13 @@ class LevelTestLlmClient(private val appConfig: AppConfig) {
             ?: throw LevelTestValidationException.TestGenerationFailedException()
 
         return runCatching { json.decodeFromString<GeneratedLevelTest>(content).questions }
+            .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
             .getOrElse { throw LevelTestValidationException.TestGenerationFailedException() }
     }
 
     private suspend fun requestChatCompletion(prompt: String): String? {
         val response = runCatching {
-            client.post("${appConfig.llmBaseUrl}/chat/completions") {
+            val httpResponse = client.post("${appConfig.llmBaseUrl}/chat/completions") {
                 header("Authorization", "Bearer ${appConfig.llmApiKey}")
                 contentType(ContentType.Application.Json)
                 setBody(
@@ -81,8 +86,13 @@ class LevelTestLlmClient(private val appConfig: AppConfig) {
                         thinking = LlmThinking.DISABLED
                     )
                 )
-            }.body<ChatCompletionResponse>()
-        }.getOrNull() ?: return null
+            }
+            if (!httpResponse.status.isSuccess()) {
+                error("LLM 응답 상태 ${httpResponse.status}: ${httpResponse.bodyAsText().take(500)}")
+            }
+            httpResponse.body<ChatCompletionResponse>()
+        }.onFailure { logger.warn("LLM 호출 실패: model={}", appConfig.llmModel, it) }
+            .getOrNull() ?: return null
 
         return response.choices.firstOrNull()?.message?.content
     }

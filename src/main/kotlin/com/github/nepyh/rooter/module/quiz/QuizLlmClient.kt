@@ -13,11 +13,14 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.slf4j.LoggerFactory
 
 @Serializable
 data class GeneratedQuestion(
@@ -64,6 +67,7 @@ private data class ChatCompletionResponse(val choices: List<ChatCompletionChoice
 open class QuizLlmClient(private val appConfig: AppConfig) {
 
     private val json = Json { ignoreUnknownKeys = true }
+    private val logger = LoggerFactory.getLogger(QuizLlmClient::class.java)
 
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
@@ -83,6 +87,7 @@ open class QuizLlmClient(private val appConfig: AppConfig) {
 
         val content = requestChatCompletion(prompt)
         return runCatching { json.decodeFromString<List<GeneratedQuestion>>(content) }
+            .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
             .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
     }
 
@@ -95,6 +100,7 @@ open class QuizLlmClient(private val appConfig: AppConfig) {
 
         val content = requestChatCompletion(prompt)
         return runCatching { json.decodeFromString<List<WeakAreaSuggestion>>(content) }
+            .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
             .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
     }
 
@@ -114,12 +120,13 @@ open class QuizLlmClient(private val appConfig: AppConfig) {
 
         val content = requestChatCompletion(prompt)
         return runCatching { json.decodeFromString<List<CustomReviewQuestion>>(content) }
+            .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
             .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
     }
 
     private suspend fun requestChatCompletion(prompt: String): String {
         val response = runCatching {
-            client.post("${appConfig.llmBaseUrl}/chat/completions") {
+            val httpResponse = client.post("${appConfig.llmBaseUrl}/chat/completions") {
                 header("Authorization", "Bearer ${appConfig.llmApiKey}")
                 contentType(ContentType.Application.Json)
                 setBody(
@@ -129,8 +136,13 @@ open class QuizLlmClient(private val appConfig: AppConfig) {
                         thinking = LlmThinking.DISABLED
                     )
                 )
-            }.body<ChatCompletionResponse>()
-        }.getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
+            }
+            if (!httpResponse.status.isSuccess()) {
+                error("LLM 응답 상태 ${httpResponse.status}: ${httpResponse.bodyAsText().take(500)}")
+            }
+            httpResponse.body<ChatCompletionResponse>()
+        }.onFailure { logger.warn("LLM 호출 실패: model={}", appConfig.llmModel, it) }
+            .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
 
         return response.choices.firstOrNull()?.message?.content
             ?: throw QuizValidationException.QuizGenerationFailedException()
