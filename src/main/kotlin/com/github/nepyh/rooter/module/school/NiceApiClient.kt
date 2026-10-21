@@ -11,6 +11,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
+import org.slf4j.LoggerFactory
 
 /**
  * 나이스 교육정보 개방포털(NICE) Open API 저수준 클라이언트.
@@ -64,7 +65,18 @@ class NiceApiClient(
         return rows
     }
 
+    // NICE 호출마다 서비스·걸린 시간·행 수를 남긴다 (캐시가 실제로 NICE 호출을 얼마나 줄이는지 운영 로그로 확인용)
     private suspend fun <T> fetchPage(service: String, params: Map<String, String>, serializer: KSerializer<T>): NicePage<T> {
+        val startedAt = System.nanoTime()
+        val result = runCatching { requestPage(service, params, serializer) }
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+        result
+            .onSuccess { logger.info("NICE {} {}ms rows={}", service, elapsedMs, it.rows.size) }
+            .onFailure { logger.warn("NICE {} {}ms 실패: {}", service, elapsedMs, it.message) }
+        return result.getOrThrow()
+    }
+
+    private suspend fun <T> requestPage(service: String, params: Map<String, String>, serializer: KSerializer<T>): NicePage<T> {
         val allParams = buildMap {
             put("KEY", apiKey)
             put("Type", "json")
@@ -130,6 +142,8 @@ class NiceApiClient(
         const val DEFAULT_MAX_PAGES = 10
 
         val json = Json { ignoreUnknownKeys = true }
+
+        private val logger = LoggerFactory.getLogger(NiceApiClient::class.java)
 
         private fun defaultHttpClient(): HttpClient = HttpClient(CIO) {
             install(HttpTimeout) {
