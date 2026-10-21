@@ -23,7 +23,7 @@ import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 
 @Serializable
-data class GeneratedPlanTask(val task_name: String, val estimated_minutes: Int)
+data class GeneratedPlanTask(val task_name: String, val estimated_minutes: Int, val subject_name: String? = null)
 
 @Serializable
 data class GeneratedDailyPlan(

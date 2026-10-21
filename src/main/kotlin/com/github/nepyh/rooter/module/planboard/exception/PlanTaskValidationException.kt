@@ -52,4 +52,9 @@ sealed class PlanTaskValidationException(
         "TASK_QUIZ_REQUIRED",
         "할일은 태스크 퀴즈를 통과해야 완료됩니다."
     )
+    class InvalidTextbookException : PlanTaskValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_TEXTBOOK",
+        "존재하지 않는 교과서입니다."
+    )
 }

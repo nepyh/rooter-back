@@ -35,6 +35,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.Clock
@@ -44,7 +45,7 @@ import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
 
-private data class ResolvedSubject(val subjectName: String, val topics: List<String>)
+private data class ResolvedSubject(val subjectId: Int, val subjectName: String, val topics: List<String>)
 
 private data class PlanContext(
     val resolvedSubjects: List<ResolvedSubject>,
@@ -237,6 +238,10 @@ class PlanGenerationService(
                 }
             }
 
+            // LLM 이 준 task 의 subject_name 을 요청한 과목명과 맞춰 볼 이름 → 과목 id 맵 (앞뒤 공백은 무시하고 정확히 일치할 때만)
+            val subjectIdsByName = resolvedSubjects.associate { it.subjectName.trim() to it.subjectId }
+            val subjectNamesById = resolvedSubjects.associate { it.subjectId to it.subjectName }
+
             val dailyResponses = generated.daily_plans
                 .filter { it.day in 1..totalDays }
                 .sortedBy { it.day }
@@ -254,13 +259,20 @@ class PlanGenerationService(
                         placementByDate[date] ?: PlacementOptions.DEFAULT
                     )
 
-                    placedTasks.forEach { task ->
+                    // placeTasks 는 자리가 없으면 뒤쪽 태스크를 빼므로(배치 옵션과 무관) 결과는 입력의 앞부분과 순서대로 1:1 로 맞는다.
+                    // LLM 이 준 과목명이 요청한 과목명과 맞을 때만 붙인다.
+                    // 못 맞추면 null 로 두고 저장은 계속한다 (과목을 못 붙였다고 생성을 실패시키지 않음)
+                    val taskSubjectIds = placedTasks.indices.map { index ->
+                        day.tasks.getOrNull(index)?.subject_name?.trim()?.let { subjectIdsByName[it] }
+                    }
+                    placedTasks.zip(taskSubjectIds).forEach { (task, taskSubjectId) ->
                         PlanTaskRow.new {
                             this.dailyPlan = dailyPlan
                             taskName = task.taskName
                             startTime = task.startTime
                             endTime = task.endTime
                             estimatedMinutes = task.estimatedMinutes
+                            this.subjectId = taskSubjectId?.let { EntityID(it, SubjectTable) }
                         }
                     }
 
@@ -269,12 +281,14 @@ class PlanGenerationService(
                         date = date.toString(),
                         topics = day.topics,
                         goal = day.goal,
-                        tasks = placedTasks.map {
+                        tasks = placedTasks.zip(taskSubjectIds) { task, taskSubjectId ->
                             PlanGenerationTaskResponse(
-                                taskName = it.taskName,
-                                estimatedMinutes = it.estimatedMinutes,
-                                startTime = it.startTime.toString(),
-                                endTime = it.endTime.toString()
+                                taskName = task.taskName,
+                                estimatedMinutes = task.estimatedMinutes,
+                                startTime = task.startTime.toString(),
+                                endTime = task.endTime.toString(),
+                                subjectId = taskSubjectId,
+                                subjectName = taskSubjectId?.let { subjectNamesById[it] }
                             )
                         }
                     )
@@ -311,7 +325,7 @@ class PlanGenerationService(
     private fun resolveSubject(input: PlanGenerationSubjectInput): ResolvedSubject {
         val textbook = TextbookRow.findById(input.textbookId)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
-        val subjectName = SubjectRow.findById(textbook.subject.id.value)?.name
+        val subjectRow = SubjectRow.findById(textbook.subject.id.value)
             ?: throw PlanBoardValidationException.InvalidSubjectRangeException()
 
         val (startChapter, endChapter) = resolveChapterRange(textbook, input.startChapterId, input.endChapterId)
@@ -322,7 +336,7 @@ class PlanGenerationService(
 
         val allTopics = if (input.customRangeText.isNullOrBlank()) topics else topics + input.customRangeText
 
-        return ResolvedSubject(subjectName, allTopics)
+        return ResolvedSubject(subjectRow.id.value, subjectRow.name, allTopics)
     }
 
     private fun levelTierFor(userId: Int, subjectName: String): String {

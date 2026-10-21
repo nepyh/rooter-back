@@ -15,14 +15,19 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.taskquiz.MAX_ATTEMPTS
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.between
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -42,14 +47,14 @@ class PlanTaskService {
         val user = UserRow.findById(userId)
             ?: return@transaction DailyPlanResponse(planDate = date.toString(), tasks = emptyList())
 
-        val tasks = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+        val taskRows = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
             .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq user.id) }
             .orderBy(PlanTaskTable.startTime)
             .map { PlanTaskRow.wrapRow(it) }
-            .map { it.toResponse() }
+        val subjectNames = subjectNamesOf(taskRows)
 
-        DailyPlanResponse(planDate = date.toString(), tasks = tasks)
+        DailyPlanResponse(planDate = date.toString(), tasks = taskRows.map { it.toResponse(it.subjectNameFrom(subjectNames)) })
     }
 
     /** 본인 플랜보드의 주간(월~일) 태스크 전체, referenceDate가 속한 주 기준 (모든 보드 대상) */
@@ -64,12 +69,15 @@ class PlanTaskService {
                 days = (0..6).map { DailyPlanResponse(planDate = weekStart.plusDays(it.toLong()).toString(), tasks = emptyList()) }
             )
 
-        val tasksByDate = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+        val taskRows = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
             .where { (DailyPlanTable.planDate.between(weekStart, weekEnd)) and (PlanBoardTable.userId eq user.id) }
             .orderBy(PlanTaskTable.startTime)
-            .map { row -> row[DailyPlanTable.planDate] to PlanTaskRow.wrapRow(row).toResponse() }
-            .groupBy({ it.first }, { it.second })
+            .map { row -> row[DailyPlanTable.planDate] to PlanTaskRow.wrapRow(row) }
+        val subjectNames = subjectNamesOf(taskRows.map { it.second })
+
+        val tasksByDate = taskRows
+            .groupBy({ it.first }, { (_, taskRow) -> taskRow.toResponse(taskRow.subjectNameFrom(subjectNames)) })
 
         val days = (0..6).map { offset ->
             val date = weekStart.plusDays(offset.toLong())
@@ -96,11 +104,12 @@ class PlanTaskService {
             return@transaction DailyPlanResponse(planDate = targetDate.toString(), tasks = emptyList())
         }
 
-        val tasks = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlan.id }
+        val taskRows = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlan.id }
             .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
-            .map { it.toResponse() }
+            .toList()
+        val subjectNames = subjectNamesOf(taskRows)
 
-        DailyPlanResponse(dailyPlanId = dailyPlan.id.value, planDate = targetDate.toString(), tasks = tasks)
+        DailyPlanResponse(dailyPlanId = dailyPlan.id.value, planDate = targetDate.toString(), tasks = taskRows.map { it.toResponse(it.subjectNameFrom(subjectNames)) })
     }
 
     fun createTask(userId: Int, request: PlanTaskCreateRequest) = transaction {
@@ -135,6 +144,13 @@ class PlanTaskService {
             throw PlanTaskValidationException.PlanDateOutOfRangeException()
         }
 
+        // 프론트가 고른 교과서가 오면 그 교과서의 과목을 할일에 붙인다 (안 보내면 과목 미지정)
+        val textbookSubjectId = request.textbookId?.let { textbookId ->
+            val textbook = TextbookRow.findById(textbookId)
+                ?: throw PlanTaskValidationException.InvalidTextbookException()
+            textbook.subject.id.value
+        }
+
         // 동시 요청에도 daily_plan 이 중복 생성되지 않도록 insertIgnore (DDL 유니크 제약과 짝)
         DailyPlanTable.insertIgnore {
             it[planBoardId] = board.id
@@ -151,6 +167,7 @@ class PlanTaskService {
             this.startTime = startTime
             this.endTime = endTime
             estimatedMinutes = request.estimatedMinutes
+            this.subjectId = textbookSubjectId?.let { EntityID(it, SubjectTable) }
         }
     }
 
@@ -178,7 +195,7 @@ class PlanTaskService {
         }
 
         task.isCompleted = isCompleted
-        task.toResponse()
+        task.toResponse(subjectNameOf(task))
     }
 
     /** 태스크 퀴즈를 통과했거나, 마지막 차수(MAX_ATTEMPTS)까지 불합격해 결과가 확정된 태스크인지 */
@@ -221,7 +238,7 @@ class PlanTaskService {
             task.estimatedMinutes = it
         }
 
-        task.toResponse()
+        task.toResponse(subjectNameOf(task))
     }
 
     /** 태스크 삭제 (본인 플랜보드 소유권 확인) */
@@ -236,13 +253,35 @@ class PlanTaskService {
         task.delete()
     }
 
-    private fun PlanTaskRow.toResponse() = PlanTaskResponse(
+    /** 과목명은 호출부가 채워 넘긴다 — 여기서 조회하면 응답 행마다 SELECT 가 나간다 */
+    private fun PlanTaskRow.toResponse(subjectName: String? = null) = PlanTaskResponse(
         id = id.value,
         dailyPlanId = readValues[PlanTaskTable.dailyPlanId].value,
         taskName = taskName,
         startTime = startTime.format(timeFormat),
         endTime = endTime.format(timeFormat),
         estimatedMinutes = estimatedMinutes,
-    isCompleted = isCompleted
+        isCompleted = isCompleted,
+        subjectId = readValues[PlanTaskTable.subjectId]?.value,
+        subjectName = subjectName
     )
+
+    /**
+     * 목록 응답에 붙일 과목명 맵. 행마다 참조 엔티티를 읽으면 행 수만큼 SELECT 가 나가므로
+     * subject id 만 모아 한 번에 조회한다 (CatalogService 의 교과서·과목 벌크 조회와 같은 방식).
+     */
+    private fun subjectNamesOf(rows: List<PlanTaskRow>): Map<Int, String> {
+        val subjectIds = rows.mapNotNull { it.subjectId }.distinct()
+        if (subjectIds.isEmpty()) return emptyMap()
+        return SubjectRow.find { SubjectTable.id inList subjectIds }
+            .associate { it.id.value to it.name }
+    }
+
+    /** 이 행의 과목명을 벌크로 만든 맵에서 꺼낸다 (과목 미지정이면 null) */
+    private fun PlanTaskRow.subjectNameFrom(subjectNames: Map<Int, String>): String? =
+        subjectId?.value?.let { subjectNames[it] }
+
+    /** 단건 응답용 — 한 행뿐이라 과목을 바로 조회한다 */
+    private fun subjectNameOf(row: PlanTaskRow): String? =
+        row.subjectId?.value?.let { SubjectRow.findById(it)?.name }
 }
