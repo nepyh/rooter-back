@@ -32,6 +32,7 @@ import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.DayOfWeek
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -241,7 +242,12 @@ class PlanTaskService {
         task.startTime = newStartTime
         task.endTime = newEndTime
 
-        request.estimatedMinutes?.let {
+        // 예상 시간은 태스크 퀴즈 문항 수·캘린더 공부 시간 합계를 정한다. 시간만 바꾸고 예상 시간을 안 보내면
+        // 옛 값이 남아(1시간 → 30분으로 줄여도 퀴즈는 1시간 기준) 바뀐 시간 길이로 맞춘다. 보내면 그 값을 쓴다
+        val timeChanged = request.startTime != null || request.endTime != null
+        val newEstimatedMinutes = request.estimatedMinutes
+            ?: if (timeChanged) Duration.between(newStartTime, newEndTime).toMinutes().toInt() else null
+        newEstimatedMinutes?.let {
             if (it < 1) throw PlanTaskValidationException.InvalidEstimatedMinutesException()
             task.estimatedMinutes = it
         }

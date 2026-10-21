@@ -877,6 +877,22 @@ class PlanBoardServiceTest : StringSpec({
         }
     }
 
+    "updateTask: 시간만 바꾸면 예상 시간을 바뀐 길이로 맞추고, 같이 보내면 보낸 값을 쓴다" {
+        val userId = seedUser("task-update-estimate@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId)) // 17:30~19:30, 120분
+        val taskId = transaction(db) { PlanTaskRow.find { PlanTaskTable.taskName eq "수학 2단원" }.first().id.value }
+
+        // 끝 시각만 당겨 30분으로 줄임 → 예상 시간도 30분 (퀴즈 문항 수·캘린더 합계 기준)
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(endTime = "18:00")).estimatedMinutes shouldBe 30
+        // 위치만 옮김 (길이 그대로) → 30분 유지
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(startTime = "20:00", endTime = "20:30")).estimatedMinutes shouldBe 30
+        // 시간과 예상 시간을 같이 보내면 보낸 값
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(startTime = "20:00", endTime = "21:00", estimatedMinutes = 50)).estimatedMinutes shouldBe 50
+        // 이름만 바꾸면 예상 시간은 그대로
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수학 3단원")).estimatedMinutes shouldBe 50
+    }
+
     "deleteTask: 삭제 후 조회되지 않는다" {
         val userId = seedUser("task-delete@test.com")
         val boardId = seedBoard(userId)

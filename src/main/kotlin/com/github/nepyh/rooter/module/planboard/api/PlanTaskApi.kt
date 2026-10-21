@@ -210,7 +210,8 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("PlanTask")
             summary = "태스크 수정"
-            description = "taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정. 본인 플랜보드 소유 태스크만 가능"
+            description = "taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정. 본인 플랜보드 소유 태스크만 가능. " +
+                "startTime·endTime 을 바꾸고 estimatedMinutes 를 안 보내면 예상 시간은 바뀐 길이(끝−시작, 분)로 자동으로 맞춘다 (태스크 퀴즈 문항 수·캘린더 공부 시간 기준)"
             parameters {
                 path("taskId") {
                     description = "태스크 ID"
