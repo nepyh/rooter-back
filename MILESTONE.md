@@ -41,7 +41,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M1 | 플랜보드 코어 | 10/14 | doing |
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
-| M4 | school·NICE 연동 | 6/8 | doing |
+| M4 | school·NICE 연동 | 6/9 | doing |
 | M5 | 사용자 기능 | 7/10 | doing |
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
@@ -125,6 +125,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] todo RB-035 교과서 데이터 수집 파이프라인 (`textbook`) — 설계만 완료 (Notion 정본). 운영 `school_textbook_adoptions` 는 비어 있음 (10-04, 추천 교과서가 안 나오는 원인)
 - [x] done RB-036 학교 검색 결과가 없으면 502 가 나가던 문제 (NICE INFO-200 → 빈 목록) — PR #164 (09-28)
 - [x] done RB-037 NICE 첫 페이지만 조회해 시험일정·하교시각이 틀리던 문제 (학년도 범위·페이지네이션) — PR #167 (09-28)
+- [ ] doing RB-145 NICE 시간표·학사일정 서버 캐시 (Caffeine, 날짜 단위 + 백그라운드 갱신) — 측정: 캐시 없을 때 바쁜 시간·계획 생성·챗봇·복습 배치가 요청마다 NICE ~0.4초. 캐시에 없는 날짜만 범위째 NICE 1회, 실패 미저장, 갱신 주기(시간표 12시간·빈 미래 날짜 1시간·학사일정 24시간) 지난 값은 바로 주고 뒤에서 갱신, 시간표·학사일정 동시 조회, NICE 호출 시간 로그 — 이슈 #298, PR #299 open · `./gradlew test` 284건 0 실패 · 실제 NICE: 주간 7일 첫 요청 387→253ms, 두 번째부터 0~1ms
 
 ## M5. 사용자 기능
 
