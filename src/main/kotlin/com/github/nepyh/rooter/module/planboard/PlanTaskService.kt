@@ -51,10 +51,13 @@ class PlanTaskService {
             .selectAll()
             .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq user.id) }
             .orderBy(PlanTaskTable.startTime)
-            .map { PlanTaskRow.wrapRow(it) }
-        val subjectNames = subjectNamesOf(taskRows)
+            .map { it[DailyPlanTable.planBoardId].value to PlanTaskRow.wrapRow(it) }
+        val subjectNames = subjectNamesOf(taskRows.map { it.second })
 
-        DailyPlanResponse(planDate = date.toString(), tasks = taskRows.map { it.toResponse(it.subjectNameFrom(subjectNames)) })
+        DailyPlanResponse(
+            planDate = date.toString(),
+            tasks = taskRows.map { (planBoardId, task) -> task.toResponse(planBoardId, task.subjectNameFrom(subjectNames)) }
+        )
     }
 
     /** 본인 플랜보드의 주간(월~일) 태스크 전체, referenceDate가 속한 주 기준 (모든 보드 대상) */
@@ -73,11 +76,13 @@ class PlanTaskService {
             .selectAll()
             .where { (DailyPlanTable.planDate.between(weekStart, weekEnd)) and (PlanBoardTable.userId eq user.id) }
             .orderBy(PlanTaskTable.startTime)
-            .map { row -> row[DailyPlanTable.planDate] to PlanTaskRow.wrapRow(row) }
-        val subjectNames = subjectNamesOf(taskRows.map { it.second })
+            .map { row -> row[DailyPlanTable.planDate] to (row[DailyPlanTable.planBoardId].value to PlanTaskRow.wrapRow(row)) }
+        val subjectNames = subjectNamesOf(taskRows.map { it.second.second })
 
-        val tasksByDate = taskRows
-            .groupBy({ it.first }, { (_, taskRow) -> taskRow.toResponse(taskRow.subjectNameFrom(subjectNames)) })
+        val tasksByDate = taskRows.groupBy({ it.first }, { (_, taskAndPlanBoard) ->
+            val (planBoardId, taskRow) = taskAndPlanBoard
+            taskRow.toResponse(planBoardId, taskRow.subjectNameFrom(subjectNames))
+        })
 
         val days = (0..6).map { offset ->
             val date = weekStart.plusDays(offset.toLong())
@@ -109,7 +114,11 @@ class PlanTaskService {
             .toList()
         val subjectNames = subjectNamesOf(taskRows)
 
-        DailyPlanResponse(dailyPlanId = dailyPlan.id.value, planDate = targetDate.toString(), tasks = taskRows.map { it.toResponse(it.subjectNameFrom(subjectNames)) })
+        DailyPlanResponse(
+            dailyPlanId = dailyPlan.id.value,
+            planDate = targetDate.toString(),
+            tasks = taskRows.map { it.toResponse(board.id.value, it.subjectNameFrom(subjectNames)) }
+        )
     }
 
     fun createTask(userId: Int, request: PlanTaskCreateRequest) = transaction {
@@ -195,7 +204,7 @@ class PlanTaskService {
         }
 
         task.isCompleted = isCompleted
-        task.toResponse(subjectNameOf(task))
+        task.toResponse(planBoardIdOf(task), subjectNameOf(task))
     }
 
     /** 태스크 퀴즈를 통과했거나, 마지막 차수(MAX_ATTEMPTS)까지 불합격해 결과가 확정된 태스크인지 */
@@ -238,7 +247,7 @@ class PlanTaskService {
             task.estimatedMinutes = it
         }
 
-        task.toResponse(subjectNameOf(task))
+        task.toResponse(planBoardIdOf(task), subjectNameOf(task))
     }
 
     /** 태스크 삭제 (본인 플랜보드 소유권 확인) */
@@ -254,9 +263,10 @@ class PlanTaskService {
     }
 
     /** 과목명은 호출부가 채워 넘긴다 — 여기서 조회하면 응답 행마다 SELECT 가 나간다 */
-    private fun PlanTaskRow.toResponse(subjectName: String? = null) = PlanTaskResponse(
+    private fun PlanTaskRow.toResponse(planBoardId: Int, subjectName: String? = null) = PlanTaskResponse(
         id = id.value,
         dailyPlanId = readValues[PlanTaskTable.dailyPlanId].value,
+        planBoardId = planBoardId,
         taskName = taskName,
         startTime = startTime.format(timeFormat),
         endTime = endTime.format(timeFormat),
@@ -284,4 +294,8 @@ class PlanTaskService {
     /** 단건 응답용 — 한 행뿐이라 과목을 바로 조회한다 */
     private fun subjectNameOf(row: PlanTaskRow): String? =
         row.subjectId?.value?.let { SubjectRow.findById(it)?.name }
+
+    /** 단건 응답용 — 이미 읽은 일일 계획 행에서 보드 id 만 꺼낸다 (보드 조회 SELECT 를 더 내지 않는다) */
+    private fun planBoardIdOf(row: PlanTaskRow): Int =
+        row.dailyPlan.readValues[DailyPlanTable.planBoardId].value
 }

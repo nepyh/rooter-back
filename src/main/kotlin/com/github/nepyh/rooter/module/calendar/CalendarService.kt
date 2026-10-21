@@ -88,16 +88,17 @@ class CalendarService {
                 .selectAll()
                 .where { (PlanBoardTable.userId eq userId) and (DailyPlanTable.planDate eq date) }
                 .orderBy(PlanTaskTable.startTime)
-                .map { PlanTaskRow.wrapRow(it) }
                 .map {
+                    val row = PlanTaskRow.wrapRow(it)
                     PlanTaskResponse(
-                        id = it.id.value,
-                        dailyPlanId = it.readValues[PlanTaskTable.dailyPlanId].value,
-                        taskName = it.taskName,
-                        startTime = it.startTime.toString(),
-                        endTime = it.endTime.toString(),
-                        estimatedMinutes = it.estimatedMinutes,
-                        isCompleted = it.isCompleted
+                        id = row.id.value,
+                        dailyPlanId = row.readValues[PlanTaskTable.dailyPlanId].value,
+                        planBoardId = it[DailyPlanTable.planBoardId].value,
+                        taskName = row.taskName,
+                        startTime = row.startTime.toString(),
+                        endTime = row.endTime.toString(),
+                        estimatedMinutes = row.estimatedMinutes,
+                        isCompleted = row.isCompleted
                     )
                 }
 

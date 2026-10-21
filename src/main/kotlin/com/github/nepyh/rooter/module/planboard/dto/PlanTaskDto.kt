@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 data class PlanTaskResponse(
     val id: Int,
     val dailyPlanId: Int,         // 피드백·챗봇(/daily-plans/{dailyPlanId}/...) 호출용
+    val planBoardId: Int,         // 이 할일이 속한 플랜보드 ID. 여러 보드가 섞이는 조회에서 보드 구분용
     val taskName: String,
     val startTime: String,        // "17:30"
     val endTime: String,          // "19:30"

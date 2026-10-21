@@ -1118,6 +1118,37 @@ class PlanBoardServiceTest : StringSpec({
         planTaskService.completeTask(userId, taskId, false).dailyPlanId shouldBe dailyPlanId
     }
 
+    // ---- 할일이 속한 플랜보드 (여러 보드가 섞이는 조회에서 보드 구분) ----
+
+    "planBoardId: 보드가 섞이는 조회에서 태스크마다 자기 보드 id 가 실린다" {
+        val userId = seedUser("task-planboard@test.com")
+        val boardA = seedBoard(userId)
+        val boardB = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardA, taskName = "A", startTime = "09:00", endTime = "10:00"))
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardB, taskName = "B", startTime = "19:00", endTime = "20:00"))
+        val date = LocalDate.of(2026, 7, 15)
+        val expected = listOf("A" to boardA, "B" to boardB)
+
+        planTaskService.getDailyPlan(userId, date).tasks.map { it.taskName to it.planBoardId } shouldBe expected
+
+        val weekDay = planTaskService.getWeeklyPlan(userId, date).days.single { it.planDate == "2026-07-15" }
+        weekDay.tasks.map { it.taskName to it.planBoardId } shouldBe expected
+
+        // 보드 하나 기준 조회는 그 보드 id 만 나온다
+        planTaskService.getBoardDailyPlan(userId, boardB, date).tasks.map { it.planBoardId } shouldBe listOf(boardB)
+    }
+
+    "planBoardId: 수정·완료 단건 응답에도 보드 id 가 들어간다" {
+        val userId = seedUser("task-planboard-update@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+        val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
+
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).planBoardId shouldBe boardId
+        // 퀴즈 없이 완료로는 못 바꾸므로(#288) 지금 상태(미완료) 그대로 보내 단건 응답만 확인한다
+        planTaskService.completeTask(userId, taskId, false).planBoardId shouldBe boardId
+    }
+
     // ---- 할일의 과목 귀속 (목록을 과목별로 분류하기 위한 제목) ----
 
     "createTask: 교과서를 지정하면 과목이 저장되고 목록·단건 응답에 subjectId/subjectName 이 실린다" {

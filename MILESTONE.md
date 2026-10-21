@@ -38,7 +38,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 | # | 마일스톤 | 진행 | 상태 |
 |---|---|---|---|
-| M1 | 플랜보드 코어 | 10/13 | doing |
+| M1 | 플랜보드 코어 | 10/14 | doing |
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 6/8 | doing |
@@ -85,6 +85,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-130 퀴즈로 결과가 확정된 할일(통과 / 3차까지 불합격)은 완료 상태 변경 금지 (#244) — `completeTask` 에서 400 `TASK_FINALIZED`, 같은 값은 성공. PR #248 머지 (10-11) (`35f894b`·`b1bc488`) · `./gradlew test` 전체 통과 · 프론트는 `completeTask` 를 정의만 하고 호출하지 않아 영향 없음. DB 변경 없음
 - [ ] doing RB-137 퀴즈를 통과하지 않은 할일은 `PATCH .../complete` 로 완료 금지 (#259, #231 미구현분) — `completeTask` 에서 미완료 → 완료면 400 `TASK_QUIZ_REQUIRED`, 완료 취소·같은 값은 성공. PR #288 open (`8746c39`·`abecd4a`) · `./gradlew test` 229건 0 실패 · 프론트 `main` 은 호출하지 않아 영향 없음. DB 변경 없음. #259 의 원인(퀴즈 통과 / 10-07 이전 빌드의 체크박스 완료)은 운영 DB 미조회로 확정 안 함
 - [ ] doing RB-142 할일에 과목 귀속 (#270, 프론트 요청 "할일 목록 과목별 분류") — `plan_tasks.subject_id`(rooter-ddl #32, on delete set null). 수동 생성 `POST /plan-tasks` 는 선택 `textbookId` 로 과목 유도(없는 교과서 400 `INVALID_TEXTBOOK`), AI 계획 생성은 LLM `subject_name` 이 요청 과목명과 맞을 때만 저장(못 맞추면 null). 할일 조회 3종·수정·완료 응답과 계획 생성 응답에 `subjectId`·`subjectName`(목록은 과목명 벌크 조회) — nyung517 커밋 5개를 main 위로 옮김 + 생성 응답 과목, PR #293 open · `./gradlew test` 269건 0 실패 · 실제 DeepSeek 2회 42개 할일 모두 과목 매칭 · 복습·재조정·챗봇 미루기로 파생된 할일은 null (범위 밖) · **DDL 선행: 운영 DB 에 `plan_tasks.subject_id` 적용 확인 후 머지**
+- [ ] doing RB-143 할일에 플랜보드 id 추가 (#294, 프론트 홈이 보드마다 `daily`·`subjects` 를 다시 부르던 워터폴 제거) — `PlanTaskResponse.planBoardId` 추가. `plan_tasks` 에 컬럼을 만들지 않고 `daily_plans.plan_board_id` 조인으로 채워 **DDL 변경 없음**(rooter-ddl 수정 불필요, 목록 조회는 기존 innerJoin 그대로라 추가 쿼리 0). 값 채운 지점: 할일 조회 3종·수정·완료·캘린더 하루 요약·챗봇 재조정·미루기·퀴즈 실패 재배치. PR #295 open (`a83f449`·`873a45c`) · `./gradlew test` 271건 0 실패(신규 2건, 3 skipped) · Dockerfile 이미지 빌드 성공(러너 39566704992) · `isManual` 은 이슈 개요에만 있고 스펙·할일에서 빠져 제외(서버에 AI/수동 구분 컬럼 없음 — 프론트는 `plan_boards.examDate === null` 로 보드 단위 판단) · 챗봇 응답의 `subjectId`·`subjectName` 미채움은 #293 범위 밖이라 그대로
 
 ## M2. 컨벤션·구조 정비
 
