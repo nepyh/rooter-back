@@ -238,6 +238,7 @@ class ChatService(
                         PlanTaskResponse(
                             id = it.id.value,
                             dailyPlanId = dailyPlanId,
+                            planBoardId = context.planBoardId,
                             taskName = it.taskName,
                             startTime = it.startTime.toString(),
                             endTime = it.endTime.toString(),
@@ -345,11 +346,11 @@ class ChatService(
                 row.startTime = slot.startTime
                 row.endTime = slot.endTime
                 row.postponedFromDate = planDate
-                row.toResponse(targetPlan.id.value)
+                row.toResponse(targetPlan.id.value, context.planBoardId)
             }
             val remaining = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
                 .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
-                .map { it.toResponse(dailyPlanId) }
+                .map { it.toResponse(dailyPlanId, context.planBoardId) }
 
             val reply = buildString {
                 append("${moved.joinToString(", ") { "'${it.taskName}'" }} 할일을 ${formatDay(toDate)}")
@@ -420,9 +421,10 @@ internal fun postponedFromPreviousDay(postponedFromDate: LocalDate?, planDate: L
 private fun formatDay(date: LocalDate): String =
     "${date.monthValue}월 ${date.dayOfMonth}일(${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)})"
 
-private fun PlanTaskRow.toResponse(dailyPlanId: Int) = PlanTaskResponse(
+private fun PlanTaskRow.toResponse(dailyPlanId: Int, planBoardId: Int) = PlanTaskResponse(
     id = id.value,
     dailyPlanId = dailyPlanId,
+    planBoardId = planBoardId,
     taskName = taskName,
     startTime = startTime.toString(),
     endTime = endTime.toString(),

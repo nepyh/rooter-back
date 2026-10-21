@@ -361,6 +361,7 @@ class TaskQuizService(
             PlanTaskResponse(
                 id = row.id.value,
                 dailyPlanId = dailyPlan.id.value,
+                planBoardId = dailyPlan.readValues[DailyPlanTable.planBoardId].value,
                 taskName = row.taskName,
                 startTime = row.startTime.toString(),
                 endTime = row.endTime.toString(),
