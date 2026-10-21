@@ -18,6 +18,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.guessTaskSubject
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.planBoardSubjects
+import com.github.nepyh.rooter.module.planboard.isManualPlanBoard
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizAnswerResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizChoiceResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResponse
@@ -362,6 +363,7 @@ class TaskQuizService(
                 id = row.id.value,
                 dailyPlanId = dailyPlan.id.value,
                 planBoardId = dailyPlan.readValues[DailyPlanTable.planBoardId].value,
+                isManual = isManualPlanBoard(dailyPlan.planBoard.examDate),
                 taskName = row.taskName,
                 startTime = row.startTime.toString(),
                 endTime = row.endTime.toString(),

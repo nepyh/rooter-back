@@ -21,6 +21,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.userSleepTime
 import com.github.nepyh.rooter.module.planboard.userTaskRanges
+import com.github.nepyh.rooter.module.planboard.isManualPlanBoard
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.studystyle.userStudyStyle
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
@@ -127,6 +128,7 @@ class ChatService(
                 planBoardSummary = planBoardSummaryOf(board.title, board.startDate, board.endDate, board.examDate, planDate),
                 history = history,
                 planBoardId = board.id.value,
+                planBoardIsManual = isManualPlanBoard(board.examDate),
                 planBoardEndDate = board.endDate,
                 pendingPostponedFrom = pendingTasks.associate { it.id.value to it.postponedFromDate }
             )
@@ -239,6 +241,7 @@ class ChatService(
                             id = it.id.value,
                             dailyPlanId = dailyPlanId,
                             planBoardId = context.planBoardId,
+                            isManual = context.planBoardIsManual,
                             taskName = it.taskName,
                             startTime = it.startTime.toString(),
                             endTime = it.endTime.toString(),
@@ -346,11 +349,11 @@ class ChatService(
                 row.startTime = slot.startTime
                 row.endTime = slot.endTime
                 row.postponedFromDate = planDate
-                row.toResponse(targetPlan.id.value, context.planBoardId)
+                row.toResponse(targetPlan.id.value, context.planBoardId, context.planBoardIsManual)
             }
             val remaining = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
                 .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
-                .map { it.toResponse(dailyPlanId, context.planBoardId) }
+                .map { it.toResponse(dailyPlanId, context.planBoardId, context.planBoardIsManual) }
 
             val reply = buildString {
                 append("${moved.joinToString(", ") { "'${it.taskName}'" }} 할일을 ${formatDay(toDate)}")
@@ -421,10 +424,11 @@ internal fun postponedFromPreviousDay(postponedFromDate: LocalDate?, planDate: L
 private fun formatDay(date: LocalDate): String =
     "${date.monthValue}월 ${date.dayOfMonth}일(${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)})"
 
-private fun PlanTaskRow.toResponse(dailyPlanId: Int, planBoardId: Int) = PlanTaskResponse(
+private fun PlanTaskRow.toResponse(dailyPlanId: Int, planBoardId: Int, isManual: Boolean) = PlanTaskResponse(
     id = id.value,
     dailyPlanId = dailyPlanId,
     planBoardId = planBoardId,
+    isManual = isManual,
     taskName = taskName,
     startTime = startTime.toString(),
     endTime = endTime.toString(),
@@ -467,6 +471,7 @@ private data class ChatContext(
     val planBoardSummary: String,
     val history: List<AiChatTurn>,
     val planBoardId: Int,
+    val planBoardIsManual: Boolean,
     val planBoardEndDate: LocalDate,
     val pendingPostponedFrom: Map<Int, LocalDate?> // 미완료 태스크 id → 미뤄져 온 원래 날짜
 )

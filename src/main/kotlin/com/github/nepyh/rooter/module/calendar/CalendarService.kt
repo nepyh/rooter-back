@@ -18,6 +18,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.isManualPlanBoard
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
@@ -94,6 +95,7 @@ class CalendarService {
                         id = row.id.value,
                         dailyPlanId = row.readValues[PlanTaskTable.dailyPlanId].value,
                         planBoardId = it[DailyPlanTable.planBoardId].value,
+                        isManual = isManualPlanBoard(it[PlanBoardTable.examDate]),
                         taskName = row.taskName,
                         startTime = row.startTime.toString(),
                         endTime = row.endTime.toString(),
