@@ -158,13 +158,15 @@ class PlanBoardServiceTest : StringSpec({
     fun seedBoard(
         userId: Int,
         start: LocalDate = LocalDate.of(2026, 7, 1),
-        end: LocalDate = LocalDate.of(2026, 7, 31)
+        end: LocalDate = LocalDate.of(2026, 7, 31),
+        examDate: LocalDate? = null
     ): Int = transaction(db) {
         PlanBoardRow.new {
             user = UserRow[userId]
             title = "테스트 보드"
             this.startDate = start
             this.endDate = end
+            this.examDate = examDate
             createdAt = OffsetDateTime.now()
         }.id.value
     }
@@ -1147,6 +1149,32 @@ class PlanBoardServiceTest : StringSpec({
         planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).planBoardId shouldBe boardId
         // 퀴즈 없이 완료로는 못 바꾸므로(#288) 지금 상태(미완료) 그대로 보내 단건 응답만 확인한다
         planTaskService.completeTask(userId, taskId, false).planBoardId shouldBe boardId
+    }
+
+    "isManual: 시험일 없는 보드(직접 만든 일정)의 할일만 true — 보드가 섞이는 목록·보드 일간 조회" {
+        val userId = seedUser("task-manual@test.com")
+        val manualBoard = seedBoard(userId)                                         // 기본 플랜보드 (시험일 없음)
+        val examBoard = seedBoard(userId, examDate = LocalDate.of(2026, 8, 1))     // AI 시험 계획 보드
+        planTaskService.createTask(userId, taskRequest(planBoardId = manualBoard, taskName = "직접", startTime = "09:00", endTime = "10:00"))
+        planTaskService.createTask(userId, taskRequest(planBoardId = examBoard, taskName = "시험", startTime = "19:00", endTime = "20:00"))
+        val date = LocalDate.of(2026, 7, 15)
+        val expected = listOf("직접" to true, "시험" to false)
+
+        planTaskService.getDailyPlan(userId, date).tasks.map { it.taskName to it.isManual } shouldBe expected
+        planTaskService.getWeeklyPlan(userId, date).days.single { it.planDate == "2026-07-15" }
+            .tasks.map { it.taskName to it.isManual } shouldBe expected
+        planTaskService.getBoardDailyPlan(userId, manualBoard, date).tasks.single().isManual shouldBe true
+        planTaskService.getBoardDailyPlan(userId, examBoard, date).tasks.single().isManual shouldBe false
+    }
+
+    "isManual: 수정·완료 단건 응답에도 보드 기준으로 들어간다" {
+        val userId = seedUser("task-manual-update@test.com")
+        val examBoard = seedBoard(userId, examDate = LocalDate.of(2026, 8, 1))
+        planTaskService.createTask(userId, taskRequest(planBoardId = examBoard))
+        val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
+
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).isManual shouldBe false
+        planTaskService.completeTask(userId, taskId, false).isManual shouldBe false
     }
 
     // ---- 할일의 과목 귀속 (목록을 과목별로 분류하기 위한 제목) ----

@@ -27,7 +27,6 @@ import org.jetbrains.exposed.v1.core.between
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
-import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -51,12 +50,12 @@ class PlanTaskService {
             .selectAll()
             .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq user.id) }
             .orderBy(PlanTaskTable.startTime)
-            .map { it[DailyPlanTable.planBoardId].value to PlanTaskRow.wrapRow(it) }
-        val subjectNames = subjectNamesOf(taskRows.map { it.second })
+            .map { BoardTask(it[DailyPlanTable.planBoardId].value, isManualPlanBoard(it[PlanBoardTable.examDate]), PlanTaskRow.wrapRow(it)) }
+        val subjectNames = subjectNamesOf(taskRows.map { it.task })
 
         DailyPlanResponse(
             planDate = date.toString(),
-            tasks = taskRows.map { (planBoardId, task) -> task.toResponse(planBoardId, task.subjectNameFrom(subjectNames)) }
+            tasks = taskRows.map { (planBoardId, isManual, task) -> task.toResponse(planBoardId, isManual, task.subjectNameFrom(subjectNames)) }
         )
     }
 
@@ -76,12 +75,12 @@ class PlanTaskService {
             .selectAll()
             .where { (DailyPlanTable.planDate.between(weekStart, weekEnd)) and (PlanBoardTable.userId eq user.id) }
             .orderBy(PlanTaskTable.startTime)
-            .map { row -> row[DailyPlanTable.planDate] to (row[DailyPlanTable.planBoardId].value to PlanTaskRow.wrapRow(row)) }
-        val subjectNames = subjectNamesOf(taskRows.map { it.second.second })
+            .map { row -> row[DailyPlanTable.planDate] to BoardTask(row[DailyPlanTable.planBoardId].value, isManualPlanBoard(row[PlanBoardTable.examDate]), PlanTaskRow.wrapRow(row)) }
+        val subjectNames = subjectNamesOf(taskRows.map { it.second.task })
 
-        val tasksByDate = taskRows.groupBy({ it.first }, { (_, taskAndPlanBoard) ->
-            val (planBoardId, taskRow) = taskAndPlanBoard
-            taskRow.toResponse(planBoardId, taskRow.subjectNameFrom(subjectNames))
+        val tasksByDate = taskRows.groupBy({ it.first }, { (_, boardTask) ->
+            val (planBoardId, isManual, taskRow) = boardTask
+            taskRow.toResponse(planBoardId, isManual, taskRow.subjectNameFrom(subjectNames))
         })
 
         val days = (0..6).map { offset ->
@@ -117,7 +116,7 @@ class PlanTaskService {
         DailyPlanResponse(
             dailyPlanId = dailyPlan.id.value,
             planDate = targetDate.toString(),
-            tasks = taskRows.map { it.toResponse(board.id.value, it.subjectNameFrom(subjectNames)) }
+            tasks = taskRows.map { it.toResponse(board.id.value, isManualPlanBoard(board.examDate), it.subjectNameFrom(subjectNames)) }
         )
     }
 
@@ -204,7 +203,7 @@ class PlanTaskService {
         }
 
         task.isCompleted = isCompleted
-        task.toResponse(planBoardIdOf(task), subjectNameOf(task))
+        task.toResponse(planBoardIdOf(task), isManualPlanBoard(task.dailyPlan.planBoard.examDate), subjectNameOf(task))
     }
 
     /** 태스크 퀴즈를 통과했거나, 마지막 차수(MAX_ATTEMPTS)까지 불합격해 결과가 확정된 태스크인지 */
@@ -247,7 +246,7 @@ class PlanTaskService {
             task.estimatedMinutes = it
         }
 
-        task.toResponse(planBoardIdOf(task), subjectNameOf(task))
+        task.toResponse(planBoardIdOf(task), isManualPlanBoard(task.dailyPlan.planBoard.examDate), subjectNameOf(task))
     }
 
     /** 태스크 삭제 (본인 플랜보드 소유권 확인) */
@@ -263,10 +262,11 @@ class PlanTaskService {
     }
 
     /** 과목명은 호출부가 채워 넘긴다 — 여기서 조회하면 응답 행마다 SELECT 가 나간다 */
-    private fun PlanTaskRow.toResponse(planBoardId: Int, subjectName: String? = null) = PlanTaskResponse(
+    private fun PlanTaskRow.toResponse(planBoardId: Int, isManual: Boolean, subjectName: String? = null) = PlanTaskResponse(
         id = id.value,
         dailyPlanId = readValues[PlanTaskTable.dailyPlanId].value,
         planBoardId = planBoardId,
+        isManual = isManual,
         taskName = taskName,
         startTime = startTime.format(timeFormat),
         endTime = endTime.format(timeFormat),
@@ -276,21 +276,6 @@ class PlanTaskService {
         subjectName = subjectName
     )
 
-    /**
-     * 목록 응답에 붙일 과목명 맵. 행마다 참조 엔티티를 읽으면 행 수만큼 SELECT 가 나가므로
-     * subject id 만 모아 한 번에 조회한다 (CatalogService 의 교과서·과목 벌크 조회와 같은 방식).
-     */
-    private fun subjectNamesOf(rows: List<PlanTaskRow>): Map<Int, String> {
-        val subjectIds = rows.mapNotNull { it.subjectId }.distinct()
-        if (subjectIds.isEmpty()) return emptyMap()
-        return SubjectRow.find { SubjectTable.id inList subjectIds }
-            .associate { it.id.value to it.name }
-    }
-
-    /** 이 행의 과목명을 벌크로 만든 맵에서 꺼낸다 (과목 미지정이면 null) */
-    private fun PlanTaskRow.subjectNameFrom(subjectNames: Map<Int, String>): String? =
-        subjectId?.value?.let { subjectNames[it] }
-
     /** 단건 응답용 — 한 행뿐이라 과목을 바로 조회한다 */
     private fun subjectNameOf(row: PlanTaskRow): String? =
         row.subjectId?.value?.let { SubjectRow.findById(it)?.name }
@@ -299,3 +284,6 @@ class PlanTaskService {
     private fun planBoardIdOf(row: PlanTaskRow): Int =
         row.dailyPlan.readValues[DailyPlanTable.planBoardId].value
 }
+
+/** 여러 보드가 섞인 목록 조회에서 할일 한 행과 그 보드의 id·직접 만든 보드 여부 */
+private data class BoardTask(val planBoardId: Int, val isManual: Boolean, val task: PlanTaskRow)

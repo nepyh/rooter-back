@@ -18,6 +18,9 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.isManualPlanBoard
+import com.github.nepyh.rooter.module.planboard.subjectNameFrom
+import com.github.nepyh.rooter.module.planboard.subjectNamesOf
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
@@ -84,21 +87,26 @@ class CalendarService {
 
     fun getDaySummary(userId: Int, date: LocalDate): DailyCompletionResponse {
         return transaction {
-            val tasks = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+            val rows = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
                 .selectAll()
                 .where { (PlanBoardTable.userId eq userId) and (DailyPlanTable.planDate eq date) }
                 .orderBy(PlanTaskTable.startTime)
-                .map {
-                    val row = PlanTaskRow.wrapRow(it)
+                .toList()
+            val taskRows = rows.map { PlanTaskRow.wrapRow(it) }
+            val subjectNames = subjectNamesOf(taskRows)
+            val tasks = rows.zip(taskRows) { it, row ->
                     PlanTaskResponse(
                         id = row.id.value,
                         dailyPlanId = row.readValues[PlanTaskTable.dailyPlanId].value,
                         planBoardId = it[DailyPlanTable.planBoardId].value,
+                        isManual = isManualPlanBoard(it[PlanBoardTable.examDate]),
                         taskName = row.taskName,
                         startTime = row.startTime.toString(),
                         endTime = row.endTime.toString(),
                         estimatedMinutes = row.estimatedMinutes,
-                        isCompleted = row.isCompleted
+                        isCompleted = row.isCompleted,
+                        subjectId = row.subjectId?.value,
+                        subjectName = row.subjectNameFrom(subjectNames)
                     )
                 }
 
