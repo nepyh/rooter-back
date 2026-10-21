@@ -14,6 +14,8 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -173,6 +175,31 @@ class SchoolDataFetcherCacheTest : StringSpec({
         fetcher.awaitCacheRefreshes()
 
         nice.timetableRanges().size shouldBe 1
+    }
+
+    "갱신할 날짜가 떨어져 있으면 구간마다 따로 받아, 사이의 멀쩡한 날짜는 다시 받지 않는다" {
+        val (nice, clock, fetcher) = setup()
+        fetcher.periods(d(19), d(20))
+        fetcher.periods(d(26), d(27))
+        clock.advance(Duration.ofHours(11))
+        fetcher.periods(d(21), d(25)) // 사이 날짜는 11시간 뒤에 받아서 아직 신선함
+
+        clock.advance(Duration.ofHours(1)) // 19·20·26·27 일만 12시간이 지남
+        fetcher.periods(d(19), d(27))
+        fetcher.awaitCacheRefreshes()
+
+        nice.timetableRanges().drop(3) shouldBe listOf("20261019" to "20261020", "20261026" to "20261027")
+    }
+
+    "여러 요청이 동시에 와도 같은 날짜는 한 번만 갱신한다" {
+        val (nice, clock, fetcher) = setup()
+        fetcher.periods(d(19), d(23))
+        clock.advance(Duration.ofHours(12))
+
+        coroutineScope { repeat(5) { launch { fetcher.periods(d(19), d(23)) } } }
+        fetcher.awaitCacheRefreshes()
+
+        nice.timetableRanges().size shouldBe 2 // 처음 1번 + 갱신 1번
     }
 
     "백그라운드 갱신이 실패하면 옛 값을 그대로 쓰고, 다음 요청 때 다시 갱신한다" {
