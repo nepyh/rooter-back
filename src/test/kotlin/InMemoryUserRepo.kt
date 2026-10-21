@@ -182,6 +182,15 @@ class InMemoryUserRepo : UserRepo {
         return targets.size
     }
 
+    override fun deleteUser(userId: Int): Int {
+        val removed = users.remove(userId) ?: return 0
+        // DB 의 on delete cascade 를 흉내 낸다
+        profiles.removeAll { it.userId == removed.id }
+        unavailableTimes.removeAll { it.userId == removed.id }
+        tasks.removeAll { it.userId == removed.id }
+        return 1
+    }
+
     private fun StoredUser.toRow(): UserRow = UserRow(EntityID(id, UserTable)).also { row ->
         row._readValues = ResultRow.createAndFillValues(
             mapOf(

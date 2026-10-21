@@ -234,6 +234,23 @@ class UserService(
         )
     }
 
+    /**
+     * 회원 탈퇴. 유저와 그 유저의 모든 기록을 지운다 (DDL cascade). 이후 이 유저의 토큰은
+     * UserJwtValidator 가 유저를 못 찾아 401 로 막는다.
+     */
+    suspend fun deleteUser(userId: Int) {
+        val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
+        val avatarKey = user.avatarImageKey
+
+        if (userRepo.deleteUser(userId) == 0) throw UserNotFoundException()
+
+        // 아바타 오브젝트는 DB cascade 대상이 아니라 직접 지운다. 탈퇴는 이미 끝났으므로 실패해도 로그만 남긴다.
+        if (avatarKey != null) {
+            runCatching { fileStorage.delete(avatarKey) }
+                .onFailure { logger.warn("탈퇴 유저 아바타 오브젝트 삭제 실패: key={}", avatarKey, it) }
+        }
+    }
+
     fun addUnavailableTime(userId: Int, request: UnavailableTimeRequest): UnavailableTimeResponse {
         userRepo.findUserById(userId) ?: throw UserNotFoundException()
 
