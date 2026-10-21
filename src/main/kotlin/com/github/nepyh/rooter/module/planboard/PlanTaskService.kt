@@ -27,7 +27,6 @@ import org.jetbrains.exposed.v1.core.between
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
-import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -276,21 +275,6 @@ class PlanTaskService {
         subjectId = readValues[PlanTaskTable.subjectId]?.value,
         subjectName = subjectName
     )
-
-    /**
-     * 목록 응답에 붙일 과목명 맵. 행마다 참조 엔티티를 읽으면 행 수만큼 SELECT 가 나가므로
-     * subject id 만 모아 한 번에 조회한다 (CatalogService 의 교과서·과목 벌크 조회와 같은 방식).
-     */
-    private fun subjectNamesOf(rows: List<PlanTaskRow>): Map<Int, String> {
-        val subjectIds = rows.mapNotNull { it.subjectId }.distinct()
-        if (subjectIds.isEmpty()) return emptyMap()
-        return SubjectRow.find { SubjectTable.id inList subjectIds }
-            .associate { it.id.value to it.name }
-    }
-
-    /** 이 행의 과목명을 벌크로 만든 맵에서 꺼낸다 (과목 미지정이면 null) */
-    private fun PlanTaskRow.subjectNameFrom(subjectNames: Map<Int, String>): String? =
-        subjectId?.value?.let { subjectNames[it] }
 
     /** 단건 응답용 — 한 행뿐이라 과목을 바로 조회한다 */
     private fun subjectNameOf(row: PlanTaskRow): String? =

@@ -19,6 +19,8 @@ import com.github.nepyh.rooter.module.planboard.guessTaskSubject
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.planBoardSubjects
 import com.github.nepyh.rooter.module.planboard.isManualPlanBoard
+import com.github.nepyh.rooter.module.planboard.subjectNameFrom
+import com.github.nepyh.rooter.module.planboard.subjectNamesOf
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizAnswerResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizChoiceResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResponse
@@ -355,10 +357,14 @@ class TaskQuizService(
             QUIZ_FAIL_SHIFT_MINUTES,
             unavailable + stayRanges
         )
-        return shifted.map { moved ->
-            val row = PlanTaskRow[moved.id]
-            row.startTime = moved.startTime
-            row.endTime = moved.endTime
+        val movedRows = shifted.map { moved ->
+            PlanTaskRow[moved.id].apply {
+                startTime = moved.startTime
+                endTime = moved.endTime
+            }
+        }
+        val subjectNames = subjectNamesOf(movedRows)
+        return movedRows.map { row ->
             PlanTaskResponse(
                 id = row.id.value,
                 dailyPlanId = dailyPlan.id.value,
@@ -368,7 +374,9 @@ class TaskQuizService(
                 startTime = row.startTime.toString(),
                 endTime = row.endTime.toString(),
                 estimatedMinutes = row.estimatedMinutes,
-                isCompleted = row.isCompleted
+                isCompleted = row.isCompleted,
+                subjectId = row.subjectId?.value,
+                subjectName = row.subjectNameFrom(subjectNames)
             )
         }
     }

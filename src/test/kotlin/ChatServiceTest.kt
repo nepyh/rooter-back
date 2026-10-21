@@ -17,6 +17,8 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerRow
@@ -76,7 +78,9 @@ class ChatServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS users CASCADE")
             SchemaUtils.create(
                 UserTable, StudentProfileTable, UnavailableTimeTable, StudyStyleAnswerTable,
-                PlanBoardTable, DailyPlanTable, PlanTaskTable, ChatTurnTable
+                PlanBoardTable, DailyPlanTable, PlanTaskTable, ChatTurnTable,
+                // 할일 과목(plan_tasks.subject_id) FK 대상
+                SubjectTable
             )
         }
     }
@@ -340,6 +344,24 @@ class ChatServiceTest : StringSpec({
             listOf(conceptId, problemId).map { PlanTaskRow[it].postponedFromDate } shouldBe listOf(tuesday, tuesday)
         }
         llm.lastToday shouldBe "2026-09-01 (화요일)"
+    }
+
+    "미루기 결과 할일에도 과목과 보드 종류(isManual)가 실린다" {
+        val (userId, dailyPlanId) = seedDailyPlan(examDate = tuesday.plusDays(8), boardEnd = tuesday.plusDays(7)) // 시험 보드
+        val taskId = seedTask(dailyPlanId, "개념 정리", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false)
+        val subjectId = transaction(db) {
+            val subject = SubjectRow.find { SubjectTable.name eq "수학" }.firstOrNull() ?: SubjectRow.new { name = "수학" }
+            PlanTaskRow[taskId].subjectId = subject.id
+            subject.id.value
+        }
+
+        val response = ChatService(postponeLlm(listOf("개념 정리")), schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "내일로 미뤄줘")
+
+        response.movedTasks!!.single().let {
+            it.subjectId shouldBe subjectId
+            it.subjectName shouldBe "수학"
+            it.isManual shouldBe false
+        }
     }
 
     "미루기: 어제에서 미뤄져 온 할일은 이틀 연속 미루지 못하고, 다른 할일만 옮긴다" {
