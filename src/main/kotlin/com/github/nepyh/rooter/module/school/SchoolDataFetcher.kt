@@ -5,6 +5,11 @@ import com.github.nepyh.rooter.module.school.model.SchoolEvent
 import com.github.nepyh.rooter.module.school.model.TimetableEntry
 import com.github.nepyh.rooter.module.school.exception.NiceApiException
 import com.github.nepyh.rooter.module.school.model.SchoolKind
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -18,7 +23,9 @@ import java.time.format.DateTimeParseException
  * - 교시별 시각 매핑은 planboard 도메인 책임 (fetcher 는 "N교시 = 과목" 원본만 제공)
  */
 class SchoolDataFetcher(
-    private val niceClient: NiceApiClient
+    private val niceClient: NiceApiClient,
+    clock: Clock = Clock.systemUTC(),
+    refreshScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
 
     companion object {
@@ -26,6 +33,39 @@ class SchoolDataFetcher(
 
         /** 학사일정 SBTR_DD_SC_NM 중 학교를 안 가는 날. 공휴일(추석·대체공휴일 등), 휴업일(방학·재량휴업일·개교기념일·토요휴업일) */
         private val NO_SCHOOL_DAY_TYPES = setOf("공휴일", "휴업일")
+
+        // 백그라운드 갱신 주기 — 시간표는 학교가 학기 중에 고칠 수 있고, 학사일정은 거의 안 바뀐다
+        val TIMETABLE_REFRESH: Duration = Duration.ofHours(12)
+        // 아직 등록 전일 수 있는 미래 날짜의 빈 시간표는 자주 다시 본다 (12시간이면 등록 후에도 기본 하교 16:30 으로 오래 계산)
+        val EMPTY_FUTURE_TIMETABLE_REFRESH: Duration = Duration.ofHours(1)
+        val NO_SCHOOL_REFRESH: Duration = Duration.ofHours(24)
+    }
+
+    /** 시간표 캐시에서 날짜를 뺀 나머지 키 */
+    private data class TimetableGroup(val schoolId: String, val year: Int, val semester: Int, val grade: Int, val className: String?)
+
+    // 계획 배치(PlanTaskScheduler)가 바쁜 시간 조회·계획 생성·챗봇·복습 배치마다 부르는 두 조회를 날짜 단위로 캐시한다 (DailyCache)
+    private val timetableCache = DailyCache<TimetableGroup, List<TimetableEntry>>(
+        name = "시간표",
+        emptyValue = emptyList(),
+        refreshAfter = { date, entries, today ->
+            if (entries.isEmpty() && !date.isBefore(today)) EMPTY_FUTURE_TIMETABLE_REFRESH else TIMETABLE_REFRESH
+        },
+        clock = clock,
+        refreshScope = refreshScope
+    )
+    private val noSchoolCache = DailyCache<String, Boolean>(
+        name = "휴업일",
+        emptyValue = false,
+        refreshAfter = { _, _, _ -> NO_SCHOOL_REFRESH },
+        clock = clock,
+        refreshScope = refreshScope
+    )
+
+    /** 테스트용 — 캐시의 백그라운드 갱신이 끝날 때까지 기다린다 */
+    internal suspend fun awaitCacheRefreshes() {
+        timetableCache.awaitRefreshes()
+        noSchoolCache.awaitRefreshes()
     }
 
     /**
@@ -67,6 +107,22 @@ class SchoolDataFetcher(
         className: String? = null,
         from: LocalDate? = null,
         to: LocalDate? = null
+    ): List<TimetableEntry> {
+        // 기간이 있으면 날짜 단위 캐시를 거친다 (기간 없는 학기 전체 조회는 쓰는 곳이 없어 캐시하지 않는다)
+        if (from == null || to == null) return fetchTimetable(schoolId, year, semester, grade, className, from, to)
+        return timetableCache.get(TimetableGroup(schoolId, year, semester, grade, className), from, to) { rangeFrom, rangeTo ->
+            fetchTimetable(schoolId, year, semester, grade, className, rangeFrom, rangeTo).groupBy { it.date }
+        }.values.flatten()
+    }
+
+    private suspend fun fetchTimetable(
+        schoolId: String,
+        year: Int,
+        semester: Int,
+        grade: Int,
+        className: String?,
+        from: LocalDate?,
+        to: LocalDate?
     ): List<TimetableEntry> {
         val (officeCode, schoolCode) = School.splitSchoolId(schoolId)
         val params = buildMap {
@@ -136,7 +192,12 @@ class SchoolDataFetcher(
      * [from]~[to] 중 학교를 안 가는 날(공휴일·방학·재량휴업일 등)을 NICE 학사일정으로 판별한다.
      * 계획 배치에서 이런 날은 평일이어도 주말처럼 취급하려고 쓴다.
      */
-    suspend fun getNoSchoolDays(schoolId: String, from: LocalDate, to: LocalDate): Set<LocalDate> {
+    suspend fun getNoSchoolDays(schoolId: String, from: LocalDate, to: LocalDate): Set<LocalDate> =
+        noSchoolCache.get(schoolId, from, to) { rangeFrom, rangeTo ->
+            fetchNoSchoolDays(schoolId, rangeFrom, rangeTo).associateWith { true }
+        }.filterValues { it }.keys
+
+    private suspend fun fetchNoSchoolDays(schoolId: String, from: LocalDate, to: LocalDate): Set<LocalDate> {
         val (officeCode, schoolCode) = School.splitSchoolId(schoolId)
         val params = mapOf(
             "ATPT_OFCDC_SC_CODE" to officeCode,

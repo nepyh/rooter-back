@@ -1,6 +1,8 @@
 package com.github.nepyh.rooter.module.planboard
 
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import java.time.LocalDate
 import java.time.LocalTime
 
@@ -81,16 +83,21 @@ object PlanTaskScheduler {
         val dates = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
         val customByWeekday = customRows.groupBy({ it.first }, { it.second })
 
-        val dismissalMinutesByDate = if (schoolId != null) {
-            runCatching { fetchDismissalMinutesByDate(schoolDataFetcher, schoolId, classNumber, grade, startDate, endDate) }.getOrElse { emptyMap() }
+        // 시간표(하교 시각)와 학사일정(쉬는 날)은 서로 상관없는 NICE 조회라 동시에 부른다 (순서대로 부르면 캐시가 빈 첫 요청이 둘을 합친 만큼 걸림)
+        val (dismissalMinutesByDate, noSchoolDays) = if (schoolId != null) {
+            coroutineScope {
+                val dismissal = async {
+                    runCatching { fetchDismissalMinutesByDate(schoolDataFetcher, schoolId, classNumber, grade, startDate, endDate) }.getOrElse { emptyMap() }
+                }
+                // 공휴일·방학·재량휴업일 등 학교 안 가는 날 (NICE 학사일정). 조회 실패면 평일은 전부 등교일로 본다
+                val noSchool = async {
+                    runCatching { schoolDataFetcher.getNoSchoolDays(schoolId, startDate, endDate) }.getOrElse { emptySet() }
+                }
+                dismissal.await() to noSchool.await()
+            }
         } else {
-            emptyMap()
-        }
-        // 공휴일·방학·재량휴업일 등 학교 안 가는 날 (NICE 학사일정). 학교 정보가 없거나 조회 실패면 평일은 전부 등교일로 본다
-        val noSchoolDays = if (schoolId != null) {
-            runCatching { schoolDataFetcher.getNoSchoolDays(schoolId, startDate, endDate) }.getOrElse { emptySet() }
-        } else {
-            emptySet()
+            // 학교 정보가 없으면 하교는 기본값, 평일은 전부 등교일
+            emptyMap<LocalDate, Int>() to emptySet<LocalDate>()
         }
 
         return dates.associateWith { date ->
