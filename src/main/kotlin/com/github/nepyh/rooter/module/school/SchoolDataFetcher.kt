@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import java.time.Clock
+import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -36,8 +37,10 @@ class SchoolDataFetcher(
 
         // 백그라운드 갱신 주기 — 시간표는 학교가 학기 중에 고칠 수 있고, 학사일정은 거의 안 바뀐다
         val TIMETABLE_REFRESH: Duration = Duration.ofHours(12)
-        // 아직 등록 전일 수 있는 미래 날짜의 빈 시간표는 자주 다시 본다 (12시간이면 등록 후에도 기본 하교 16:30 으로 오래 계산)
+        // 아직 등록 전일 수 있는 미래 평일의 빈 시간표는 자주 다시 본다 (12시간이면 등록 후에도 기본 하교 16:30 으로 오래 계산).
+        // 토·일요일은 원래 시간표가 없어 여기 넣으면 1시간마다 영원히 다시 부르므로 뺀다
         val EMPTY_FUTURE_TIMETABLE_REFRESH: Duration = Duration.ofHours(1)
+        private val WEEKEND = setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)
         val NO_SCHOOL_REFRESH: Duration = Duration.ofHours(24)
     }
 
@@ -49,7 +52,8 @@ class SchoolDataFetcher(
         name = "시간표",
         emptyValue = emptyList(),
         refreshAfter = { date, entries, today ->
-            if (entries.isEmpty() && !date.isBefore(today)) EMPTY_FUTURE_TIMETABLE_REFRESH else TIMETABLE_REFRESH
+            val mayNotBeRegisteredYet = entries.isEmpty() && !date.isBefore(today) && date.dayOfWeek !in WEEKEND
+            if (mayNotBeRegisteredYet) EMPTY_FUTURE_TIMETABLE_REFRESH else TIMETABLE_REFRESH
         },
         clock = clock,
         refreshScope = refreshScope
