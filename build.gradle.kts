@@ -44,6 +44,8 @@ dependencies {
 
     // database, orm
     implementation("com.zaxxer:HikariCP:5.1.0")
+    // NICE 시간표·학사일정 서버 메모리 캐시 (module/school/DailyCache.kt)
+    implementation("com.github.ben-manes.caffeine:caffeine:3.2.0")
 
     implementation("org.jetbrains.exposed:exposed-core:${exposedVersion}")
     implementation("org.jetbrains.exposed:exposed-dao:${exposedVersion}")
