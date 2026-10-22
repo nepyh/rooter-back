@@ -254,7 +254,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] todo RB-127 서버 DB 초기화 여부 (B-01) + 운영에 남은 테스트 계정 정리 — 결정 필요
 - [ ] todo RB-128 운영 `textbooks.file_url` 잔여 컬럼 정리 — DDL main 은 삭제했는데 운영 DB 에는 남아 있음 (10-04 확인)
 
-- [ ] doing RB-152 서버 Sentry 오류 수집 (#313) — DSN 선택 활성화, 5xx·기동·스케줄러 예외의 종류와 스택만 전송, 원문 메시지·요청·개인정보 제외. 환경변수·ECS 배선 및 메모리 transport 테스트 5개, 격리 PostgreSQL에서 전체 test/build 통과. 실제 프로젝트 수집 검증은 DSN 설정 후 별도 확인.
+- [ ] doing RB-152 서버 Sentry 오류 수집 (#313 · PR #314 · `7c9fb63`) — DSN 선택 활성화, 5xx·기동·스케줄러 예외의 종류와 스택만 전송, 원문 메시지·요청·개인정보 제외. 환경변수·ECS 배선 및 메모리 transport 테스트 5개, 격리 PostgreSQL에서 전체 test/build 통과. 실제 프로젝트 수집 검증은 DSN 설정 후 별도 확인.
 
 ## 다음 후보 (우선순위)
 
