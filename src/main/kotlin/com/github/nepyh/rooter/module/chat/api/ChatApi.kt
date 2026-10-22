@@ -42,7 +42,10 @@ fun ChatApi(chatService: ChatService) = ApiRoute("daily-plans") {
                 "AI 는 태스크 이름/소요시간과 새로 생긴 공부 불가능 시간(busy window)만 판단한다. " +
                 "\"오늘 거 내일로 미뤄줘\" 처럼 날짜를 옮기는 요청이면 해당 할일을 그날(날짜를 안 말하면 다음 날) 빈 시간으로 옮기고 " +
                 "movedTasks 로 돌려준다(옮겨간 날의 dailyPlanId·시각). updatedTasks 는 대화한 날에 남은 할일. " +
-                "바로 전날에서 미뤄져 온 할일은 이틀 연속 미룰 수 없고, 플랜보드 기간 밖·과거 날짜로도 미룰 수 없다 (이때 planChanged=false, reply 로 이유 안내)"
+                "바로 전날에서 미뤄져 온 할일은 이틀 연속 미룰 수 없고, 플랜보드 기간 밖·과거 날짜로도 미룰 수 없다 (이때 planChanged=false, reply 로 이유 안내). " +
+                "그날 할일을 직접 고치는 요청도 된다 — \"수학 30분으로 줄여줘\"(줄이기·늘리기), \"8시에 과학 추가해줘\"(추가, 플랜보드 학습 범위로 이름·과목을 붙임), " +
+                "\"영어 빼줘\"(삭제), \"수학 9시로 옮겨줘\"(특정 시각으로 옮기기). 그 시간이 수면·등교·불가능 시간·다른 할일·지난 시간과 겹치거나, " +
+                "퀴즈를 시작한 할일 삭제·결과가 확정된 할일 시간 변경이면 그 편집은 거절하고 reply 로 이유와 그날 빈 시간을 안내한다. 하나라도 적용되면 planChanged=true, updatedTasks 는 그날 할일 전체"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<ChatMessageRequest>()
