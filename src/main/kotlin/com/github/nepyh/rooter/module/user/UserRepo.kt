@@ -32,6 +32,8 @@ interface UserRepo {
 
     fun incrementTokenVersion(userId: Int): UserRow
 
+    fun updateSleepTime(userId: Int, sleepTime: LocalTime, wakeTime: LocalTime): UserRow
+
     fun findStudentProfileByUserId(userId: Int): StudentProfileRow?
 
     fun findUnavailableTimesByUserId(userId: Int): List<UnavailableTimeRow>
@@ -54,4 +56,10 @@ interface UserRepo {
 
     /** 삭제된 row 수를 반환한다. 0이면 존재하지 않거나 본인 소유가 아님. */
     fun deleteUnavailableTime(userId: Int, timeId: Int): Int
+
+    /**
+     * 회원 탈퇴. users 행을 지우면 이 유저를 참조하는 테이블(플랜보드·퀴즈·복습·캘린더 등)은
+     * DDL 의 on delete cascade 로 함께 지워진다 (rooter-ddl). 삭제된 row 수를 반환한다.
+     */
+    fun deleteUser(userId: Int): Int
 }

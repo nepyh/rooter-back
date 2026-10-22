@@ -1,6 +1,15 @@
+import com.github.nepyh.rooter.module.planboard.PlacedTask
+import com.github.nepyh.rooter.module.planboard.PlacementOptions
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
+import com.github.nepyh.rooter.module.planboard.placementOptions
+import com.github.nepyh.rooter.module.planboard.SleepTime
 import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import com.github.nepyh.rooter.module.studystyle.BestTime
+import com.github.nepyh.rooter.module.studystyle.Distraction
+import com.github.nepyh.rooter.module.studystyle.FocusSpan
+import com.github.nepyh.rooter.module.studystyle.StudyStyleProfile
+import com.github.nepyh.rooter.module.studystyle.VolatileTime
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.shouldBe
@@ -24,7 +33,7 @@ class PlanTaskSchedulerTest : StringSpec({
     val sunday = LocalDate.of(2026, 10, 4)
     val mondayEvening = 1 to ((18 * 60) to (20 * 60)) // 월 18:00~20:00
 
-    suspend fun buildRanges(customRows: List<Pair<Int, Pair<Int, Int>>>) =
+    suspend fun buildRanges(customRows: List<Pair<Int, Pair<Int, Int>>>, sleepTime: SleepTime = SleepTime.DEFAULT) =
         PlanTaskScheduler.buildUnavailableRanges(
             schoolDataFetcher = schoolDataFetcher,
             startDate = monday,
@@ -32,8 +41,31 @@ class PlanTaskSchedulerTest : StringSpec({
             schoolId = null,
             classNumber = null,
             grade = 1,
-            customRows = customRows
+            customRows = customRows,
+            sleepTime = sleepTime
         )
+
+    "사용자 수면시간: 자정 전에 자면 00:00~기상, 취침~24:00 두 구간을 막고 주말엔 기상 시각부터 잡힌다" {
+        val ranges = buildRanges(emptyList(), SleepTime(LocalTime.of(22, 30), LocalTime.of(8, 0)))
+        val saturday = ranges.getValue(monday.plusDays(5))
+
+        saturday shouldBe listOf(0 to (8 * 60), (22 * 60 + 30) to (24 * 60))
+        PlanTaskScheduler.placeTasks(listOf("A" to 60), PlanTaskScheduler.freeIntervalsFromBusyRanges(saturday))
+            .single().startTime shouldBe LocalTime.of(8, 0)
+    }
+
+    "사용자 수면시간: 자정 넘어 자면 취침~기상 한 구간만 막아, 전날 밤 23시대에도 할일이 들어갈 수 있다" {
+        val ranges = buildRanges(emptyList(), SleepTime(LocalTime.of(1, 0), LocalTime.of(7, 0)))
+        val saturday = ranges.getValue(monday.plusDays(5))
+
+        saturday shouldBe listOf(60 to (7 * 60))
+        PlanTaskScheduler.freeIntervalsFromBusyRanges(saturday).last().second shouldBe 24 * 60
+    }
+
+    "SleepTime.ranges: 00:00 기상이면 빈 앞 구간을 넣지 않는다, 기본값은 예전 고정값과 같다" {
+        SleepTime(LocalTime.of(22, 0), LocalTime.MIDNIGHT).ranges() shouldBe listOf((22 * 60) to (24 * 60))
+        SleepTime.DEFAULT.ranges() shouldBe listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60))
+    }
 
     "학교가 있으면 계획 기간의 시간표만 조회해서, 그날 마지막 교시로 하교 시각을 계산한다" {
         val requestedRanges = mutableListOf<Pair<String?, String?>>()
@@ -157,5 +189,72 @@ class PlanTaskSchedulerTest : StringSpec({
 
         val holidayTasks = PlanTaskScheduler.placeTasks(listOf("A" to 30), PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(holidayMonday)))
         holidayTasks.single().startTime shouldBe LocalTime.of(6, 30)
+    }
+
+    // ── 공부 스타일 설문 배치 (PlacementOptions) ──
+    // 평일 등교일: 하교 16:30, 취침 23:00 → 빈 시간 16:30~23:00
+    val schoolDayFree = PlanTaskScheduler.freeIntervalsFromBusyRanges(listOf(0 to (16 * 60 + 30), (23 * 60) to (24 * 60)))
+    fun times(placed: List<PlacedTask>) = placed.map { it.startTime to it.endTime }
+    fun t(hour: Int, minute: Int = 0): LocalTime = LocalTime.of(hour, minute)
+
+    "배치 옵션을 안 주면 예전처럼 하교 직후부터 10분씩 쉬며 채운다" {
+        times(PlanTaskScheduler.placeTasks(listOf("A" to 50, "B" to 30), schoolDayFree)) shouldBe
+            listOf(t(16, 30) to t(17, 20), t(17, 30) to t(18, 0))
+    }
+
+    "쉬는 시간을 바꾸면 태스크 사이 간격이 바뀐다" {
+        times(PlanTaskScheduler.placeTasks(listOf("A" to 30, "B" to 30), schoolDayFree, PlacementOptions(breakMinutes = 5))) shouldBe
+            listOf(t(16, 30) to t(17, 0), t(17, 5) to t(17, 35))
+    }
+
+    "밤부터 채우면 잠들기 전에 몰아 두되 태스크 순서는 유지한다" {
+        val placed = PlanTaskScheduler.placeTasks(listOf("A" to 60, "B" to 30), schoolDayFree, PlacementOptions(fromLate = true))
+
+        placed.map { it.taskName } shouldBe listOf("A", "B")
+        times(placed) shouldBe listOf(t(21, 20) to t(22, 20), t(22, 30) to t(23, 0))
+    }
+
+    "밤부터 채울 때 전부 안 들어가면 앞쪽 태스크가 빠지지 않게 이른 시간부터 채운다" {
+        val free = listOf((20 * 60) to (21 * 60)) // 1시간뿐
+        val placed = PlanTaskScheduler.placeTasks(listOf("A" to 40, "B" to 40), free, PlacementOptions(fromLate = true))
+
+        placed.map { it.taskName } shouldBe listOf("A")
+        times(placed) shouldBe listOf(t(20, 0) to t(20, 40))
+    }
+
+    "피할 구간을 빼고도 다 들어가면 피하고, 안 들어가면 무시한다" {
+        val avoidAfterSchool = PlacementOptions(avoidRanges = listOf(0 to (18 * 60 + 30)))
+
+        times(PlanTaskScheduler.placeTasks(listOf("A" to 60), schoolDayFree, avoidAfterSchool)) shouldBe listOf(t(18, 30) to t(19, 30))
+        // 18:30~23:00 (270분) 에 안 들어가는 분량이면 하교 직후부터 원래대로
+        PlanTaskScheduler.placeTasks(listOf("A" to 150, "B" to 150), schoolDayFree, avoidAfterSchool)
+            .first().startTime shouldBe t(16, 30)
+    }
+
+    "설문 → 배치 옵션: 집중 시간은 쉬는 시간, 밤은 뒤부터, 방과 후는 등교일만 피한다" {
+        val bed = SleepTime.DEFAULT // 23:00 취침
+
+        StudyStyleProfile.EMPTY.placementOptions(isSchoolDay = true, sleepTime = bed) shouldBe PlacementOptions.DEFAULT
+        StudyStyleProfile(focus = FocusSpan.SHORT).placementOptions(true, bed).breakMinutes shouldBe 5
+        StudyStyleProfile(focus = FocusSpan.DEEP).placementOptions(true, bed).breakMinutes shouldBe 15
+        StudyStyleProfile(bestTime = BestTime.NIGHT).placementOptions(true, bed).fromLate shouldBe true
+        StudyStyleProfile(bestTime = BestTime.MORNING).placementOptions(true, bed).fromLate shouldBe false
+
+        val afterSchool = StudyStyleProfile(volatileTime = VolatileTime.AFTER_SCHOOL)
+        afterSchool.placementOptions(isSchoolDay = true, sleepTime = bed).avoidRanges shouldBe listOf(0 to (18 * 60 + 30))
+        afterSchool.placementOptions(isSchoolDay = false, sleepTime = bed).avoidRanges shouldBe emptyList()
+
+        StudyStyleProfile(volatileTime = VolatileTime.EVENING).placementOptions(false, bed).avoidRanges shouldBe
+            listOf((19 * 60 + 30) to (23 * 60))
+    }
+
+    "설문 → 배치 옵션: 졸음이면 취침 전 1시간을 피하되, 밤을 골랐으면 밤 선택을 따른다" {
+        val bed = SleepTime.DEFAULT
+
+        StudyStyleProfile(distraction = Distraction.SLEEPY).placementOptions(true, bed).avoidRanges shouldBe listOf((22 * 60) to (23 * 60))
+        StudyStyleProfile(distraction = Distraction.SLEEPY, bestTime = BestTime.NIGHT).placementOptions(true, bed).avoidRanges shouldBe emptyList()
+        // 00:30 취침이면 전날 밤 23:30~24:00 과 00:00~00:30
+        StudyStyleProfile(distraction = Distraction.SLEEPY).placementOptions(true, SleepTime(t(0, 30), t(7))).avoidRanges shouldBe
+            listOf(0 to 30, (23 * 60 + 30) to (24 * 60))
     }
 })

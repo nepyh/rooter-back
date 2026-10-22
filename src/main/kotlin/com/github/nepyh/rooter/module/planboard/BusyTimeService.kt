@@ -48,6 +48,7 @@ class BusyTimeService(private val schoolDataFetcher: SchoolDataFetcher) {
             val classNumber: Int?,
             val grade: Int,
             val customRows: List<Pair<Int, Pair<Int, Int>>>,
+            val sleepTime: SleepTime,
             val tasks: List<ExistingTask>
         )
 
@@ -86,7 +87,7 @@ class BusyTimeService(private val schoolDataFetcher: SchoolDataFetcher) {
                         end = end
                     )
                 }
-            Context(profile?.schoolId, profile?.classNumber, profile?.grade ?: 2, customRows, tasks)
+            Context(profile?.schoolId, profile?.classNumber, profile?.grade ?: 2, customRows, userSleepTime(userId), tasks)
         }
 
         // NICE 조회(외부 호출)는 트랜잭션 밖에서
@@ -97,7 +98,8 @@ class BusyTimeService(private val schoolDataFetcher: SchoolDataFetcher) {
             schoolId = context.schoolId,
             classNumber = context.classNumber,
             grade = context.grade,
-            customRows = context.customRows
+            customRows = context.customRows,
+            sleepTime = context.sleepTime
         )
         val tasksByDate = context.tasks.groupBy { it.date }
 

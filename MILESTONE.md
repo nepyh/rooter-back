@@ -38,16 +38,16 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 | # | 마일스톤 | 진행 | 상태 |
 |---|---|---|---|
-| M1 | 플랜보드 코어 | 11/13 | doing |
+| M1 | 플랜보드 코어 | 11/17 | doing |
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
-| M4 | school·NICE 연동 | 6/8 | doing |
-| M5 | 사용자 기능 | 7/9 | doing |
+| M4 | school·NICE 연동 | 7/10 | doing |
+| M5 | 사용자 기능 | 7/10 | doing |
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
-| M8 | AI 계획 생성·스케줄링 | 7/10 | doing |
+| M8 | AI 계획 생성·스케줄링 | 9/13 | doing |
 | M9 | 퀴즈 고도화 | 14/17 | doing |
-| M10 | 챗봇 재조정 | 5/5 | done |
+| M10 | 챗봇 재조정 | 5/6 | doing |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
 | M13 | 인프라·배포 | 7/11 | doing |
@@ -84,6 +84,10 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] todo RB-010 scheduler DAO 전환 — 미지시 항목
 - [x] done RB-130 퀴즈로 결과가 확정된 할일(통과 / 3차까지 불합격)은 완료 상태 변경 금지 (#244) — `completeTask` 에서 400 `TASK_FINALIZED`, 같은 값은 성공. PR #248 머지 (10-11) (`35f894b`·`b1bc488`) · `./gradlew test` 전체 통과 · 프론트는 `completeTask` 를 정의만 하고 호출하지 않아 영향 없음. DB 변경 없음
 - [x] done RB-137 퀴즈를 통과하지 않은 할일은 `PATCH .../complete` 로 완료 금지 (#259, #231 미구현분) — `completeTask` 에서 미완료 → 완료면 400 `TASK_QUIZ_REQUIRED`, 완료 취소·같은 값은 성공. PR #288 머지 (10-20, 리뷰 전 선머지) (`8746c39`·`abecd4a`) · `./gradlew test` 229건 0 실패 · 프론트 `main` 은 퀴즈 통과 뒤에만 `completeTask(id, true)` 를 불러(같은 값이라 성공) 영향 없음. DB 변경 없음. #259 의 원인(퀴즈 통과 / 10-07 이전 빌드의 체크박스 완료)은 운영 DB 미조회로 확정 안 함
+- [ ] doing RB-142 할일에 과목 귀속 (#270, 프론트 요청 "할일 목록 과목별 분류") — `plan_tasks.subject_id`(rooter-ddl #32, on delete set null). 수동 생성 `POST /plan-tasks` 는 선택 `textbookId` 로 과목 유도(없는 교과서 400 `INVALID_TEXTBOOK`), AI 계획 생성은 LLM `subject_name` 이 요청 과목명과 맞을 때만 저장(못 맞추면 null). 할일 조회 3종·수정·완료 응답과 계획 생성 응답에 `subjectId`·`subjectName`(목록은 과목명 벌크 조회) — nyung517 커밋 5개를 main 위로 옮김 + 생성 응답 과목, PR #293 open · `./gradlew test` 269건 0 실패 · 실제 DeepSeek 2회 42개 할일 모두 과목 매칭 · 복습·재조정·챗봇 미루기로 파생된 할일은 null (범위 밖) · **DDL 선행: 운영 DB 에 `plan_tasks.subject_id` 적용 확인 후 머지**
+- [ ] doing RB-143 할일에 플랜보드 id 추가 (#294, 프론트 홈이 보드마다 `daily`·`subjects` 를 다시 부르던 워터폴 제거) — `PlanTaskResponse.planBoardId` 추가. `plan_tasks` 에 컬럼을 만들지 않고 `daily_plans.plan_board_id` 조인으로 채워 **DDL 변경 없음**(rooter-ddl 수정 불필요, 목록 조회는 기존 innerJoin 그대로라 추가 쿼리 0). 값 채운 지점: 할일 조회 3종·수정·완료·캘린더 하루 요약·챗봇 재조정·미루기·퀴즈 실패 재배치. PR #295 open (`a83f449`·`873a45c`) · `./gradlew test` 271건 0 실패(신규 2건, 3 skipped) · Dockerfile 이미지 빌드 성공(러너 39566704992) · `isManual` 은 이슈 개요에만 있고 스펙·할일에서 빠져 제외(서버에 AI/수동 구분 컬럼 없음 — 프론트는 `plan_boards.examDate === null` 로 보드 단위 판단) · 챗봇 응답의 `subjectId`·`subjectName` 미채움은 #293 범위 밖이라 그대로
+- [ ] doing RB-144 할일 응답에 `isManual`(직접 만든 일정 보드의 할일인지, #294 개요에 있었으나 #295 에서 빠짐) + 과목 누락 3곳 채움 — `isManualPlanBoard`(시험일 없음 = 직접 만든 보드, 프론트 `board.examDate === null` 과 같은 규칙, DDL 없음)로 할일 조회 3종·수정·완료·캘린더·챗봇·퀴즈 재배치에 채움. 캘린더 하루 요약·챗봇 재조정·미루기·퀴즈 재배치 응답은 #293 이후에도 `subjectId`·`subjectName` 이 항상 null 이던 것을 `PlanTaskSubjects.kt` 공용 벌크 조회로 채움 — 이슈 #296, PR #297 open · `./gradlew test` 280건 0 실패 · 프론트는 `getBoardInfo` 워터폴 대신 응답 값 사용 가능
+- [ ] doing RB-147 할일 수정(PATCH) 보강 (#302, 할일 위치·길이 조정용) — 시간만 바꾸고 `estimatedMinutes` 를 안 보내면 바뀐 길이로 자동 맞춤(태스크 퀴즈 문항 수·캘린더 합계 기준이라), 퀴즈로 결과가 확정된 할일의 시간·예상 시간 변경은 400 `TASK_FINALIZED`(이름 변경·같은 값 재전송은 허용) — 이슈 #302, PR #303 open · `./gradlew test` 291건 0 실패 · 다른 날로 옮기기·겹침 검사·자정 넘김(RB-077)은 범위 밖
 - [ ] doing RB-138 할일 상태를 `status`(PENDING/DONE/FAILED) 하나로 통합 (#258) — `is_completed`·`is_failed` 를 `plan_tasks.status` 로 교체, 실패 처리·완료 취소는 `PATCH /plan-tasks/{taskId}` 의 `status` 로 (`/fail` 제거), →DONE 은 퀴즈 통과로만 (`TASK_QUIZ_REQUIRED`). PR #283 open (`f9a4f4f`·`a465bbd`, #288 병합 후 `changeStatus` 가 그 규칙을 포함) · `./gradlew test` 238건 0 실패 · rooter-ddl #36 / PR #37 (status 추가, 1단계) 선행 필요 · 구 컬럼 삭제는 배포 후 rooter-ddl 다음 PR
 
 ## M2. 컨벤션·구조 정비
@@ -124,6 +128,8 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] todo RB-035 교과서 데이터 수집 파이프라인 (`textbook`) — 설계만 완료 (Notion 정본). 운영 `school_textbook_adoptions` 는 비어 있음 (10-04, 추천 교과서가 안 나오는 원인)
 - [x] done RB-036 학교 검색 결과가 없으면 502 가 나가던 문제 (NICE INFO-200 → 빈 목록) — PR #164 (09-28)
 - [x] done RB-037 NICE 첫 페이지만 조회해 시험일정·하교시각이 틀리던 문제 (학년도 범위·페이지네이션) — PR #167 (09-28)
+- [x] done RB-145 NICE 시간표·학사일정 서버 캐시 (Caffeine, 날짜 단위 + 백그라운드 갱신) — 측정: 캐시 없을 때 바쁜 시간·계획 생성·챗봇·복습 배치가 요청마다 NICE ~0.4초. 캐시에 없는 날짜만 범위째 NICE 1회, 실패 미저장, 갱신 주기(시간표 12시간·빈 미래 날짜 1시간·학사일정 24시간) 지난 값은 바로 주고 뒤에서 갱신, 시간표·학사일정 동시 조회, NICE 호출 시간 로그 — 이슈 #298, PR #299 (10-21) · 운영 로그에서 NICE 600~800ms 를 캐시 미스 때만 부르는 것 확인 · `./gradlew test` 284건 0 실패 · 실제 NICE: 주간 7일 첫 요청 387→253ms, 두 번째부터 0~1ms
+- [ ] doing RB-146 NICE 캐시 후속 (#300) — 토·일요일 빈 시간표를 "등록 전 미래 날짜"로 보고 1시간마다 다시 부르던 것(주말은 12시간), 떨어진 갱신 날짜를 한 범위로 묶어 사이 평일까지 다시 받던 것(연속 구간별로 갱신), 요청 취소가 실패 로그로 남던 것 — 이슈 #300, PR #301 open · `./gradlew test` 291건 0 실패 (캐시 테스트 11건)
 
 ## M5. 사용자 기능
 
@@ -136,6 +142,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-046 로그인 응답에 userId 추가 (토큰 디코드 의존 제거) — PR #180 (09-28)
 - [x] done RB-047 아바타 다운로드 링크(avatarUrl) 응답 — PR #151 (09-26)
 - [ ] todo RB-048 내 정보 응답에 학교 이름 (프론트 요청 B-17) — 지금은 `schoolId` 만 나감. NICE 조회로 DB 변경 없이 가능
+- [ ] doing RB-139 회원 탈퇴 `DELETE /users/{id}` (앱스토어 제출 필수) — 본인만, `users` 행 삭제로 하위 기록은 DDL cascade(rooter-ddl 스키마에서 users 에서 닿는 FK 25개 전부 CASCADE·막는 FK 0 확인), 아바타 S3 오브젝트 삭제(실패해도 탈퇴 성공), 이후 토큰은 유저가 없어 401 · `./gradlew test` 240건 0 실패 · DDL 변경 없음 · 남은 것: 애플 로그인 토큰 철회(`.p8` 키 필요)·약관 동의 기록
 
 ## M6. 파일 저장·S3
 
@@ -170,6 +177,9 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] todo RB-077 자정을 넘기는 할일 (B-09) — 지금은 `INVALID_TIME_RANGE` 로 거부. 정책 결정 필요
 - [ ] doing RB-078 같은 날 dailyPlanId 가 여러 개(보드 여러 개)일 때 챗봇·퀴즈 기준 (B-07) — 일일 퀴즈 생성에 `planBoardId` 추가, 생략 시 학습 범위 있는 보드 우선 (이슈 #241, PR #246 open, 테스트 199건 통과). 챗봇은 경로의 dailyPlanId 로 이미 보드가 정해짐. 프론트가 `planBoardId` 를 보내야 완결
 - [ ] todo RB-079 일일 퀴즈 복습 할일·챗봇 재조정·퀴즈 실패 밀기도 다른 보드 할일을 피하도록 — 지금은 같은 보드의 그날 할일만 봄
+- [x] done RB-140 DeepSeek(`deepseek-flash`) 전환 후 AI 기능이 15초에 끊기고 로그도 안 남던 문제 — thinking disabled(계획 생성 16.9초 → 6~7초), LLM 요청 타임아웃 50초(Ktor CIO 기본 15초, ALB idle 60초 안쪽), 호출·파싱 실패 warn 로그 — 이슈 #289, PR #290 (10-21) (`7f0c56c` `60bbe44` `1bd868e`) · `./gradlew test` 248건 0 실패 · 실제 DeepSeek 로 7일 계획 생성 6.4초 성공, 잘못된 키는 401 본문이 로그에 남는 것 확인
+- [x] done RB-141 공부 스타일 설문(7문항)을 계획 생성·배치·챗봇에 반영 — 지금까지 설문은 저장만 되고 계획 생성은 안 읽었고 챗봇엔 `문항1=2` 숫자만 갔음. `StudyStyleProfile`(보기 enum·문구·지시), 프롬프트 `<STUDY_STYLE>`(Q1 task 길이·Q3 새 단원 순서·Q4 주말 분량·Q5 출발 분량·Q6 따라잡기·Q7 tips), 스케줄러 `PlacementOptions`(Q1 휴식 5/10/15분·Q2 밤이면 잠들기 전부터·Q4 방과 후/저녁 회피·Q7 졸음이면 취침 전 1시간 회피), 챗봇 문장 요약, Swagger 문항 안내 — 이슈 #291, PR #292 (10-20) · `./gradlew test` 265건 0 실패 · 실제 DeepSeek 비교: 짧고 굵게·30분 이하 → task 최대 30분·하루 45~75분, 몰입·1시간 이상 → 최대 80분·하루 120~180분 · 챗봇 재조정·미루기·복습 배치는 범위 밖
+- [ ] doing RB-148 AI 계획 생성에 날짜별 공부 가능 시간·하루 권장 공부량 (#304) — 예전엔 첫날만 빈 시간을 알려줘 학원 있는 날 넘친 할일을 `placeTasks` 가 조용히 버렸고, 빈 시간만 주면 평일 5시간 넘게 채움. 구간마다 "day N: 공부 가능 ○분, 가장 긴 연속 ○분, 권장 ○~○분"(등교일 90~150 · 쉬는 날 150~240 · 벼락치기 1.5배) — 이슈 #304, PR #305 open · `./gradlew test` 290건 0 실패 · 실제 DeepSeek: 모든 날 공부 가능 시간·가장 긴 연속 시간 이하, 평일 80~140분·주말 150~190분 · 못 들어간 할일 처리·긴 휴식은 범위 밖
 
 ## M9. 퀴즈 고도화
 
@@ -203,6 +213,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-092 계획을 안 바꾸고도 "조정해 드릴게요" 라고 답하던 문제 (서버가 겹침 판단·답변 보정) — PR #198 (09-29)
 - [x] done RB-093 재조정이 안 겹치는 태스크까지 이른 시간으로 옮기던 문제 — PR #200 (09-29)
 - [x] done RB-094 "내일로 미뤄줘" — 다른 날로 미루기, 이틀 연속 미루기 금지 — PR #230 (10-01) · `rooter-ddl` #25 · 실제 LLM 로 미루기·날짜 계산 확인
+- [ ] doing RB-149 챗봇으로 그날 할일 줄이기·늘리기·추가·삭제·특정 시각으로 옮기기 (#306) — AI 는 `edits`(resize·add·delete·move)만 고르고 서버(`ChatEdits.kt`)가 수면·등교·불가능 시간·다른 할일·지난 시간 겹침을 검증해 적용, 답변도 실제 결과로 생성 (거절 시 이유+그날 빈 시간). 추가 할일은 플랜보드 학습 범위로 이름·과목 붙임(`<PLAN_SUBJECTS>`). 퀴즈 시작한 할일 삭제·확정된 할일 시간 변경 거절. 덤: 새 일정 겹침을 AI 가 판단해 틀리던 것을 서버 판단으로 — 이슈 #306, PR #307 open · `./gradlew test` 307건 0 실패 · 실제 DeepSeek 9개 문장(줄이기·시각 추가·삭제·옮기기·알아서 추가·학원·가족모임·미루기·질문) 모두 의도대로
 
 ## M11. 교과서 카탈로그
 

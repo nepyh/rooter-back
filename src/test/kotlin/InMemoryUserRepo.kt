@@ -35,6 +35,8 @@ class InMemoryUserRepo : UserRepo {
         var bio: String?,
         val createdAt: OffsetDateTime,
         var tokenVersion: Int,
+        var sleepTime: LocalTime? = null,
+        var wakeTime: LocalTime? = null,
     )
 
     private data class StoredProfile(
@@ -120,6 +122,13 @@ class InMemoryUserRepo : UserRepo {
         return stored.toRow()
     }
 
+    override fun updateSleepTime(userId: Int, sleepTime: LocalTime, wakeTime: LocalTime): UserRow {
+        val stored = users[userId] ?: throw UserNotFoundException()
+        stored.sleepTime = sleepTime
+        stored.wakeTime = wakeTime
+        return stored.toRow()
+    }
+
     override fun findStudentProfileByUserId(userId: Int): StudentProfileRow? =
         profiles.firstOrNull { it.userId == userId }?.toRow()
 
@@ -174,6 +183,15 @@ class InMemoryUserRepo : UserRepo {
         return targets.size
     }
 
+    override fun deleteUser(userId: Int): Int {
+        val removed = users.remove(userId) ?: return 0
+        // DB 의 on delete cascade 를 흉내 낸다
+        profiles.removeAll { it.userId == removed.id }
+        unavailableTimes.removeAll { it.userId == removed.id }
+        tasks.removeAll { it.userId == removed.id }
+        return 1
+    }
+
     private fun StoredUser.toRow(): UserRow = UserRow(EntityID(id, UserTable)).also { row ->
         row._readValues = ResultRow.createAndFillValues(
             mapOf(
@@ -185,6 +203,8 @@ class InMemoryUserRepo : UserRepo {
                 UserTable.bio to bio,
                 UserTable.createdAt to createdAt,
                 UserTable.tokenVersion to tokenVersion,
+                UserTable.sleepTime to sleepTime,
+                UserTable.wakeTime to wakeTime,
             )
         )
     }

@@ -3,10 +3,12 @@ package com.github.nepyh.rooter.module.quiz
 import com.github.nepyh.rooter.common.QUIZ_CHAPTER_NAME_MAX
 import com.github.nepyh.rooter.common.matchQuizChapter
 import com.github.nepyh.rooter.common.quizQuestionCount
+import com.github.nepyh.rooter.module.planboard.SleepTime
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.planBoardSubjects
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
+import com.github.nepyh.rooter.module.planboard.userSleepTime
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
@@ -337,7 +339,8 @@ class QuizService(
             customUnavailableRows = UnavailableTimeRow.find { UnavailableTimeTable.user eq userId }.map {
                 it.dayOfWeek.code.toInt() to
                     (PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime))
-            }
+            },
+            sleepTime = userSleepTime(userId)
         )
     }
 
@@ -352,7 +355,8 @@ class QuizService(
             schoolId = ctx.schoolId,
             classNumber = ctx.classNumber,
             grade = ctx.grade,
-            customRows = ctx.customUnavailableRows
+            customRows = ctx.customUnavailableRows,
+            sleepTime = ctx.sleepTime
         )[date].orEmpty()
 
         return newSuspendedTransaction {
@@ -455,5 +459,6 @@ private data class ReviewScheduleContext(
     val grade: Int,
     val schoolId: String?,
     val classNumber: Int?,
-    val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>
+    val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>,
+    val sleepTime: SleepTime
 )

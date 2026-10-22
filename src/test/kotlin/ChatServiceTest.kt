@@ -4,23 +4,35 @@ import com.github.nepyh.rooter.module.chat.ChatLlmClient
 import com.github.nepyh.rooter.module.chat.ChatService
 import com.github.nepyh.rooter.module.chat.PLAN_NOT_APPLIED_REPLY
 import com.github.nepyh.rooter.module.chat.POSTPONE_NOTHING_REPLY
+import com.github.nepyh.rooter.module.chat.dto.AiChatEdit
 import com.github.nepyh.rooter.module.chat.dto.AiChatPlanUpdate
 import com.github.nepyh.rooter.module.chat.dto.AiChatPostpone
 import com.github.nepyh.rooter.module.chat.dto.AiChatResult
 import com.github.nepyh.rooter.module.chat.dto.AiChatTask
+import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.chat.planBoardSummaryOf
 import com.github.nepyh.rooter.module.chat.postponeBlockedReply
+import com.github.nepyh.rooter.module.planboard.model.ChapterRow
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookRow
+import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerRow
 import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerTable
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.user.model.UserRow
@@ -34,6 +46,7 @@ import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
+import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.DriverManager
 import java.sql.SQLException
@@ -67,6 +80,8 @@ class ChatServiceTest : StringSpec({
     beforeSpec {
         transaction(db) {
             exec("DROP TABLE IF EXISTS chat_turns CASCADE")
+            exec("DROP TABLE IF EXISTS plan_subjects CASCADE")
+            exec("DROP TABLE IF EXISTS task_quiz_attempts CASCADE")
             exec("DROP TABLE IF EXISTS plan_tasks CASCADE")
             exec("DROP TABLE IF EXISTS daily_plans CASCADE")
             exec("DROP TABLE IF EXISTS plan_boards CASCADE")
@@ -76,7 +91,11 @@ class ChatServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS users CASCADE")
             SchemaUtils.create(
                 UserTable, StudentProfileTable, UnavailableTimeTable, StudyStyleAnswerTable,
-                PlanBoardTable, DailyPlanTable, PlanTaskTable, ChatTurnTable
+                PlanBoardTable, DailyPlanTable, PlanTaskTable, ChatTurnTable,
+                // 할일 과목(plan_tasks.subject_id) FK 대상
+                SubjectTable,
+                // 할일 직접 편집: 플랜보드 과목·학습 범위, 할일 퀴즈 상태
+                TextbookTable, ChapterTable, PlanSubjectTable, TaskQuizAttemptTable
             )
         }
     }
@@ -84,9 +103,12 @@ class ChatServiceTest : StringSpec({
     beforeEach {
         transaction(db) {
             ChatTurnTable.deleteAll()
+            TaskQuizAttemptTable.deleteAll()
+            PlanSubjectTable.deleteAll()
             PlanTaskTable.deleteAll()
             DailyPlanTable.deleteAll()
             PlanBoardTable.deleteAll()
+            StudyStyleAnswerTable.deleteAll()
             UserTable.deleteAll()
         }
     }
@@ -327,6 +349,19 @@ class ChatServiceTest : StringSpec({
         llm.lastPlanBoardSummary!!.lines().last() shouldBe "시험일: 등록되지 않음"
     }
 
+    "공부 스타일 설문은 숫자가 아니라 학생이 고른 보기 문구로 AI 에 넘긴다" {
+        val (userId, dailyPlanId) = seedDailyPlan(examDate = null)
+        transaction(db) {
+            StudyStyleAnswerRow.new { user = UserRow[userId]; questionNumber = 2; answerOption = 1 }
+            StudyStyleAnswerRow.new { user = UserRow[userId]; questionNumber = 7; answerOption = 4 } // 모르겠어요 → 빠짐
+        }
+        val llm = FakeChatLlmClient(AiChatResult(reply_message = "좋아요", plan_changed = false))
+
+        ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "안녕")
+
+        llm.lastStudyStyleSummary shouldBe "공부가 잘 되는 시간대: 아침 (등교 전)"
+    }
+
     fun postponeLlm(names: List<String>, toDate: String? = null, reply: String = "미룰게요") = FakeChatLlmClient(
         AiChatResult(reply_message = reply, plan_changed = true, postpone = AiChatPostpone(task_names = names, to_date = toDate))
     )
@@ -356,6 +391,81 @@ class ChatServiceTest : StringSpec({
             listOf(conceptId, problemId).map { PlanTaskRow[it].postponedFromDate } shouldBe listOf(tuesday, tuesday)
         }
         llm.lastToday shouldBe "2026-09-01 (화요일)"
+    }
+
+    // ---- 할일 직접 편집 (#306) ----
+
+    fun editLlm(vararg edits: AiChatEdit) = FakeChatLlmClient(AiChatResult(reply_message = "바꿀게요", plan_changed = true, edits = edits.toList()))
+
+    "할일 직접 편집: 줄이기·빼기·추가를 서버가 적용하고, 답변은 실제 결과로 만들고, 추가한 할일엔 플랜보드 과목을 붙인다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        seedTask(dailyPlanId, "수학 문제 풀기", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false)
+        seedTask(dailyPlanId, "영어 단어", LocalTime.of(18, 10), LocalTime.of(18, 40), completed = false)
+        val scienceId = transaction(db) {
+            val science = SubjectRow.find { SubjectTable.name eq "과학" }.firstOrNull() ?: SubjectRow.new { name = "과학" }
+            val textbook = TextbookRow.new { subject = science; title = "과학 교과서" }
+            val first = ChapterRow.new { this.textbook = textbook; chapterName = "물질의 구성"; chapterOrder = 1 }
+            val second = ChapterRow.new { this.textbook = textbook; chapterName = "전기와 자기"; chapterOrder = 2 }
+            PlanSubjectRow.new { planBoard = DailyPlanRow[dailyPlanId].planBoard; this.textbook = textbook; startChapter = first; endChapter = second }
+            science.id.value
+        }
+        val llm = editLlm(
+            AiChatEdit("resize", "수학 문제 풀기", minutes = 30),
+            AiChatEdit("delete", "영어 단어"),
+            AiChatEdit("add", "과학 2단원 전기와 자기 개념 정리", minutes = 40, start_time = "20:00", subject_name = "과학")
+        )
+
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "수학 30분으로 줄이고 영어 빼고 8시에 과학 넣어줘")
+
+        response.planChanged shouldBe true
+        response.updatedTasks!!.map { "${it.taskName} ${it.startTime}~${it.endTime} ${it.estimatedMinutes} ${it.subjectName}" } shouldBe listOf(
+            "수학 문제 풀기 17:00~17:30 30 null",
+            "과학 2단원 전기와 자기 개념 정리 20:00~20:40 40 과학"
+        )
+        response.updatedTasks!!.last().subjectId shouldBe scienceId
+        response.reply shouldBe "'수학 문제 풀기'을(를) 30분(17:00~17:30)으로 줄였어요. '영어 단어'을(를) 오늘 계획에서 뺐어요. " +
+            "'과학 2단원 전기와 자기 개념 정리'을(를) 20:00~20:40에 추가했어요."
+        // AI 가 학습 범위를 보고 할일 이름을 짓도록 플랜보드 과목·단원을 넘긴다
+        llm.lastPlanSubjects shouldBe "- 과학 (과학 교과서): 물질의 구성, 전기와 자기"
+        transaction(db) { ChatTurnRow.find { ChatTurnTable.dailyPlanId eq dailyPlanId }.map { it.role } } shouldBe listOf("user", "assistant")
+    }
+
+    "할일 직접 편집: 모두 거절되면 계획은 그대로 두고 이유와 빈 시간을 답한다, 퀴즈를 시작한 할일은 못 뺀다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val mathId = seedTask(dailyPlanId, "수학 문제 풀기", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false)
+        seedTask(dailyPlanId, "영어 단어", LocalTime.of(18, 10), LocalTime.of(18, 40), completed = false)
+        transaction(db) {
+            TaskQuizAttemptTable.insert {
+                it[planTaskId] = mathId; it[attemptNumber] = 1; it[totalCount] = 5; it[createdAt] = OffsetDateTime.now()
+            }
+        }
+        val llm = editLlm(AiChatEdit("delete", "수학 문제 풀기"), AiChatEdit("move", "영어 단어", start_time = "17:30"))
+
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "수학 빼고 영어 5시 반으로")
+
+        response.planChanged shouldBe false
+        response.updatedTasks shouldBe null
+        response.reply shouldBe "'수학 문제 풀기'은(는) 이미 퀴즈를 시작한 할일이라 뺄 수 없어요. " +
+            "'영어 단어'을(를) 17:30로 옮기지 못했어요 — 그 시간에 '수학 문제 풀기' 할일이 있어요. 오늘 빈 시간: 16:30~17:00, 18:00~18:10, 18:40~23:00"
+        transaction(db) { PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.count() } shouldBe 2L
+    }
+
+    "미루기 결과 할일에도 과목과 보드 종류(isManual)가 실린다" {
+        val (userId, dailyPlanId) = seedDailyPlan(examDate = tuesday.plusDays(8), boardEnd = tuesday.plusDays(7)) // 시험 보드
+        val taskId = seedTask(dailyPlanId, "개념 정리", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false)
+        val subjectId = transaction(db) {
+            val subject = SubjectRow.find { SubjectTable.name eq "수학" }.firstOrNull() ?: SubjectRow.new { name = "수학" }
+            PlanTaskRow[taskId].subjectId = subject.id
+            subject.id.value
+        }
+
+        val response = ChatService(postponeLlm(listOf("개념 정리")), schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "내일로 미뤄줘")
+
+        response.movedTasks!!.single().let {
+            it.subjectId shouldBe subjectId
+            it.subjectName shouldBe "수학"
+            it.isManual shouldBe false
+        }
     }
 
     "미루기: 어제에서 미뤄져 온 할일은 이틀 연속 미루지 못하고, 다른 할일만 옮긴다" {
@@ -414,6 +524,8 @@ private class FakeChatLlmClient(private val result: AiChatResult?) : ChatLlmClie
     var lastCurrentTasksJson: String? = null
     var lastPlanBoardSummary: String? = null
     var lastToday: String? = null
+    var lastStudyStyleSummary: String? = null
+    var lastPlanSubjects: String? = null
 
     override suspend fun adjustPlan(
         grade: Int,
@@ -423,9 +535,12 @@ private class FakeChatLlmClient(private val result: AiChatResult?) : ChatLlmClie
         currentTasksJson: String,
         chatHistoryJson: String,
         planBoardSummary: String,
-        userMessage: String
+        userMessage: String,
+        planSubjects: String
     ): AiChatResult? {
+        lastPlanSubjects = planSubjects
         lastToday = today
+        lastStudyStyleSummary = studyStyleSummary
         lastCurrentTasksJson = currentTasksJson
         lastPlanBoardSummary = planBoardSummary
         return result

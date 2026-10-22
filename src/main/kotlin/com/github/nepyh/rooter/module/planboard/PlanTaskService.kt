@@ -16,16 +16,24 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookRow
+import com.github.nepyh.rooter.module.taskquiz.MAX_ATTEMPTS
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.core.between
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.DayOfWeek
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -40,14 +48,17 @@ class PlanTaskService {
         val user = UserRow.findById(userId)
             ?: return@transaction DailyPlanResponse(planDate = date.toString(), tasks = emptyList())
 
-        val tasks = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+        val taskRows = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
             .where { (DailyPlanTable.planDate eq date) and (PlanBoardTable.userId eq user.id) }
             .orderBy(PlanTaskTable.startTime)
-            .map { PlanTaskRow.wrapRow(it) }
-            .map { it.toResponse() }
+            .map { BoardTask(it[DailyPlanTable.planBoardId].value, isManualPlanBoard(it[PlanBoardTable.examDate]), PlanTaskRow.wrapRow(it)) }
+        val subjectNames = subjectNamesOf(taskRows.map { it.task })
 
-        DailyPlanResponse(planDate = date.toString(), tasks = tasks)
+        DailyPlanResponse(
+            planDate = date.toString(),
+            tasks = taskRows.map { (planBoardId, isManual, task) -> task.toResponse(planBoardId, isManual, task.subjectNameFrom(subjectNames)) }
+        )
     }
 
     /** 본인 플랜보드의 주간(월~일) 태스크 전체, referenceDate가 속한 주 기준 (모든 보드 대상) */
@@ -62,12 +73,17 @@ class PlanTaskService {
                 days = (0..6).map { DailyPlanResponse(planDate = weekStart.plusDays(it.toLong()).toString(), tasks = emptyList()) }
             )
 
-        val tasksByDate = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+        val taskRows = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
             .where { (DailyPlanTable.planDate.between(weekStart, weekEnd)) and (PlanBoardTable.userId eq user.id) }
             .orderBy(PlanTaskTable.startTime)
-            .map { row -> row[DailyPlanTable.planDate] to PlanTaskRow.wrapRow(row).toResponse() }
-            .groupBy({ it.first }, { it.second })
+            .map { row -> row[DailyPlanTable.planDate] to BoardTask(row[DailyPlanTable.planBoardId].value, isManualPlanBoard(row[PlanBoardTable.examDate]), PlanTaskRow.wrapRow(row)) }
+        val subjectNames = subjectNamesOf(taskRows.map { it.second.task })
+
+        val tasksByDate = taskRows.groupBy({ it.first }, { (_, boardTask) ->
+            val (planBoardId, isManual, taskRow) = boardTask
+            taskRow.toResponse(planBoardId, isManual, taskRow.subjectNameFrom(subjectNames))
+        })
 
         val days = (0..6).map { offset ->
             val date = weekStart.plusDays(offset.toLong())
@@ -94,11 +110,16 @@ class PlanTaskService {
             return@transaction DailyPlanResponse(planDate = targetDate.toString(), tasks = emptyList())
         }
 
-        val tasks = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlan.id }
+        val taskRows = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlan.id }
             .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
-            .map { it.toResponse() }
+            .toList()
+        val subjectNames = subjectNamesOf(taskRows)
 
-        DailyPlanResponse(dailyPlanId = dailyPlan.id.value, planDate = targetDate.toString(), tasks = tasks)
+        DailyPlanResponse(
+            dailyPlanId = dailyPlan.id.value,
+            planDate = targetDate.toString(),
+            tasks = taskRows.map { it.toResponse(board.id.value, isManualPlanBoard(board.examDate), it.subjectNameFrom(subjectNames)) }
+        )
     }
 
     fun createTask(userId: Int, request: PlanTaskCreateRequest) = transaction {
@@ -133,6 +154,13 @@ class PlanTaskService {
             throw PlanTaskValidationException.PlanDateOutOfRangeException()
         }
 
+        // 프론트가 고른 교과서가 오면 그 교과서의 과목을 할일에 붙인다 (안 보내면 과목 미지정)
+        val textbookSubjectId = request.textbookId?.let { textbookId ->
+            val textbook = TextbookRow.findById(textbookId)
+                ?: throw PlanTaskValidationException.InvalidTextbookException()
+            textbook.subject.id.value
+        }
+
         // 동시 요청에도 daily_plan 이 중복 생성되지 않도록 insertIgnore (DDL 유니크 제약과 짝)
         DailyPlanTable.insertIgnore {
             it[planBoardId] = board.id
@@ -149,6 +177,7 @@ class PlanTaskService {
             this.startTime = startTime
             this.endTime = endTime
             estimatedMinutes = request.estimatedMinutes
+            this.subjectId = textbookSubjectId?.let { EntityID(it, SubjectTable) }
         }
     }
 
@@ -168,7 +197,7 @@ class PlanTaskService {
         if ((task.status == PlanTaskStatus.DONE) != isCompleted) {
             task.changeStatus(if (isCompleted) PlanTaskStatus.DONE else PlanTaskStatus.PENDING)
         }
-        task.toResponse()
+        task.toResponse(planBoardIdOf(task), isManualPlanBoard(task.dailyPlan.planBoard.examDate), subjectNameOf(task))
     }
 
     /**
@@ -183,16 +212,19 @@ class PlanTaskService {
         when {
             status == PlanTaskStatus.FAILED -> throw PlanTaskValidationException.TaskFinalizedException()
             target == PlanTaskStatus.DONE -> throw PlanTaskValidationException.TaskQuizRequiredException()
-            status == PlanTaskStatus.DONE && (target == PlanTaskStatus.FAILED || hasPassedQuiz(id.value)) ->
+            status == PlanTaskStatus.DONE && (target == PlanTaskStatus.FAILED || isFinalizedByQuiz(id.value)) ->
                 throw PlanTaskValidationException.TaskFinalizedException()
         }
         status = target
     }
 
-    /** 태스크 퀴즈를 통과한 태스크인지 */
-    private fun hasPassedQuiz(taskId: Int): Boolean =
+    /** 태스크 퀴즈를 통과했거나, 마지막 차수(MAX_ATTEMPTS)까지 불합격해 결과가 확정된 태스크인지 */
+    private fun isFinalizedByQuiz(taskId: Int): Boolean =
         !TaskQuizAttemptTable.selectAll().where {
-            (TaskQuizAttemptTable.planTaskId eq taskId) and (TaskQuizAttemptTable.passed eq true)
+            (TaskQuizAttemptTable.planTaskId eq taskId) and (
+                (TaskQuizAttemptTable.passed eq true) or
+                    ((TaskQuizAttemptTable.passed eq false) and (TaskQuizAttemptTable.attemptNumber greaterEq MAX_ATTEMPTS))
+                )
         }.empty()
 
     /** taskName/startTime/endTime/estimatedMinutes/status 중 전달된 필드만 수정 (본인 플랜보드 소유권 확인) */
@@ -218,17 +250,27 @@ class PlanTaskService {
         if (!newEndTime.isAfter(newStartTime)) {
             throw PlanTaskValidationException.InvalidTimeRangeException()
         }
+        // 예상 시간은 태스크 퀴즈 문항 수·캘린더 공부 시간 합계를 정한다. 시간만 바꾸고 예상 시간을 안 보내면
+        // 옛 값이 남아(1시간 → 30분으로 줄여도 퀴즈는 1시간 기준) 바뀐 시간 길이로 맞춘다. 보내면 그 값을 쓴다
+        val timeChanged = request.startTime != null || request.endTime != null
+        val newEstimatedMinutes = request.estimatedMinutes
+            ?: if (timeChanged) Duration.between(newStartTime, newEndTime).toMinutes().toInt() else task.estimatedMinutes
+        if (newEstimatedMinutes < 1) throw PlanTaskValidationException.InvalidEstimatedMinutesException()
+
+        // 결과가 확정된 할일(실패 처리 · 퀴즈 통과 / 마지막 차수까지 불합격)은 지난 기록이라 시간·예상 시간을 못 바꾼다.
+        // 이름 변경과 지금과 같은 값을 다시 보내는 것은 막지 않는다 — 프론트는 수정 시 모든 필드를 함께 보낸다
+        val scheduleChanged = newStartTime != task.startTime || newEndTime != task.endTime || newEstimatedMinutes != task.estimatedMinutes
+        if (scheduleChanged && (task.status == PlanTaskStatus.FAILED || isFinalizedByQuiz(taskId))) {
+            throw PlanTaskValidationException.TaskFinalizedException()
+        }
+
         task.startTime = newStartTime
         task.endTime = newEndTime
-
-        request.estimatedMinutes?.let {
-            if (it < 1) throw PlanTaskValidationException.InvalidEstimatedMinutesException()
-            task.estimatedMinutes = it
-        }
+        task.estimatedMinutes = newEstimatedMinutes
 
         request.status?.let { task.changeStatus(it) }
 
-        task.toResponse()
+        task.toResponse(planBoardIdOf(task), isManualPlanBoard(task.dailyPlan.planBoard.examDate), subjectNameOf(task))
     }
 
     /** 태스크 삭제 (본인 플랜보드 소유권 확인) */
@@ -243,14 +285,30 @@ class PlanTaskService {
         task.delete()
     }
 
-    private fun PlanTaskRow.toResponse() = PlanTaskResponse(
+    /** 과목명은 호출부가 채워 넘긴다 — 여기서 조회하면 응답 행마다 SELECT 가 나간다 */
+    private fun PlanTaskRow.toResponse(planBoardId: Int, isManual: Boolean, subjectName: String? = null) = PlanTaskResponse(
         id = id.value,
         dailyPlanId = readValues[PlanTaskTable.dailyPlanId].value,
+        planBoardId = planBoardId,
+        isManual = isManual,
         taskName = taskName,
         startTime = startTime.format(timeFormat),
         endTime = endTime.format(timeFormat),
         estimatedMinutes = estimatedMinutes,
         isCompleted = status == PlanTaskStatus.DONE,
-        status = status
+        status = status,
+        subjectId = readValues[PlanTaskTable.subjectId]?.value,
+        subjectName = subjectName
     )
+
+    /** 단건 응답용 — 한 행뿐이라 과목을 바로 조회한다 */
+    private fun subjectNameOf(row: PlanTaskRow): String? =
+        row.subjectId?.value?.let { SubjectRow.findById(it)?.name }
+
+    /** 단건 응답용 — 이미 읽은 일일 계획 행에서 보드 id 만 꺼낸다 (보드 조회 SELECT 를 더 내지 않는다) */
+    private fun planBoardIdOf(row: PlanTaskRow): Int =
+        row.dailyPlan.readValues[DailyPlanTable.planBoardId].value
 }
+
+/** 여러 보드가 섞인 목록 조회에서 할일 한 행과 그 보드의 id·직접 만든 보드 여부 */
+private data class BoardTask(val planBoardId: Int, val isManual: Boolean, val task: PlanTaskRow)

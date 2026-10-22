@@ -5,6 +5,8 @@ import com.github.nepyh.rooter.module.planboard.GeneratedPlan
 import com.github.nepyh.rooter.module.planboard.GeneratedPlanTask
 import com.github.nepyh.rooter.module.planboard.PlanGenerationLlmClient
 import com.github.nepyh.rooter.module.planboard.PlanGenerationService
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerRow
+import com.github.nepyh.rooter.module.studystyle.model.StudyStyleAnswerTable
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationSubjectInput
 import com.github.nepyh.rooter.module.school.NiceApiClient
@@ -55,6 +57,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -112,7 +115,7 @@ class PlanBoardServiceTest : StringSpec({
             SchemaUtils.create(
                 UserTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable,
                 // plan-generation 이 등급·프로필·불가 시간을 조회한다
-                LevelTestResultTable, StudentProfileTable, UnavailableTimeTable,
+                LevelTestResultTable, StudentProfileTable, UnavailableTimeTable, StudyStyleAnswerTable,
                 // 태스크 완료 처리가 퀴즈로 확정된 태스크인지 조회한다
                 TaskQuizAttemptTable
             )
@@ -125,6 +128,7 @@ class PlanBoardServiceTest : StringSpec({
     beforeEach {
         transaction(db) {
             LevelTestResultTable.deleteAll()
+            StudyStyleAnswerTable.deleteAll()
             StudentProfileTable.deleteAll()
             UnavailableTimeTable.deleteAll()
             TaskQuizAttemptTable.deleteAll()
@@ -154,13 +158,15 @@ class PlanBoardServiceTest : StringSpec({
     fun seedBoard(
         userId: Int,
         start: LocalDate = LocalDate.of(2026, 7, 1),
-        end: LocalDate = LocalDate.of(2026, 7, 31)
+        end: LocalDate = LocalDate.of(2026, 7, 31),
+        examDate: LocalDate? = null
     ): Int = transaction(db) {
         PlanBoardRow.new {
             user = UserRow[userId]
             title = "테스트 보드"
             this.startDate = start
             this.endDate = end
+            this.examDate = examDate
             createdAt = OffsetDateTime.now()
         }.id.value
     }
@@ -594,6 +600,17 @@ class PlanBoardServiceTest : StringSpec({
         saturday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("06:30~10:00", "11:00~23:00")
     }
 
+    "busy-times: 사용자가 저장한 수면시간(01:00 취침, 07:30 기상)을 SLEEP 으로 주고 기본 23:00~06:30 은 막지 않는다" {
+        val userId = seedUser("busy-sleep@test.com")
+        transaction(db) { UserRow[userId].apply { sleepTime = LocalTime.of(1, 0); wakeTime = LocalTime.of(7, 30) } }
+
+        // 2026-07-04 토요일
+        val saturday = BusyTimeService(noNiceSchoolDataFetcher()).getBusyTimes(userId, LocalDate.of(2026, 7, 4), LocalDate.of(2026, 7, 4)).days.single()
+
+        saturday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf("SLEEP 01:00~07:30")
+        saturday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("00:00~01:00", "07:30~24:00")
+    }
+
     "busy-times: endDate 가 startDate 보다 빠르거나 31일을 넘으면 InvalidDateRangeException" {
         val userId = seedUser("busy-range@test.com")
         val service = BusyTimeService(noNiceSchoolDataFetcher())
@@ -631,6 +648,76 @@ class PlanBoardServiceTest : StringSpec({
         response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("07:40~08:40", "08:50~09:20")
     }
 
+    "plan-generation: 공부 스타일 설문(밤·짧고 굵게)이 있으면 잠들기 전부터 5분씩 쉬며 배치한다" {
+        val userId = seedUser("gen-style@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        transaction(db) {
+            // Q1 = 1 (짧고 굵게, 5분 휴식), Q2 = 3 (밤)
+            listOf(1 to 1, 2 to 3).forEach { (question, option) ->
+                StudyStyleAnswerRow.new {
+                    user = UserRow[userId]
+                    questionNumber = question.toShort()
+                    answerOption = option.toShort()
+                }
+            }
+        }
+        val llm = FakePlanGenerationLlmClient(tasks = listOf(GeneratedPlanTask("수학 개념", 60), GeneratedPlanTask("수학 문제", 30)))
+
+        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(
+                title = "밤 공부",
+                subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)),
+                startDate = "2026-07-01", // 수요일 등교일: 빈 시간 16:30~23:00
+                daysRemaining = 1
+            )
+        )
+
+        response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("21:25~22:25", "22:30~23:00")
+        llm.studyStyleRules.single() shouldContain "task 하나의 estimated_minutes 는 30분을 넘기지 마라"
+        llm.studyStyleRules.single() shouldContain "공부가 잘 되는 시간대: 밤 (자기 전)"
+    }
+
+    "plan-generation: 설문이 없으면 AI 에 공부 스타일 지시를 넘기지 않는다" {
+        val userId = seedUser("gen-no-style@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient()
+
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "설문 없음", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 1)
+        )
+
+        llm.studyStyleRules.single() shouldBe ""
+    }
+
+    "plan-generation: 주말이 변수인 학생에게는 구간마다 그 구간 기준 주말 day 번호를 알려준다" {
+        val userId = seedUser("gen-weekend@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        transaction(db) {
+            StudyStyleAnswerRow.new {
+                user = UserRow[userId]
+                questionNumber = 4
+                answerOption = 3 // 주말 전체
+            }
+        }
+        val llm = FakePlanGenerationLlmClient()
+
+        // 2026-07-01(수) 부터 30일 → 10일씩 3구간. 1구간 주말 = 07-04·05 (day 4, 5)
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "주말", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 30)
+        )
+
+        llm.studyStyleRules.size shouldBe 3
+        llm.studyStyleRules.any { it.contains("주말(day 4, 5)") } shouldBe true
+        // 2구간(07-11~07-20) 주말 = 07-11·12·18·19 → day 1, 2, 8, 9
+        llm.studyStyleRules.any { it.contains("주말(day 1, 2, 8, 9)") } shouldBe true
+    }
+
     // 2026-10-05 은 월요일(등교일, 학교 정보 없음 → 하교 16:30), 2026-10-03 은 토요일
     fun kstClock(dateTime: String): Clock = Clock.fixed(java.time.LocalDateTime.parse(dateTime).atZone(java.time.ZoneId.of("Asia/Seoul")).toInstant(), java.time.ZoneOffset.UTC)
 
@@ -652,7 +739,9 @@ class PlanBoardServiceTest : StringSpec({
         response.dailyPlans.first().date shouldBe "2026-10-05"
         response.dailyPlans.first().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("20:30~21:30", "21:40~22:10")
         response.dailyPlans[1].tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:30~17:30", "17:40~18:10") // 내일은 그대로
-        llm.contexts.single().contains("첫날(2026-10-05)은 지금 20:28 이후만 공부할 수 있고, 남은 공부 가능 시간은 약 150분이다") shouldBe true
+        // 오늘은 20:30~23:00 (150분), 내일(화)은 하교 16:30~23:00 (390분)
+        llm.contexts.single().contains("- day 1 (2026-10-05 월, 오늘이라 지금 20:28 이후만): 공부 가능 150분, 가장 긴 연속 150분, 권장 90~150분") shouldBe true
+        llm.contexts.single().contains("- day 2 (2026-10-06 화): 공부 가능 390분, 가장 긴 연속 390분, 권장 90~150분") shouldBe true
     }
 
     "plan-generation: 주말 오후 4시에 오늘부터 만들면 아침(06:30)이 아니라 지금(16:00)부터 잡힌다" {
@@ -661,11 +750,12 @@ class PlanBoardServiceTest : StringSpec({
         response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:00~17:00", "17:10~17:40")
     }
 
-    "plan-generation: 내일부터 시작하는 계획은 지금 시각과 상관없이 평소대로 잡히고, AI 에 남은 시간 안내도 없다" {
+    "plan-generation: 내일부터 시작하는 계획은 지금 시각과 상관없이 평소대로 잡히고, 공부 가능 시간도 하루 전체 기준이다" {
         val (response, llm) = generateToday("now-tomorrow@test.com", kstClock("2026-10-05T20:28"), startDate = "2026-10-06")
 
         response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:30~17:30", "17:40~18:10")
-        llm.contexts.single().contains("첫날(") shouldBe false
+        llm.contexts.single().contains("오늘이라 지금") shouldBe false
+        llm.contexts.single().contains("- day 1 (2026-10-06 화): 공부 가능 390분, 가장 긴 연속 390분, 권장 90~150분") shouldBe true
     }
 
     "plan-generation: 밤 늦게(22:50) 만들어 오늘 남은 시간이 부족하면 오늘 할일은 비고, 다음 날부터 잡힌다" {
@@ -673,7 +763,48 @@ class PlanBoardServiceTest : StringSpec({
 
         response.dailyPlans.first().tasks shouldBe emptyList()
         response.dailyPlans[1].tasks.size shouldBe 2
-        llm.contexts.single().contains("남은 시간이 거의 없으면 첫날 tasks 는 비워도 된다") shouldBe true
+        llm.contexts.single().contains("- day 1 (2026-10-05 월, 오늘이라 지금 22:50 이후만): 공부 가능 10분, 가장 긴 연속 10분, 권장 10~10분") shouldBe true
+    }
+
+    "plan-generation: 날짜마다 학원 같은 불가능 시간·다른 할일을 뺀 공부 가능 시간과 가장 긴 연속 시간, 쉬는 시간을 AI 에 알려준다" {
+        val userId = seedUser("gen-capacity@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        transaction(db) {
+            // 수요일 학원 18:00~20:00 → 하교 16:30~23:00 이 16:30~18:00(90분) + 20:00~23:00(180분) 으로 쪼개진다
+            UnavailableTimeRow.new {
+                user = UserRow[userId]; dayOfWeek = DayOfWeek.WEDNESDAY
+                startTime = LocalTime.of(18, 0); endTime = LocalTime.of(20, 0)
+            }
+        }
+        val llm = FakePlanGenerationLlmClient()
+
+        // 2026-07-01 수 ~ 07-04 토 (학교 정보 없음 → 평일 하교 16:30, 주말은 06:30 부터)
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "분량", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 4)
+        )
+
+        val context = llm.contexts.single()
+        context.contains("할일 사이에는 쉬는 시간 10분이 들어간다") shouldBe true
+        context.contains("- day 1 (2026-07-01 수): 공부 가능 270분, 가장 긴 연속 180분, 권장 90~150분") shouldBe true
+        context.contains("- day 2 (2026-07-02 목): 공부 가능 390분, 가장 긴 연속 390분, 권장 90~150분") shouldBe true
+        context.contains("- day 4 (2026-07-04 토): 공부 가능 990분, 가장 긴 연속 990분, 권장 150~240분") shouldBe true
+    }
+
+    "plan-generation: 벼락치기 모드면 하루 권장 공부량을 1.5배로 알려준다" {
+        val userId = seedUser("gen-cram-target@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient()
+
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "벼락치기", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-03", daysRemaining = 2, isCramMode = true)
+        )
+
+        llm.contexts.single().contains("- day 1 (2026-07-03 금): 공부 가능 390분, 가장 긴 연속 390분, 권장 135~225분") shouldBe true
+        llm.contexts.single().contains("- day 2 (2026-07-04 토): 공부 가능 990분, 가장 긴 연속 990분, 권장 225~360분") shouldBe true
     }
 
     "addSubject: 정상 등록되면 subjectName/textbookTitle 이 채워진다" {
@@ -788,6 +919,22 @@ class PlanBoardServiceTest : StringSpec({
         shouldThrow<PlanTaskValidationException.InvalidTimeRangeException> {
             planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(startTime = "20:00"))
         }
+    }
+
+    "updateTask: 시간만 바꾸면 예상 시간을 바뀐 길이로 맞추고, 같이 보내면 보낸 값을 쓴다" {
+        val userId = seedUser("task-update-estimate@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId)) // 17:30~19:30, 120분
+        val taskId = transaction(db) { PlanTaskRow.find { PlanTaskTable.taskName eq "수학 2단원" }.first().id.value }
+
+        // 끝 시각만 당겨 30분으로 줄임 → 예상 시간도 30분 (퀴즈 문항 수·캘린더 합계 기준)
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(endTime = "18:00")).estimatedMinutes shouldBe 30
+        // 위치만 옮김 (길이 그대로) → 30분 유지
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(startTime = "20:00", endTime = "20:30")).estimatedMinutes shouldBe 30
+        // 시간과 예상 시간을 같이 보내면 보낸 값
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(startTime = "20:00", endTime = "21:00", estimatedMinutes = 50)).estimatedMinutes shouldBe 50
+        // 이름만 바꾸면 예상 시간은 그대로
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수학 3단원")).estimatedMinutes shouldBe 50
     }
 
     "deleteTask: 삭제 후 조회되지 않는다" {
@@ -1032,6 +1179,152 @@ class PlanBoardServiceTest : StringSpec({
         // 미완료 → 완료는 퀴즈 통과로만 되므로 (TASK_QUIZ_REQUIRED) 완료 API 응답은 같은 값(false)으로 확인한다
         planTaskService.completeTask(userId, taskId, false).dailyPlanId shouldBe dailyPlanId
     }
+
+    // ---- 할일이 속한 플랜보드 (여러 보드가 섞이는 조회에서 보드 구분) ----
+
+    "planBoardId: 보드가 섞이는 조회에서 태스크마다 자기 보드 id 가 실린다" {
+        val userId = seedUser("task-planboard@test.com")
+        val boardA = seedBoard(userId)
+        val boardB = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardA, taskName = "A", startTime = "09:00", endTime = "10:00"))
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardB, taskName = "B", startTime = "19:00", endTime = "20:00"))
+        val date = LocalDate.of(2026, 7, 15)
+        val expected = listOf("A" to boardA, "B" to boardB)
+
+        planTaskService.getDailyPlan(userId, date).tasks.map { it.taskName to it.planBoardId } shouldBe expected
+
+        val weekDay = planTaskService.getWeeklyPlan(userId, date).days.single { it.planDate == "2026-07-15" }
+        weekDay.tasks.map { it.taskName to it.planBoardId } shouldBe expected
+
+        // 보드 하나 기준 조회는 그 보드 id 만 나온다
+        planTaskService.getBoardDailyPlan(userId, boardB, date).tasks.map { it.planBoardId } shouldBe listOf(boardB)
+    }
+
+    "planBoardId: 수정·완료 단건 응답에도 보드 id 가 들어간다" {
+        val userId = seedUser("task-planboard-update@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+        val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
+
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).planBoardId shouldBe boardId
+        // 퀴즈 없이 완료로는 못 바꾸므로(#288) 지금 상태(미완료) 그대로 보내 단건 응답만 확인한다
+        planTaskService.completeTask(userId, taskId, false).planBoardId shouldBe boardId
+    }
+
+    "isManual: 시험일 없는 보드(직접 만든 일정)의 할일만 true — 보드가 섞이는 목록·보드 일간 조회" {
+        val userId = seedUser("task-manual@test.com")
+        val manualBoard = seedBoard(userId)                                         // 기본 플랜보드 (시험일 없음)
+        val examBoard = seedBoard(userId, examDate = LocalDate.of(2026, 8, 1))     // AI 시험 계획 보드
+        planTaskService.createTask(userId, taskRequest(planBoardId = manualBoard, taskName = "직접", startTime = "09:00", endTime = "10:00"))
+        planTaskService.createTask(userId, taskRequest(planBoardId = examBoard, taskName = "시험", startTime = "19:00", endTime = "20:00"))
+        val date = LocalDate.of(2026, 7, 15)
+        val expected = listOf("직접" to true, "시험" to false)
+
+        planTaskService.getDailyPlan(userId, date).tasks.map { it.taskName to it.isManual } shouldBe expected
+        planTaskService.getWeeklyPlan(userId, date).days.single { it.planDate == "2026-07-15" }
+            .tasks.map { it.taskName to it.isManual } shouldBe expected
+        planTaskService.getBoardDailyPlan(userId, manualBoard, date).tasks.single().isManual shouldBe true
+        planTaskService.getBoardDailyPlan(userId, examBoard, date).tasks.single().isManual shouldBe false
+    }
+
+    "isManual: 수정·완료 단건 응답에도 보드 기준으로 들어간다" {
+        val userId = seedUser("task-manual-update@test.com")
+        val examBoard = seedBoard(userId, examDate = LocalDate.of(2026, 8, 1))
+        planTaskService.createTask(userId, taskRequest(planBoardId = examBoard))
+        val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
+
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).isManual shouldBe false
+        planTaskService.completeTask(userId, taskId, false).isManual shouldBe false
+    }
+
+    // ---- 할일의 과목 귀속 (목록을 과목별로 분류하기 위한 제목) ----
+
+    "createTask: 교과서를 지정하면 과목이 저장되고 목록·단건 응답에 subjectId/subjectName 이 실린다" {
+        val userId = seedUser("task-subject@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("수학")
+        val textbookId = seedTextbook(subjectId, title = "수학 교과서")
+
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId, textbookId = textbookId))
+        val date = LocalDate.of(2026, 7, 15)
+
+        // 목록 3종(일간·보드 일간·주간) 모두 같은 과목이 실린다
+        listOf(
+            planTaskService.getDailyPlan(userId, date).tasks.single(),
+            planTaskService.getBoardDailyPlan(userId, boardId, date).tasks.single(),
+            planTaskService.getWeeklyPlan(userId, date).days.single { it.planDate == "2026-07-15" }.tasks.single()
+        ).forEach { task ->
+            task.subjectId shouldBe subjectId
+            task.subjectName shouldBe "수학"
+        }
+
+        // 수정·완료 단건 응답에도 같은 과목이 실린다
+        val taskId = planTaskService.getDailyPlan(userId, date).tasks.single().id
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수학 2단원 복습")).subjectName shouldBe "수학"
+        // 퀴즈 없이 완료로는 못 바꾸므로(#288) 지금 상태(미완료) 그대로 보내 단건 응답만 확인한다
+        planTaskService.completeTask(userId, taskId, false).subjectId shouldBe subjectId
+    }
+
+    "createTask: 교과서를 안 보내면 과목이 붙지 않는다 (null)" {
+        val userId = seedUser("task-nosubject@test.com")
+        val boardId = seedBoard(userId)
+
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+
+        val task = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single()
+        task.subjectId shouldBe null
+        task.subjectName shouldBe null
+    }
+
+    "createTask: 존재하지 않는 교과서면 400 INVALID_TEXTBOOK 이고 할일도 만들어지지 않는다" {
+        val userId = seedUser("task-badtextbook@test.com")
+        val boardId = seedBoard(userId)
+
+        val e = shouldThrow<PlanTaskValidationException.InvalidTextbookException> {
+            planTaskService.createTask(userId, taskRequest(planBoardId = boardId, textbookId = 999))
+        }
+
+        e.status.value shouldBe 400
+        e.code shouldBe "INVALID_TEXTBOOK"
+        planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks shouldBe emptyList()
+    }
+
+    "plan-generation: LLM 이 준 subject_name 이 요청 과목과 맞으면 저장되고, 못 맞추면 null 이다" {
+        val userId = seedUser("gen-subject@test.com")
+        val subjectId = seedSubject("수학")
+        val math = seedTextbook(subjectId, title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient(
+            tasks = listOf(
+                GeneratedPlanTask("수학 개념", 60, "수학"),      // 요청 과목명과 정확히 일치
+                GeneratedPlanTask("수학 문제", 30, "  수학  "),  // 앞뒤 공백은 무시하고 일치
+                GeneratedPlanTask("국어 문법", 30, "국어")       // 요청에 없는 과목 → null
+            )
+        )
+
+        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(
+                title = "과목 귀속",
+                subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)),
+                startDate = "2026-07-04", // 토요일 — 06:30 부터 자리가 넉넉해 3개 다 배치된다
+                daysRemaining = 1
+            )
+        )
+
+        planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 4)).tasks
+            .map { it.taskName to it.subjectName } shouldBe listOf(
+            "수학 개념" to "수학",
+            "수학 문제" to "수학",
+            "국어 문법" to null
+        )
+        // 계획 생성 응답에도 같은 과목이 실린다
+        response.dailyPlans.single().tasks.map { Triple(it.taskName, it.subjectId, it.subjectName) } shouldBe listOf(
+            Triple("수학 개념", subjectId, "수학"),
+            Triple("수학 문제", subjectId, "수학"),
+            Triple("국어 문법", null, null)
+        )
+    }
 })
 
 // context 의 "총 학습 기간: N일" 만큼 계획을 돌려준다. shortResponses 번째까지는 절반만 돌려준다.
@@ -1040,9 +1333,11 @@ private class FakePlanGenerationLlmClient(
     private val tasks: List<GeneratedPlanTask> = emptyList()
 ) : PlanGenerationLlmClient(dummyAppConfig()) {
     val contexts = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val studyStyleRules = java.util.Collections.synchronizedList(mutableListOf<String>())
 
-    override suspend fun generatePlan(context: String): GeneratedPlan {
+    override suspend fun generatePlan(context: String, studyStyleRules: String): GeneratedPlan {
         contexts += context
+        this.studyStyleRules += studyStyleRules
         val days = Regex("총 학습 기간: (\\d+)일").find(context)!!.groupValues[1].toInt()
         val returned = synchronized(this) { if (shortResponses > 0) { shortResponses--; days / 2 } else days }
         return GeneratedPlan(
@@ -1073,8 +1368,9 @@ private fun taskRequest(
     taskName: String = "수학 2단원",
     startTime: String = "17:30",
     endTime: String = "19:30",
-    estimatedMinutes: Int = 120
-) = PlanTaskCreateRequest(planBoardId, planDate, taskName, startTime, endTime, estimatedMinutes)
+    estimatedMinutes: Int = 120,
+    textbookId: Int? = null
+) = PlanTaskCreateRequest(planBoardId, planDate, taskName, startTime, endTime, estimatedMinutes, textbookId)
 
 private fun ensureTestDatabase(url: String, user: String, password: String) {
     val dbName = url.substringAfterLast("/")

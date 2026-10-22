@@ -1,11 +1,12 @@
 package com.github.nepyh.rooter.module.planboard
 
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import java.time.LocalDate
 import java.time.LocalTime
 
 private const val DAY_MINUTES = 24 * 60
-private val DEFAULT_UNAVAILABLE_RANGES = listOf(0 to (6 * 60 + 30), (23 * 60) to DAY_MINUTES) // 00:00~06:30, 23:00~24:00
 private const val DEFAULT_DISMISSAL_MINUTES = 16 * 60 + 30 // NICE 시간표를 못 가져올 때 쓰는 하교시각 폴백값 (16:30)
 private const val DEFAULT_BREAK_MINUTES = 10
 
@@ -22,6 +23,22 @@ data class PlacedTask(
 )
 
 /**
+ * [PlanTaskScheduler.placeTasks] 의 배치 방식. 공부 스타일 설문으로 정한다 (planboard/StudyStylePlacement.kt).
+ * @property breakMinutes 태스크 사이 쉬는 시간
+ * @property fromLate true 면 가장 늦은 빈 시간(잠들기 전)부터 채운다
+ * @property avoidRanges 다른 빈 시간이 충분하면 피할 구간 (분)
+ */
+data class PlacementOptions(
+    val breakMinutes: Int = DEFAULT_BREAK_MINUTES,
+    val fromLate: Boolean = false,
+    val avoidRanges: List<Pair<Int, Int>> = emptyList()
+) {
+    companion object {
+        val DEFAULT = PlacementOptions()
+    }
+}
+
+/**
  * 하루치 태스크를 빈 시간대에 순서대로 채워 넣는 결정론적 스케줄러.
  * AI 는 태스크 이름/소요시간만 정하고, 실제 시각 배정은 항상 여기서 계산한다
  * (plan-generation, chat 기반 계획 재조정 둘 다 이 로직을 공유).
@@ -32,8 +49,8 @@ object PlanTaskScheduler {
      * 날짜별 학습 불가 시간대를 만든다 (plan-generation 의 여러 날짜 생성, chat 재조정의
      * 하루짜리 범위 둘 다 이 함수로 통일해서 씀 — 재조정은 startDate == endDate 로 호출).
      *
-     * 취침시간 기본값을 항상 채우고, 평일(학교 가는 날)은 **자정부터 하교 시각까지 통째로** 막는다.
-     * → 평일에는 하교 후에만, 주말에는 아침(06:30)부터 계획이 잡힌다.
+     * 사용자 수면시간([sleepTime], 설정 안 했으면 23:00~06:30)을 항상 채우고, 평일(학교 가는 날)은 **자정부터 하교 시각까지 통째로** 막는다.
+     * → 평일에는 하교 후에만, 주말에는 아침(기상 시각)부터 계획이 잡힌다.
      *   공휴일·방학·재량휴업일처럼 학교를 안 가는 날(NICE 학사일정, [SchoolDataFetcher.getNoSchoolDays])은 평일이어도 주말처럼 취급한다.
      *   (예전엔 등교 준비 07:00~08:00 · 학교 08:30~ 만 막아서 06:30~07:00, 08:00~08:30 틈에 짧은 태스크가 들어갔음)
      * 사용자가 직접 등록한 시간대(customRows)는 그 위에 더한다. 하교시각은 NICE 실시간 시간표로 그날의
@@ -46,9 +63,10 @@ object PlanTaskScheduler {
         schoolId: String?,
         classNumber: Int?,
         grade: Int,
-        customRows: List<Pair<Int, Pair<Int, Int>>>
+        customRows: List<Pair<Int, Pair<Int, Int>>>,
+        sleepTime: SleepTime = SleepTime.DEFAULT
     ): Map<LocalDate, List<Pair<Int, Int>>> =
-        buildTypedUnavailableRanges(schoolDataFetcher, startDate, endDate, schoolId, classNumber, grade, customRows)
+        buildTypedUnavailableRanges(schoolDataFetcher, startDate, endDate, schoolId, classNumber, grade, customRows, sleepTime)
             .mapValues { (_, ranges) -> ranges.map { it.start to it.end } }
 
     /** [buildUnavailableRanges] 와 같은 계산이지만 각 시간이 수면·등교·사용자 등록 중 무엇인지 함께 돌려준다. */
@@ -59,25 +77,31 @@ object PlanTaskScheduler {
         schoolId: String?,
         classNumber: Int?,
         grade: Int,
-        customRows: List<Pair<Int, Pair<Int, Int>>>
+        customRows: List<Pair<Int, Pair<Int, Int>>>,
+        sleepTime: SleepTime = SleepTime.DEFAULT
     ): Map<LocalDate, List<TypedRange>> {
         val dates = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
         val customByWeekday = customRows.groupBy({ it.first }, { it.second })
 
-        val dismissalMinutesByDate = if (schoolId != null) {
-            runCatching { fetchDismissalMinutesByDate(schoolDataFetcher, schoolId, classNumber, grade, startDate, endDate) }.getOrElse { emptyMap() }
+        // 시간표(하교 시각)와 학사일정(쉬는 날)은 서로 상관없는 NICE 조회라 동시에 부른다 (순서대로 부르면 캐시가 빈 첫 요청이 둘을 합친 만큼 걸림)
+        val (dismissalMinutesByDate, noSchoolDays) = if (schoolId != null) {
+            coroutineScope {
+                val dismissal = async {
+                    runCatching { fetchDismissalMinutesByDate(schoolDataFetcher, schoolId, classNumber, grade, startDate, endDate) }.getOrElse { emptyMap() }
+                }
+                // 공휴일·방학·재량휴업일 등 학교 안 가는 날 (NICE 학사일정). 조회 실패면 평일은 전부 등교일로 본다
+                val noSchool = async {
+                    runCatching { schoolDataFetcher.getNoSchoolDays(schoolId, startDate, endDate) }.getOrElse { emptySet() }
+                }
+                dismissal.await() to noSchool.await()
+            }
         } else {
-            emptyMap()
-        }
-        // 공휴일·방학·재량휴업일 등 학교 안 가는 날 (NICE 학사일정). 학교 정보가 없거나 조회 실패면 평일은 전부 등교일로 본다
-        val noSchoolDays = if (schoolId != null) {
-            runCatching { schoolDataFetcher.getNoSchoolDays(schoolId, startDate, endDate) }.getOrElse { emptySet() }
-        } else {
-            emptySet()
+            // 학교 정보가 없으면 하교는 기본값, 평일은 전부 등교일
+            emptyMap<LocalDate, Int>() to emptySet<LocalDate>()
         }
 
         return dates.associateWith { date ->
-            val ranges = DEFAULT_UNAVAILABLE_RANGES.map { (start, end) -> TypedRange(UnavailableType.SLEEP, start, end) }.toMutableList()
+            val ranges = sleepTime.ranges().map { (start, end) -> TypedRange(UnavailableType.SLEEP, start, end) }.toMutableList()
             // 등교일(평일이면서 공휴일·방학 등이 아닌 날): 등교 전 시간을 포함해 하교 시각까지 전부 막는다
             if (date.dayOfWeek.value <= 5 && date !in noSchoolDays) {
                 ranges.add(TypedRange(UnavailableType.SCHOOL, 0, dismissalMinutesByDate[date] ?: DEFAULT_DISMISSAL_MINUTES))
@@ -172,34 +196,78 @@ object PlanTaskScheduler {
         return free
     }
 
-    fun placeTasks(items: List<Pair<String, Int>>, freeIntervals: List<Pair<Int, Int>>): List<PlacedTask> {
+    /**
+     * 태스크를 빈 시간에 순서대로 채운다. [options] 를 생략하면 가장 이른 빈 시간부터, 사이에 10분씩 쉬며 채운다.
+     * - [PlacementOptions.avoidRanges]: 이 구간을 뺀 빈 시간에 전부 들어가면 그렇게 배치하고, 안 들어가면 무시한다
+     * - [PlacementOptions.fromLate]: 가장 늦은 빈 시간(잠들기 전)부터 거꾸로 채운다 (태스크 순서는 유지).
+     *   전부 들어가지 않으면 앞쪽 태스크가 빠지지 않게 원래대로 이른 시간부터 채운다
+     * 빈 시간이 모자라면 뒤쪽 태스크는 배치하지 않는다.
+     */
+    fun placeTasks(
+        items: List<Pair<String, Int>>,
+        freeIntervals: List<Pair<Int, Int>>,
+        options: PlacementOptions = PlacementOptions.DEFAULT
+    ): List<PlacedTask> {
+        val candidates = listOfNotNull(
+            subtractRanges(freeIntervals, options.avoidRanges).takeIf { options.avoidRanges.isNotEmpty() },
+            freeIntervals
+        )
+        for (intervals in candidates) {
+            val placed = placeInOrder(items, intervals, options)
+            if (placed.size == items.size) return placed
+        }
+        return placeInOrder(items, freeIntervals, options.copy(fromLate = false))
+    }
+
+    private fun placeInOrder(items: List<Pair<String, Int>>, freeIntervals: List<Pair<Int, Int>>, options: PlacementOptions): List<PlacedTask> {
+        val slots = if (options.fromLate) {
+            // 하루를 거꾸로 뒤집어 앞에서부터 채운 뒤 다시 뒤집는다 → 가장 늦은 빈 시간부터, 마지막 태스크가 가장 늦게
+            val mirrored = freeIntervals.map { (start, end) -> (DAY_MINUTES - end) to (DAY_MINUTES - start) }.reversed()
+            fillFromEarly(items.reversed(), mirrored, options.breakMinutes)
+                .map { (start, end) -> (DAY_MINUTES - end) to (DAY_MINUTES - start) }
+                .reversed()
+        } else {
+            fillFromEarly(items, freeIntervals, options.breakMinutes)
+        }
+        val placedItems = if (options.fromLate) items.takeLast(slots.size) else items.take(slots.size)
+        return placedItems.zip(slots) { (taskName, minutes), (start, end) ->
+            PlacedTask(
+                taskName = taskName.take(150),
+                estimatedMinutes = minutes,
+                startTime = minutesToLocalTime(start),
+                endTime = minutesToLocalTime(end)
+            )
+        }
+    }
+
+    /** 앞에서부터 채운 각 태스크의 (시작분, 끝분). 빈 시간이 모자라면 거기서 멈춰 앞쪽 태스크만 돌려준다. */
+    private fun fillFromEarly(items: List<Pair<String, Int>>, freeIntervals: List<Pair<Int, Int>>, breakMinutes: Int): List<Pair<Int, Int>> {
         if (items.isEmpty() || freeIntervals.isEmpty()) return emptyList()
 
         var intervalIndex = 0
         var cursor = freeIntervals.getOrNull(0)?.first ?: 0
 
-        val result = mutableListOf<PlacedTask>()
-        for ((taskName, minutes) in items) {
+        val result = mutableListOf<Pair<Int, Int>>()
+        for ((_, minutes) in items) {
             while (intervalIndex < freeIntervals.size && cursor + minutes > freeIntervals[intervalIndex].second) {
                 intervalIndex++
                 cursor = freeIntervals.getOrNull(intervalIndex)?.first ?: cursor
             }
             if (intervalIndex >= freeIntervals.size) break // 남은 빈 시간이 없으면 이후 task는 배치하지 않음
 
-            val start = cursor
-            val end = start + minutes
-            cursor = end + DEFAULT_BREAK_MINUTES
-            result.add(
-                PlacedTask(
-                    taskName = taskName.take(150),
-                    estimatedMinutes = minutes,
-                    startTime = minutesToLocalTime(start),
-                    endTime = minutesToLocalTime(end)
-                )
-            )
+            result.add(cursor to cursor + minutes)
+            cursor += minutes + breakMinutes
         }
         return result
     }
+
+    /** [intervals] 에서 [ranges] 와 겹치는 부분을 잘라낸 구간 목록 */
+    private fun subtractRanges(intervals: List<Pair<Int, Int>>, ranges: List<Pair<Int, Int>>): List<Pair<Int, Int>> =
+        ranges.fold(intervals) { remaining, (cutStart, cutEnd) ->
+            remaining.flatMap { (start, end) ->
+                listOf(start to minOf(end, cutStart), maxOf(start, cutEnd) to end).filter { (s, e) -> s < e }
+            }
+        }
 
     private fun minutesToLocalTime(totalMinutes: Int): LocalTime {
         val clamped = totalMinutes.coerceIn(0, DAY_MINUTES - 1)

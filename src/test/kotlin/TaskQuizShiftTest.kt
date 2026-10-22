@@ -7,6 +7,8 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.review.model.ReviewChoiceTable
 import com.github.nepyh.rooter.module.review.model.ReviewQuestionTable
 import com.github.nepyh.rooter.module.taskquiz.ShiftableTask
@@ -39,6 +41,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import org.jetbrains.exposed.v1.core.eq
 
 /**
  * 태스크 완료 퀴즈 불합격 시 남은 계획 밀기 테스트.
@@ -92,7 +95,9 @@ class TaskQuizShiftTest : StringSpec({
                 UserTable, UnavailableTimeTable, PlanBoardTable, DailyPlanTable, PlanTaskTable,
                 TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable,
                 // 틀린 문제를 복습 목록으로 복사한다 (users 를 지우면 cascade 로 함께 지워짐)
-                ReviewQuestionTable, ReviewChoiceTable
+                ReviewQuestionTable, ReviewChoiceTable,
+                // 할일 과목(plan_tasks.subject_id) FK 대상
+                SubjectTable
             )
         }
     }
@@ -149,6 +154,23 @@ class TaskQuizShiftTest : StringSpec({
     }
     fun timesOf(ids: Collection<Int>) = transaction(db) {
         ids.associateWith { id -> PlanTaskRow[id].let { "${it.startTime}~${it.endTime}" } }
+    }
+
+    "밀린 태스크 응답에도 과목과 보드 종류(isManual)가 실린다" {
+        val s = seed(attemptNumber = 1, others = listOf(Triple("다음 공부", "17:10~17:50", false)))
+        val subjectId = transaction(db) {
+            val subject = SubjectRow.find { SubjectTable.name eq "과학" }.firstOrNull() ?: SubjectRow.new { name = "과학" }
+            PlanTaskRow[s.otherTaskIds.getValue("다음 공부")].subjectId = subject.id
+            subject.id.value
+        }
+
+        val response = answerAllAndSubmit(s, correct = false)
+
+        response.shiftedTasks.single().let {
+            it.subjectId shouldBe subjectId
+            it.subjectName shouldBe "과학"
+            it.isManual shouldBe true // seed 보드는 시험일 없음
+        }
     }
 
     "불합격이라 재시도가 잡히면 오늘 아직 시작 안 한 미완료 태스크만 15분 뒤로 민다" {

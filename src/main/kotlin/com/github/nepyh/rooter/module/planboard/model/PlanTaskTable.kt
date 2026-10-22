@@ -19,6 +19,10 @@ object PlanTaskTable : IntIdTable("plan_tasks") {
     val postponedFromDate = date("postponed_from_date").nullable()
     // 대기·완료·실패 (rooter-ddl #36). 예전 is_completed·is_failed 를 대체한다
     val status = enumerationByName("status", 20, PlanTaskStatus::class).default(PlanTaskStatus.PENDING)
+    // 할일이 속한 과목 (DDL 의 fk_plan_tasks_subject 와 동일, on delete set null — rooter-ddl #32).
+    // null = 과목 미지정: 복습 태스크(QuizService)·재조정 태스크(FeedbackService)·챗봇 미루기로 파생된
+    // 할일(ChatService)과 컬럼 추가 전에 만든 행은 채우지 않는다 (이번 범위 밖)
+    val subjectId = reference("subject_id", SubjectTable, onDelete = ReferenceOption.SET_NULL).nullable()
 }
 
 class PlanTaskRow(id: EntityID<Int>) : IntEntity(id) {
@@ -31,4 +35,7 @@ class PlanTaskRow(id: EntityID<Int>) : IntEntity(id) {
     var estimatedMinutes by PlanTaskTable.estimatedMinutes
     var postponedFromDate by PlanTaskTable.postponedFromDate
     var status by PlanTaskTable.status
+
+    // id 로만 쓰고 과목명은 서비스가 벌크 조회로 붙인다 (참조 엔티티로 두면 행마다 SELECT 가 나간다)
+    var subjectId by PlanTaskTable.subjectId
 }

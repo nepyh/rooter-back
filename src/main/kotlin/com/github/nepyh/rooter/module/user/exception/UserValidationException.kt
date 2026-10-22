@@ -82,4 +82,14 @@ sealed class UserValidationException(
         "AVATAR_FILE_TOO_LARGE",
         "이미지 파일은 5MB를 초과할 수 없습니다."
     )
+    class WrongTimeFormatException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_TIME_FORMAT",
+        "시간 형식이 올바르지 않습니다. (HH:mm)"
+    )
+    class WrongSleepTimeException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_SLEEP_TIME",
+        "취침 시각과 기상 시각이 같을 수 없습니다."
+    )
 }
