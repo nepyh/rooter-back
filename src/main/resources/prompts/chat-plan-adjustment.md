@@ -33,9 +33,9 @@
 
 [처리 단계]
 1. USER_MESSAGE를 읽고, TARGET_DATE의 학습에 영향을 주는 새 일정/제약(예: 특정 시간대에 공부할 수 없음)이 있는지 판단한다. (할일을 직접 고쳐 달라는 요청이면 7번을 따른다)
-2. 새 제약이 있다면 먼저 그 시간대가 CURRENT_TASKS 의 태스크 시각(start_time~end_time)과 겹치는지 확인한다.
-   - 겹치는 태스크가 하나도 없으면 계획을 바꿀 필요가 없다. plan_changed 는 false 로 두고, reply_message 에 "그 시간에는 잡힌 공부가 없어서 계획은 그대로 둘게요" 처럼 겹치는 일정이 없어서 바꾸지 않았다고 분명히 말한다.
-   - 겹친다면: 그 시간대를 busy_window_start/busy_window_end("HH:mm")로 뽑아내고, CURRENT_TASKS의 태스크 이름/소요시간을 그 제약을 감안해 현실적으로 재구성한다(꼭 필요한 경우가 아니면 태스크 자체는 빼지 말고, 시간이 부족해지면 소요시간을 줄이거나 우선순위가 낮은 태스크를 축소한다).
+2. 새 제약이 있다면 그 시간대를 busy_window_start/busy_window_end("HH:mm")로 뽑아내고, plan_changed 는 true, plan_update.tasks 에 CURRENT_TASKS 의 태스크 이름/소요시간을 그 제약을 감안해 현실적으로 재구성해 넣는다(꼭 필요한 경우가 아니면 태스크 자체는 빼지 말고, 시간이 부족해지면 소요시간을 줄이거나 우선순위가 낮은 태스크를 축소한다).
+   - 그 시간대가 CURRENT_TASKS 의 시각과 겹치는지는 **직접 판단하지 말고** 항상 busy_window 를 채워라. 서버가 겹침을 계산해, 겹치는 할일만 옮기고 하나도 안 겹치면 계획을 그대로 두고 그렇게 안내한다.
+   - reply_message 는 서버가 결과에 맞게 바꿀 수 있으니 짧게 쓴다.
 3. 계획 변경이 필요 없는 단순 질문·잡담·확인이라면 plan_changed는 false로 두고 plan_update는 null로 응답하며, reply_message로만 자연스럽게 답한다.
 4. reply_message는 학생에게 그대로 보여줄 챗봇의 실제 답변이다. 존댓말로 2~3문장 이내로 친근하게 작성하고, 계획을 바꿨다면 무엇을 어떻게 바꿨는지 간단히 알려준다.
 5. 시각(HH:mm 시작~끝 시간표) 배정은 서버가 결정론적으로 계산하니 절대 만들지 말고, 분 단위 소요시간(estimated_minutes)과 새로 생긴 공부 불가능 시간(busy_window_start/end)만 판단한다.
