@@ -56,7 +56,8 @@ open class ChatLlmClient(private val appConfig: AppConfig) {
         currentTasksJson: String,
         chatHistoryJson: String,
         planBoardSummary: String,
-        userMessage: String
+        userMessage: String,
+        planSubjects: String = ""
     ): AiChatResult? {
         val prompt = PromptLoader.load(
             "prompts/chat-plan-adjustment.md",
@@ -67,6 +68,7 @@ open class ChatLlmClient(private val appConfig: AppConfig) {
             "CURRENT_TASKS_JSON" to currentTasksJson,
             "CHAT_HISTORY_JSON" to chatHistoryJson,
             "PLAN_BOARD" to planBoardSummary,
+            "PLAN_SUBJECTS" to planSubjects.ifBlank { "등록된 과목 없음" },
             "USER_MESSAGE" to userMessage
         )
 

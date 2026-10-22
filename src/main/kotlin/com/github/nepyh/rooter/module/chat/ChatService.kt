@@ -30,11 +30,22 @@ import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
+import com.github.nepyh.rooter.module.chat.dto.AiChatEdit
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
+import com.github.nepyh.rooter.module.taskquiz.MAX_ATTEMPTS
+import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
@@ -98,6 +109,15 @@ class ChatService(
             // 숫자(문항1=2)가 아니라 학생이 고른 보기 문구로 넘겨야 AI 가 뜻을 안다
             val studyStyleSummary = userStudyStyle(userId).summary()
 
+            // 할일 직접 편집(edits)용 — 할일 과목, 퀴즈 진행·확정 여부, 플랜보드 과목·학습 범위, 같은 날 다른 보드의 할일
+            val subjectNames = subjectNamesOf(pendingTasks)
+            val quizState = quizStateOf(pendingTasks.map { it.id.value })
+            val planSubjects = planSubjectsOf(board.id.value)
+            val otherBoardRanges = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+                .selectAll()
+                .where { (PlanBoardTable.userId eq userId) and (DailyPlanTable.planDate eq planDate) and (DailyPlanTable.id neq dailyPlanId) }
+                .map { PlanTaskScheduler.toMinutes(it[PlanTaskTable.startTime]) to PlanTaskScheduler.toMinutes(it[PlanTaskTable.endTime]) }
+
             val history = ChatTurnRow.find { ChatTurnTable.dailyPlanId eq dailyPlanId }
                 .orderBy(ChatTurnTable.createdAt to SortOrder.ASC)
                 .map { AiChatTurn(role = it.role, content = it.content) }
@@ -109,9 +129,25 @@ class ChatService(
                 pendingTasks = pendingTasks.map {
                     AiChatCurrentTask(
                         it.taskName, it.estimatedMinutes, it.startTime.toString(), it.endTime.toString(),
-                        can_postpone = !postponedFromPreviousDay(it.postponedFromDate, planDate)
+                        can_postpone = !postponedFromPreviousDay(it.postponedFromDate, planDate),
+                        subject_name = it.subjectNameFrom(subjectNames)
                     )
                 },
+                editable = pendingTasks.map {
+                    val state = quizState[it.id.value]
+                    EditableTask(
+                        id = it.id.value,
+                        name = it.taskName,
+                        start = PlanTaskScheduler.toMinutes(it.startTime),
+                        end = PlanTaskScheduler.toMinutes(it.endTime),
+                        subjectId = it.subjectId?.value,
+                        quizStarted = state != null,
+                        quizFinalized = state == true
+                    )
+                },
+                otherBoardRanges = otherBoardRanges,
+                planSubjectsText = planSubjects.joinToString("\n") { it.line },
+                subjectIdsByName = planSubjects.associate { it.subjectName to it.subjectId },
                 pendingExisting = pendingTasks.map {
                     ExistingPendingTask(
                         it.id.value, it.taskName,
@@ -144,12 +180,18 @@ class ChatService(
             currentTasksJson = json.encodeToString(context.pendingTasks),
             chatHistoryJson = json.encodeToString(context.history),
             planBoardSummary = context.planBoardSummary,
-            userMessage = trimmed
+            userMessage = trimmed,
+            planSubjects = context.planSubjectsText
         )
 
         // 다른 날로 미뤄 달라는 요청이면 그날 계획 재구성 대신 미루기만 한다
         result?.postpone?.takeIf { it.task_names.isNotEmpty() }?.let { postpone ->
             return postponeTasks(userId, dailyPlanId, trimmed, context, postpone, result.reply_message)
+        }
+
+        // 할일을 직접 줄이기·추가·삭제·옮기기 해 달라는 요청이면 그 동작만 검증해 적용한다 (#306)
+        result?.edits?.takeIf { it.isNotEmpty() }?.let { edits ->
+            return editTasks(dailyPlanId, trimmed, context, edits)
         }
 
         val update = result?.plan_update
@@ -264,6 +306,76 @@ class ChatService(
             )
         }
     }
+
+    /**
+     * 그날 할일을 직접 고친다 (줄이기·늘리기·추가·삭제·특정 시각으로 옮기기, #306).
+     * 시간이 실제로 비어 있는지는 [applyChatEdits] 가 판단하고, 답변은 AI 문장 대신 실제로 적용·거절한 결과로 만든다.
+     */
+    private suspend fun editTasks(dailyPlanId: Int, userMessage: String, context: ChatContext, edits: List<AiChatEdit>): ChatMessageResponse {
+        val planDate = LocalDate.parse(context.planDate)
+        // 할일을 둘 수 없는 시간: 수면·등교·불가능 시간(NICE 조회라 트랜잭션 밖) + 완료한 할일 + 같은 날 다른 보드의 할일
+        val unavailable = PlanTaskScheduler.buildUnavailableRanges(
+            schoolDataFetcher = schoolDataFetcher,
+            startDate = planDate,
+            endDate = planDate,
+            schoolId = context.schoolId,
+            classNumber = context.classNumber,
+            grade = context.grade,
+            customRows = context.customUnavailableRows,
+            sleepTime = context.sleepTime
+        )[planDate].orEmpty()
+        val day = EditDay(
+            blocked = unavailable + context.completedRanges + context.otherBoardRanges,
+            earliestMinute = earliestMinuteOn(planDate),
+            subjectIdsByName = context.subjectIdsByName
+        )
+        val edited = applyChatEdits(context.editable, edits, day)
+        val reply = (edited.applied + edited.rejected).joinToString(" ").ifBlank { PLAN_NOT_APPLIED_REPLY }
+        if (!edited.changed) {
+            return saveTurns(dailyPlanId, userMessage, reply, ChatMessageResponse(reply = reply, planChanged = false))
+        }
+
+        val before = context.editable.associateBy { it.id }
+        return newSuspendedTransaction {
+            val dailyPlan = DailyPlanRow[dailyPlanId]
+            edited.deletedIds.forEach { PlanTaskRow.findById(it)?.delete() }
+            edited.tasks.forEach { task ->
+                if (task.id == null) {
+                    PlanTaskRow.new {
+                        this.dailyPlan = dailyPlan
+                        taskName = task.name
+                        startTime = minutesToTime(task.start)
+                        endTime = minutesToTime(task.end)
+                        estimatedMinutes = task.minutes
+                        subjectId = task.subjectId?.let { EntityID(it, SubjectTable) }
+                    }
+                } else if (before[task.id] != task) {
+                    PlanTaskRow.findById(task.id)?.apply {
+                        startTime = minutesToTime(task.start)
+                        endTime = minutesToTime(task.end)
+                        estimatedMinutes = task.minutes // 퀴즈 문항 수·캘린더 합계 기준이라 바뀐 길이로 맞춘다
+                    }
+                }
+            }
+
+            val dayRows = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
+                .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
+                .toList()
+            val subjectNames = subjectNamesOf(dayRows)
+            val updatedTasks = dayRows.map { it.toResponse(dailyPlanId, context.planBoardId, context.planBoardIsManual, it.subjectNameFrom(subjectNames)) }
+            saveTurnsInTransaction(dailyPlanId, userMessage, reply)
+            ChatMessageResponse(reply = reply, planChanged = true, updatedTasks = updatedTasks)
+        }
+    }
+
+    /** 오늘 계획이면 지금 이후(10분 단위 올림)만, 다른 날이면 하루 전체 */
+    private fun earliestMinuteOn(planDate: LocalDate): Int =
+        if (planDate == todayInAppZone(clock)) {
+            val now = LocalTime.now(clock.withZone(APP_ZONE))
+            minOf(((now.hour * 60 + now.minute + 9) / 10) * 10, 24 * 60)
+        } else {
+            0
+        }
 
     /**
      * 할일을 다른 날로 미룬다. 옮길 날의 빈 시간(수면·등교·불가능 시간·그날의 모든 기존 할일을 피해서)에 순서대로 넣고,
@@ -474,5 +586,45 @@ private data class ChatContext(
     val planBoardId: Int,
     val planBoardIsManual: Boolean,
     val planBoardEndDate: LocalDate,
-    val pendingPostponedFrom: Map<Int, LocalDate?> // 미완료 태스크 id → 미뤄져 온 원래 날짜
+    val pendingPostponedFrom: Map<Int, LocalDate?>, // 미완료 태스크 id → 미뤄져 온 원래 날짜
+    val editable: List<EditableTask>, // 할일 직접 편집 대상 (미완료 할일 + 과목·퀴즈 상태)
+    val otherBoardRanges: List<Pair<Int, Int>>, // 같은 날 다른 플랜보드의 할일 시간 (편집할 때 겹치지 않게)
+    val planSubjectsText: String, // 프롬프트 <PLAN_SUBJECTS>
+    val subjectIdsByName: Map<String, Int> // 플랜보드 과목명 → 과목 id (추가하는 할일에 과목을 붙일 때)
 )
+
+private fun minutesToTime(minutes: Int): LocalTime =
+    if (minutes >= 24 * 60) LocalTime.of(23, 59) else LocalTime.of(minutes / 60, minutes % 60)
+
+/**
+ * 할일별 태스크 퀴즈 상태. 키가 없으면 퀴즈를 시작하지 않은 할일, false 면 진행 중, true 면 결과 확정
+ * (통과 / 마지막 차수까지 불합격 — PlanTaskService 의 확정 판정과 같은 기준). 트랜잭션 안에서 부른다.
+ */
+private fun quizStateOf(taskIds: List<Int>): Map<Int, Boolean> {
+    if (taskIds.isEmpty()) return emptyMap()
+    return TaskQuizAttemptTable.selectAll()
+        .where { TaskQuizAttemptTable.planTaskId inList taskIds }
+        .groupBy({ it[TaskQuizAttemptTable.planTaskId].value }, {
+            it[TaskQuizAttemptTable.passed] == true ||
+                (it[TaskQuizAttemptTable.passed] == false && it[TaskQuizAttemptTable.attemptNumber] >= MAX_ATTEMPTS)
+        })
+        .mapValues { (_, finalized) -> finalized.any { it } }
+}
+
+private class PlanSubjectLine(val subjectId: Int, val subjectName: String, val line: String)
+
+/** 프롬프트 <PLAN_SUBJECTS> 용 플랜보드 과목·학습 범위 ("- 과학 (교과서): 단원, 단원, ..."). 트랜잭션 안에서 부른다 */
+private fun planSubjectsOf(planBoardId: Int): List<PlanSubjectLine> =
+    PlanSubjectRow.find { PlanSubjectTable.planBoardId eq planBoardId }.mapNotNull { row ->
+        val textbook = row.textbook
+        val subject = SubjectRow.findById(textbook.subject.id.value) ?: return@mapNotNull null
+        val topics = orderedChaptersInRange(textbook, row.startChapter, row.endChapter).map { it.chapterName } +
+            listOfNotNull(row.customRangeText?.takeIf { it.isNotBlank() })
+        PlanSubjectLine(
+            subjectId = subject.id.value,
+            subjectName = subject.name.trim(),
+            line = "- ${subject.name} (${textbook.title}): ${topics.take(MAX_PROMPT_TOPICS).joinToString(", ")}"
+        )
+    }
+
+private const val MAX_PROMPT_TOPICS = 40
