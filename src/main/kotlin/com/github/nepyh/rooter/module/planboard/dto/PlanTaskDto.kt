@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.planboard.dto
 
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -12,7 +13,7 @@ data class PlanTaskResponse(
     val startTime: String,        // "17:30"
     val endTime: String,          // "19:30"
     val estimatedMinutes: Int,    // "2시간" 표시용
-    val isCompleted: Boolean,
+    val status: PlanTaskStatus,   // PENDING(대기) / DONE(완료) / FAILED(실패)
     // 할일 목록을 과목별로 분류해 제목으로 보여주기 위한 값. null = 과목 미지정(파생 할일·컬럼 추가 전 행)
     val subjectId: Int? = null,
     val subjectName: String? = null
@@ -52,14 +53,11 @@ data class PlanTaskCreateResponse(
 )
 
 @Serializable
-data class PlanTaskCompleteRequest(
-    val isCompleted: Boolean
-)
-
-@Serializable
 data class PlanTaskUpdateRequest(
     val taskName: String? = null,
     val startTime: String? = null,
     val endTime: String? = null,
-    val estimatedMinutes: Int? = null
+    val estimatedMinutes: Int? = null,
+    // 상태 변경. PENDING → FAILED(실패 처리), DONE → PENDING(완료 취소)만 된다. DONE 은 태스크 퀴즈 통과로만 된다
+    val status: PlanTaskStatus? = null
 )

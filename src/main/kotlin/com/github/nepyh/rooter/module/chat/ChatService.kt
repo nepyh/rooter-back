@@ -18,6 +18,7 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.userSleepTime
 import com.github.nepyh.rooter.module.planboard.userTaskRanges
@@ -89,11 +90,11 @@ class ChatService(
             val planDate = dailyPlanRow.planDate
             val board = dailyPlanRow.planBoard
 
-            // 이미 완료한 태스크는 재조정 대상이 아니다 — AI 에는 미완료 태스크만 보내고,
-            // 완료 태스크의 시간대는 재배치할 때 막아둔다.
+            // 이미 완료·실패한 태스크는 재조정 대상이 아니다 — AI 에는 대기 태스크만 보내고,
+            // 완료·실패 태스크의 시간대는 재배치할 때 막아둔다.
             val (completedTasks, pendingTasks) = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
                 .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
-                .partition { it.isCompleted }
+                .partition { it.status != PlanTaskStatus.PENDING }
 
             val profileRow = StudentProfileRow.find { StudentProfileTable.user eq userId }
                 .firstOrNull()
@@ -266,8 +267,10 @@ class ChatService(
 
                 val dailyPlan = DailyPlanRow[dailyPlanId]
                 val keptIds = rescheduled.mapNotNull { it.existingId }.toSet()
-                // AI 가 뺐거나 자리가 없어 못 넣은 미완료 태스크만 지운다 (완료 태스크는 건드리지 않음)
-                PlanTaskRow.find { (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq false) }
+                // AI 가 뺐거나 자리가 없어 못 넣은 대기 태스크만 지운다 (완료·실패 태스크는 건드리지 않음)
+                PlanTaskRow.find {
+                    (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.status eq PlanTaskStatus.PENDING)
+                }
                     .filter { it.id.value !in keptIds }
                     .forEach { it.delete() }
                 rescheduled.forEach { task ->
@@ -544,7 +547,7 @@ private fun PlanTaskRow.toResponse(dailyPlanId: Int, planBoardId: Int, isManual:
     startTime = startTime.toString(),
     endTime = endTime.toString(),
     estimatedMinutes = estimatedMinutes,
-    isCompleted = isCompleted,
+    status = status,
     subjectId = subjectId?.value,
     subjectName = subjectName
 )

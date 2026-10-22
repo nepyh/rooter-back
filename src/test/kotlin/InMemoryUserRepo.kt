@@ -1,3 +1,4 @@
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.user.UserRepo
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
@@ -54,7 +55,7 @@ class InMemoryUserRepo : UserRepo {
         val endTime: LocalTime,
     )
 
-    private data class StoredTask(val userId: Int, val planDate: LocalDate, val isCompleted: Boolean)
+    private data class StoredTask(val userId: Int, val planDate: LocalDate, val status: PlanTaskStatus)
 
     private val users = LinkedHashMap<Int, StoredUser>()
     private val profiles = mutableListOf<StoredProfile>()
@@ -65,8 +66,8 @@ class InMemoryUserRepo : UserRepo {
     private var nextUnavailableTimeId = 1
 
     /** planboard 쪽 데이터가 필요한 테스트는 직접 심는다 (getStreak 등). */
-    fun seedTask(userId: Int, planDate: LocalDate, isCompleted: Boolean) {
-        tasks += StoredTask(userId, planDate, isCompleted)
+    fun seedTask(userId: Int, planDate: LocalDate, status: PlanTaskStatus = PlanTaskStatus.PENDING) {
+        tasks += StoredTask(userId, planDate, status)
     }
 
     override fun insertUser(
@@ -232,6 +233,6 @@ class InMemoryUserRepo : UserRepo {
         }
 
     private fun StoredTask.toRow(): ResultRow = ResultRow.createAndFillValues(
-        mapOf(PlanTaskTable.isCompleted to isCompleted)
+        mapOf(PlanTaskTable.status to status)
     )
 }

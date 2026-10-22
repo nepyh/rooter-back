@@ -17,6 +17,7 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.isManualPlanBoard
 import com.github.nepyh.rooter.module.planboard.subjectNameFrom
@@ -104,14 +105,14 @@ class CalendarService {
                         startTime = row.startTime.toString(),
                         endTime = row.endTime.toString(),
                         estimatedMinutes = row.estimatedMinutes,
-                        isCompleted = row.isCompleted,
+                        status = row.status,
                         subjectId = row.subjectId?.value,
                         subjectName = row.subjectNameFrom(subjectNames)
                     )
                 }
 
             val totalTasks = tasks.size
-            val completedTasks = tasks.count { it.isCompleted }
+            val completedTasks = tasks.count { it.status == PlanTaskStatus.DONE }
             val completionRate = if (totalTasks == 0) 0.0 else (completedTasks.toDouble() / totalTasks) * 100
 
             val events = CalendarEventRow.find {

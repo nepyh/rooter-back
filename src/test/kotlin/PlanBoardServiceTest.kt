@@ -38,6 +38,7 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
@@ -1168,7 +1169,7 @@ class PlanBoardServiceTest : StringSpec({
         planTaskService.getBoardDailyPlan(userId, boardId, LocalDate.of(2026, 7, 20)).dailyPlanId shouldBe null
     }
 
-    "dailyPlanId: 태스크 수정·완료 응답에도 dailyPlanId 가 들어간다" {
+    "dailyPlanId: 태스크 수정(상태 변경 포함) 응답에도 dailyPlanId 가 들어간다" {
         val userId = seedUser("dp-update@test.com")
         val boardId = seedBoard(userId)
         planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
@@ -1176,8 +1177,9 @@ class PlanBoardServiceTest : StringSpec({
         val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
 
         planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).dailyPlanId shouldBe dailyPlanId
-        // 미완료 → 완료는 퀴즈 통과로만 되므로 (TASK_QUIZ_REQUIRED) 완료 API 응답은 같은 값(false)으로 확인한다
-        planTaskService.completeTask(userId, taskId, false).dailyPlanId shouldBe dailyPlanId
+        // 상태 변경(PENDING → FAILED)도 단건 응답이라 같은 값이 실린다
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(status = PlanTaskStatus.FAILED))
+            .dailyPlanId shouldBe dailyPlanId
     }
 
     // ---- 할일이 속한 플랜보드 (여러 보드가 섞이는 조회에서 보드 구분) ----
@@ -1200,15 +1202,15 @@ class PlanBoardServiceTest : StringSpec({
         planTaskService.getBoardDailyPlan(userId, boardB, date).tasks.map { it.planBoardId } shouldBe listOf(boardB)
     }
 
-    "planBoardId: 수정·완료 단건 응답에도 보드 id 가 들어간다" {
+    "planBoardId: 수정(상태 변경 포함) 단건 응답에도 보드 id 가 들어간다" {
         val userId = seedUser("task-planboard-update@test.com")
         val boardId = seedBoard(userId)
         planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
         val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
 
         planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).planBoardId shouldBe boardId
-        // 퀴즈 없이 완료로는 못 바꾸므로(#288) 지금 상태(미완료) 그대로 보내 단건 응답만 확인한다
-        planTaskService.completeTask(userId, taskId, false).planBoardId shouldBe boardId
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(status = PlanTaskStatus.FAILED))
+            .planBoardId shouldBe boardId
     }
 
     "isManual: 시험일 없는 보드(직접 만든 일정)의 할일만 true — 보드가 섞이는 목록·보드 일간 조회" {
@@ -1227,14 +1229,15 @@ class PlanBoardServiceTest : StringSpec({
         planTaskService.getBoardDailyPlan(userId, examBoard, date).tasks.single().isManual shouldBe false
     }
 
-    "isManual: 수정·완료 단건 응답에도 보드 기준으로 들어간다" {
+    "isManual: 수정(상태 변경 포함) 단건 응답에도 보드 기준으로 들어간다" {
         val userId = seedUser("task-manual-update@test.com")
         val examBoard = seedBoard(userId, examDate = LocalDate.of(2026, 8, 1))
         planTaskService.createTask(userId, taskRequest(planBoardId = examBoard))
         val taskId = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks.single().id
 
         planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수정됨")).isManual shouldBe false
-        planTaskService.completeTask(userId, taskId, false).isManual shouldBe false
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(status = PlanTaskStatus.FAILED))
+            .isManual shouldBe false
     }
 
     // ---- 할일의 과목 귀속 (목록을 과목별로 분류하기 위한 제목) ----
@@ -1258,11 +1261,11 @@ class PlanBoardServiceTest : StringSpec({
             task.subjectName shouldBe "수학"
         }
 
-        // 수정·완료 단건 응답에도 같은 과목이 실린다
+        // 수정(상태 변경 포함) 단건 응답에도 같은 과목이 실린다
         val taskId = planTaskService.getDailyPlan(userId, date).tasks.single().id
         planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "수학 2단원 복습")).subjectName shouldBe "수학"
-        // 퀴즈 없이 완료로는 못 바꾸므로(#288) 지금 상태(미완료) 그대로 보내 단건 응답만 확인한다
-        planTaskService.completeTask(userId, taskId, false).subjectId shouldBe subjectId
+        planTaskService.updateTask(userId, taskId, PlanTaskUpdateRequest(status = PlanTaskStatus.FAILED))
+            .subjectId shouldBe subjectId
     }
 
     "createTask: 교과서를 안 보내면 과목이 붙지 않는다 (null)" {

@@ -5,6 +5,7 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
@@ -128,7 +129,7 @@ class TaskQuizShiftTest : StringSpec({
         fun task(name: String, range: String, completed: Boolean) = PlanTaskRow.new {
             this.dailyPlan = dailyPlan; taskName = name
             startTime = LocalTime.parse(range.substringBefore("~")); endTime = LocalTime.parse(range.substringAfter("~"))
-            estimatedMinutes = 30; isCompleted = completed
+            estimatedMinutes = 30; status = if (completed) PlanTaskStatus.DONE else PlanTaskStatus.PENDING
         }.id.value
         val quizTask = task("퀴즈 태스크", "16:00~17:00", false)
         val otherIds = others.associate { (name, range, completed) -> name to task(name, range, completed) }

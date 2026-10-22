@@ -22,6 +22,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
@@ -145,7 +146,7 @@ class ChatServiceTest : StringSpec({
 
     fun seedTask(
         dailyPlanId: Int, name: String, start: LocalTime, end: LocalTime, completed: Boolean,
-        postponedFrom: LocalDate? = null
+        postponedFrom: LocalDate? = null, failed: Boolean = false
     ): Int = transaction(db) {
         PlanTaskRow.new {
             postponedFromDate = postponedFrom
@@ -154,7 +155,11 @@ class ChatServiceTest : StringSpec({
             startTime = start
             endTime = end
             estimatedMinutes = (end.toSecondOfDay() - start.toSecondOfDay()) / 60
-            isCompleted = completed
+            status = when {
+                failed -> PlanTaskStatus.FAILED
+                completed -> PlanTaskStatus.DONE
+                else -> PlanTaskStatus.PENDING
+            }
         }.id.value
     }
 
@@ -179,7 +184,7 @@ class ChatServiceTest : StringSpec({
         // 완료 태스크는 id·시각·완료 상태가 그대로 유지된다
         transaction(db) {
             val done = PlanTaskRow.findById(doneId)!!
-            done.isCompleted shouldBe true
+            done.status shouldBe PlanTaskStatus.DONE
             done.startTime shouldBe LocalTime.of(17, 0)
             done.endTime shouldBe LocalTime.of(18, 0)
             PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.count() shouldBe 3L
@@ -187,13 +192,39 @@ class ChatServiceTest : StringSpec({
 
         // 새 일정(busy window) 없이 소요시간만 줄였으므로 겹치는 게 없다 → 남은 태스크는 원래 시각에서 길이만 바뀐다
         response.planChanged shouldBe true
-        response.updatedTasks!!.map { Triple(it.taskName, it.startTime, it.isCompleted) } shouldBe listOf(
-            Triple("완료한 태스크", "17:00", true),
-            Triple("남은 태스크1", "18:10", false),
-            Triple("남은 태스크2", "19:10", false)
+        response.updatedTasks!!.map { Triple(it.taskName, it.startTime, it.status) } shouldBe listOf(
+            Triple("완료한 태스크", "17:00", PlanTaskStatus.DONE),
+            Triple("남은 태스크1", "18:10", PlanTaskStatus.PENDING),
+            Triple("남은 태스크2", "19:10", PlanTaskStatus.PENDING)
         )
         response.updatedTasks!!.map { it.endTime } shouldBe listOf("18:00", "18:50", "19:50")
     }
+    "채팅으로 계획을 재조정해도 실패한 태스크는 AI 에 보내지 않고, 지우거나 옮기지 않는다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val failedId = seedTask(dailyPlanId, "실패한 태스크", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false, failed = true)
+        seedTask(dailyPlanId, "남은 태스크", LocalTime.of(18, 10), LocalTime.of(19, 0), completed = false)
+
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "줄였어요",
+                plan_changed = true,
+                plan_update = AiChatPlanUpdate(tasks = listOf(AiChatTask("남은 태스크", 40)))
+            )
+        )
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "10분 줄여줘")
+
+        llm.lastCurrentTasksJson!! shouldNotContain "실패한 태스크"
+        transaction(db) {
+            val failed = PlanTaskRow.findById(failedId)!!
+            failed.status shouldBe PlanTaskStatus.FAILED
+            failed.startTime shouldBe LocalTime.of(17, 0)
+        }
+        response.updatedTasks!!.map { it.taskName to it.status } shouldBe listOf(
+            "실패한 태스크" to PlanTaskStatus.FAILED,
+            "남은 태스크" to PlanTaskStatus.PENDING
+        )
+    }
+
     "AI 에 보내는 현재 태스크에 시작·끝 시각이 들어간다 (새 일정과 겹치는지 판단용)" {
         val (userId, dailyPlanId) = seedDailyPlan()
         seedTask(dailyPlanId, "수학", LocalTime.of(16, 10), LocalTime.of(16, 50), completed = false)

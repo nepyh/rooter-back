@@ -38,7 +38,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 | # | 마일스톤 | 진행 | 상태 |
 |---|---|---|---|
-| M1 | 플랜보드 코어 | 10/16 | doing |
+| M1 | 플랜보드 코어 | 11/17 | doing |
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 7/10 | doing |
@@ -83,11 +83,12 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-009 DB 통합 테스트 (`PlanBoardServiceTest`, 18케이스) — `a5680c7`
 - [ ] todo RB-010 scheduler DAO 전환 — 미지시 항목
 - [x] done RB-130 퀴즈로 결과가 확정된 할일(통과 / 3차까지 불합격)은 완료 상태 변경 금지 (#244) — `completeTask` 에서 400 `TASK_FINALIZED`, 같은 값은 성공. PR #248 머지 (10-11) (`35f894b`·`b1bc488`) · `./gradlew test` 전체 통과 · 프론트는 `completeTask` 를 정의만 하고 호출하지 않아 영향 없음. DB 변경 없음
-- [ ] doing RB-137 퀴즈를 통과하지 않은 할일은 `PATCH .../complete` 로 완료 금지 (#259, #231 미구현분) — `completeTask` 에서 미완료 → 완료면 400 `TASK_QUIZ_REQUIRED`, 완료 취소·같은 값은 성공. PR #288 open (`8746c39`·`abecd4a`) · `./gradlew test` 229건 0 실패 · 프론트 `main` 은 호출하지 않아 영향 없음. DB 변경 없음. #259 의 원인(퀴즈 통과 / 10-07 이전 빌드의 체크박스 완료)은 운영 DB 미조회로 확정 안 함
+- [x] done RB-137 퀴즈를 통과하지 않은 할일은 `PATCH .../complete` 로 완료 금지 (#259, #231 미구현분) — `completeTask` 에서 미완료 → 완료면 400 `TASK_QUIZ_REQUIRED`, 완료 취소·같은 값은 성공. PR #288 머지 (10-20, 리뷰 전 선머지) (`8746c39`·`abecd4a`) · `./gradlew test` 229건 0 실패 · 프론트 `main` 은 퀴즈 통과 뒤에만 `completeTask(id, true)` 를 불러(같은 값이라 성공) 영향 없음. DB 변경 없음. #259 의 원인(퀴즈 통과 / 10-07 이전 빌드의 체크박스 완료)은 운영 DB 미조회로 확정 안 함
 - [ ] doing RB-142 할일에 과목 귀속 (#270, 프론트 요청 "할일 목록 과목별 분류") — `plan_tasks.subject_id`(rooter-ddl #32, on delete set null). 수동 생성 `POST /plan-tasks` 는 선택 `textbookId` 로 과목 유도(없는 교과서 400 `INVALID_TEXTBOOK`), AI 계획 생성은 LLM `subject_name` 이 요청 과목명과 맞을 때만 저장(못 맞추면 null). 할일 조회 3종·수정·완료 응답과 계획 생성 응답에 `subjectId`·`subjectName`(목록은 과목명 벌크 조회) — nyung517 커밋 5개를 main 위로 옮김 + 생성 응답 과목, PR #293 open · `./gradlew test` 269건 0 실패 · 실제 DeepSeek 2회 42개 할일 모두 과목 매칭 · 복습·재조정·챗봇 미루기로 파생된 할일은 null (범위 밖) · **DDL 선행: 운영 DB 에 `plan_tasks.subject_id` 적용 확인 후 머지**
 - [ ] doing RB-143 할일에 플랜보드 id 추가 (#294, 프론트 홈이 보드마다 `daily`·`subjects` 를 다시 부르던 워터폴 제거) — `PlanTaskResponse.planBoardId` 추가. `plan_tasks` 에 컬럼을 만들지 않고 `daily_plans.plan_board_id` 조인으로 채워 **DDL 변경 없음**(rooter-ddl 수정 불필요, 목록 조회는 기존 innerJoin 그대로라 추가 쿼리 0). 값 채운 지점: 할일 조회 3종·수정·완료·캘린더 하루 요약·챗봇 재조정·미루기·퀴즈 실패 재배치. PR #295 open (`a83f449`·`873a45c`) · `./gradlew test` 271건 0 실패(신규 2건, 3 skipped) · Dockerfile 이미지 빌드 성공(러너 39566704992) · `isManual` 은 이슈 개요에만 있고 스펙·할일에서 빠져 제외(서버에 AI/수동 구분 컬럼 없음 — 프론트는 `plan_boards.examDate === null` 로 보드 단위 판단) · 챗봇 응답의 `subjectId`·`subjectName` 미채움은 #293 범위 밖이라 그대로
 - [ ] doing RB-144 할일 응답에 `isManual`(직접 만든 일정 보드의 할일인지, #294 개요에 있었으나 #295 에서 빠짐) + 과목 누락 3곳 채움 — `isManualPlanBoard`(시험일 없음 = 직접 만든 보드, 프론트 `board.examDate === null` 과 같은 규칙, DDL 없음)로 할일 조회 3종·수정·완료·캘린더·챗봇·퀴즈 재배치에 채움. 캘린더 하루 요약·챗봇 재조정·미루기·퀴즈 재배치 응답은 #293 이후에도 `subjectId`·`subjectName` 이 항상 null 이던 것을 `PlanTaskSubjects.kt` 공용 벌크 조회로 채움 — 이슈 #296, PR #297 open · `./gradlew test` 280건 0 실패 · 프론트는 `getBoardInfo` 워터폴 대신 응답 값 사용 가능
 - [ ] doing RB-147 할일 수정(PATCH) 보강 (#302, 할일 위치·길이 조정용) — 시간만 바꾸고 `estimatedMinutes` 를 안 보내면 바뀐 길이로 자동 맞춤(태스크 퀴즈 문항 수·캘린더 합계 기준이라), 퀴즈로 결과가 확정된 할일의 시간·예상 시간 변경은 400 `TASK_FINALIZED`(이름 변경·같은 값 재전송은 허용) — 이슈 #302, PR #303 open · `./gradlew test` 291건 0 실패 · 다른 날로 옮기기·겹침 검사·자정 넘김(RB-077)은 범위 밖
+- [ ] doing RB-138 할일 상태를 `status`(PENDING/DONE/FAILED) 하나로 통합 (#258) — `is_completed`·`is_failed` 를 `plan_tasks.status` 로 교체, 실패 처리·완료 취소는 `PATCH /plan-tasks/{taskId}` 의 `status` 로 (`/fail` 제거), →DONE 은 퀴즈 통과로만 (`TASK_QUIZ_REQUIRED`). 퀴즈 히스토리는 실패 처리한 할일의 채점 전 차수를 `MISSED` 로. 응답·API 에 남아 있던 `isCompleted`(`PlanTaskResponse`·예전 앱 호환용)와 `PATCH .../complete` 도 제거해 상태는 `status` 하나로만 오감 — 프론트 `main` 이 아직 `isCompleted`·`/complete` 를 쓰므로 프론트 PR 동반 필요. PR #283 open (`f9a4f4f`·`a465bbd`, #288 병합 후 `changeStatus` 가 그 규칙을 포함, 10-22 main 재병합 `59e8456` 으로 RB-147 의 시간 변경 금지에 실패 할일 포함) · `./gradlew test` 317건 0 실패 · rooter-ddl #36 / PR #37 머지됨(10-20, status 추가 1단계) — **운영 DB 적용 확인 후 머지** · 구 컬럼 삭제는 배포 후 rooter-ddl 다음 PR
 
 ## M2. 컨벤션·구조 정비
 

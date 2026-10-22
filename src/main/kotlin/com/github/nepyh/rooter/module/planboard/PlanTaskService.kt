@@ -14,6 +14,7 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
@@ -23,11 +24,11 @@ import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.core.between
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.core.greaterEq
-import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -181,30 +182,21 @@ class PlanTaskService {
     }
 
     /**
-     * 태스크 완료 처리/취소 (본인 플랜보드 소유권 확인).
-     * 태스크 퀴즈로 결과가 확정된 태스크(통과, 또는 마지막 차수까지 불합격)는 완료 상태를 바꿀 수 없다.
-     * 미완료 → 완료는 태스크 퀴즈 통과로만 일어나므로 여기서는 막는다 (TASK_QUIZ_REQUIRED). 완료 취소는 그대로 된다.
-     * 지금 상태와 같은 값을 보내는 건 막지 않는다.
+     * 사용자가 바꿀 수 있는 상태 전환만 허용한다. 지금과 같은 상태면 아무것도 하지 않는다.
+     * - PENDING → FAILED: 실패 처리
+     * - DONE → PENDING: 완료 취소. 태스크 퀴즈를 통과해 완료된 할일은 TASK_FINALIZED
+     * - → DONE: 태스크 퀴즈 통과(TaskQuizService.submitQuiz)로만 되므로 TASK_QUIZ_REQUIRED (#259)
+     * - FAILED → 그 외, DONE → FAILED: TASK_FINALIZED
      */
-    fun completeTask(userId: Int, taskId: Int, isCompleted: Boolean): PlanTaskResponse = transaction {
-        val task = PlanTaskRow.findById(taskId)
-            ?: throw PlanTaskNotFoundException()
-
-        if (task.dailyPlan.planBoard.user.id.value != userId) {
-            throw PlanTaskNotFoundException()
+    private fun PlanTaskRow.changeStatus(target: PlanTaskStatus) {
+        if (status == target) return
+        when {
+            status == PlanTaskStatus.FAILED -> throw PlanTaskValidationException.TaskFinalizedException()
+            target == PlanTaskStatus.DONE -> throw PlanTaskValidationException.TaskQuizRequiredException()
+            status == PlanTaskStatus.DONE && (target == PlanTaskStatus.FAILED || isFinalizedByQuiz(id.value)) ->
+                throw PlanTaskValidationException.TaskFinalizedException()
         }
-
-        if (task.isCompleted != isCompleted && isFinalizedByQuiz(taskId)) {
-            throw PlanTaskValidationException.TaskFinalizedException()
-        }
-
-        // 퀴즈를 통과하면 TaskQuizService.submitQuiz 가 완료로 바꾼다. 여기서 완료로 바꾸면 퀴즈 없이 잔디가 채워진다 (#259)
-        if (isCompleted && !task.isCompleted) {
-            throw PlanTaskValidationException.TaskQuizRequiredException()
-        }
-
-        task.isCompleted = isCompleted
-        task.toResponse(planBoardIdOf(task), isManualPlanBoard(task.dailyPlan.planBoard.examDate), subjectNameOf(task))
+        status = target
     }
 
     /** 태스크 퀴즈를 통과했거나, 마지막 차수(MAX_ATTEMPTS)까지 불합격해 결과가 확정된 태스크인지 */
@@ -216,7 +208,7 @@ class PlanTaskService {
                 )
         }.empty()
 
-    /** taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정 (본인 플랜보드 소유권 확인) */
+    /** taskName/startTime/endTime/estimatedMinutes/status 중 전달된 필드만 수정 (본인 플랜보드 소유권 확인) */
     fun updateTask(userId: Int, taskId: Int, request: PlanTaskUpdateRequest): PlanTaskResponse = transaction {
         val task = PlanTaskRow.findById(taskId)
             ?: throw PlanTaskNotFoundException()
@@ -246,16 +238,18 @@ class PlanTaskService {
             ?: if (timeChanged) Duration.between(newStartTime, newEndTime).toMinutes().toInt() else task.estimatedMinutes
         if (newEstimatedMinutes < 1) throw PlanTaskValidationException.InvalidEstimatedMinutesException()
 
-        // 퀴즈로 결과가 확정된 할일은 지난 기록이라 시간·예상 시간을 못 바꾼다 (완료 상태 변경과 같은 규칙, completeTask).
+        // 결과가 확정된 할일(실패 처리 · 퀴즈 통과 / 마지막 차수까지 불합격)은 지난 기록이라 시간·예상 시간을 못 바꾼다.
         // 이름 변경과 지금과 같은 값을 다시 보내는 것은 막지 않는다 — 프론트는 수정 시 모든 필드를 함께 보낸다
         val scheduleChanged = newStartTime != task.startTime || newEndTime != task.endTime || newEstimatedMinutes != task.estimatedMinutes
-        if (scheduleChanged && isFinalizedByQuiz(taskId)) {
+        if (scheduleChanged && (task.status == PlanTaskStatus.FAILED || isFinalizedByQuiz(taskId))) {
             throw PlanTaskValidationException.TaskFinalizedException()
         }
 
         task.startTime = newStartTime
         task.endTime = newEndTime
         task.estimatedMinutes = newEstimatedMinutes
+
+        request.status?.let { task.changeStatus(it) }
 
         task.toResponse(planBoardIdOf(task), isManualPlanBoard(task.dailyPlan.planBoard.examDate), subjectNameOf(task))
     }
@@ -282,7 +276,7 @@ class PlanTaskService {
         startTime = startTime.format(timeFormat),
         endTime = endTime.format(timeFormat),
         estimatedMinutes = estimatedMinutes,
-        isCompleted = isCompleted,
+        status = status,
         subjectId = readValues[PlanTaskTable.subjectId]?.value,
         subjectName = subjectName
     )

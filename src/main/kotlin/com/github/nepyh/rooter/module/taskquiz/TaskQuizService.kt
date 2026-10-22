@@ -6,6 +6,7 @@ import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.review.ReviewChoiceDraft
 import com.github.nepyh.rooter.module.review.copyWrongQuestionToReview
 import com.github.nepyh.rooter.module.review.model.ReviewSource
@@ -298,15 +299,15 @@ class TaskQuizService(
         var shiftedTasks = emptyList<PlanTaskResponse>()
 
         if (passed) {
-            // 퀴즈 통과 = 완료 확인 자체이므로 체크 여부와 무관하게 완료 처리
-            PlanTaskRow[planTaskId].isCompleted = true
+            // 퀴즈 통과 = 완료 확인 자체이므로 체크 여부와 무관하게 완료 처리. 그사이 실패 처리한 태스크는 실패로 둔다
+            PlanTaskRow[planTaskId].takeUnless { it.status == PlanTaskStatus.FAILED }?.status = PlanTaskStatus.DONE
         } else if (attemptNumber < MAX_ATTEMPTS) {
             retryScheduled = true // 스케줄러가 RETRY_DELAY_MINUTES 뒤 다음 attempt를 자동 생성
             // 재시도 퀴즈를 풀 시간만큼 오늘 남은 계획을 뒤로 민다 (퀴즈와 다음 공부가 겹치지 않게)
             shiftedTasks = shiftRemainingTasksForRetry(planTaskId)
         } else {
-            // 최초 1회 + 재시도 2회 모두 실패 -> 미완료로 확정 (잔디 색에 반영됨)
-            PlanTaskRow[planTaskId].isCompleted = false
+            // 최초 1회 + 재시도 2회 모두 실패 -> 실패로 확정 (status=FAILED, 잔디에는 미완료로 반영됨)
+            PlanTaskRow[planTaskId].status = PlanTaskStatus.FAILED
             taskInvalidated = true
         }
 
@@ -342,7 +343,7 @@ class TaskQuizService(
         val nowMinutes = now.hour * 60 + now.minute
         val dayTasks = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlan.id }.toList()
         val (toShift, stay) = dayTasks.partition {
-            it.id.value != planTaskId && !it.isCompleted && PlanTaskScheduler.toMinutes(it.startTime) >= nowMinutes
+            it.id.value != planTaskId && it.status == PlanTaskStatus.PENDING && PlanTaskScheduler.toMinutes(it.startTime) >= nowMinutes
         }
         if (toShift.isEmpty()) return emptyList()
 
@@ -374,7 +375,7 @@ class TaskQuizService(
                 startTime = row.startTime.toString(),
                 endTime = row.endTime.toString(),
                 estimatedMinutes = row.estimatedMinutes,
-                isCompleted = row.isCompleted,
+                status = row.status,
                 subjectId = row.subjectId?.value,
                 subjectName = row.subjectNameFrom(subjectNames)
             )

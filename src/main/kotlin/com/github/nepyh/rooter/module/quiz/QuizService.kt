@@ -4,6 +4,7 @@ import com.github.nepyh.rooter.common.QUIZ_CHAPTER_NAME_MAX
 import com.github.nepyh.rooter.common.matchQuizChapter
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.module.planboard.SleepTime
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.planBoardSubjects
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
@@ -105,7 +106,7 @@ class QuizService(
             val planBoardId = dailyPlanRow[DailyPlanTable.planBoardId].value
             val chapterNames = chapterNamesForPlanBoard(planBoardId)
             val completedTasks = PlanTaskRow.find {
-                (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.isCompleted eq true)
+                (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.status eq PlanTaskStatus.DONE)
             }.toList()
             val completedTaskNames = completedTasks.map { it.taskName }
 

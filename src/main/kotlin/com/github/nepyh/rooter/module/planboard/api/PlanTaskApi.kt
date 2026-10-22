@@ -5,7 +5,6 @@ import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
-import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCompleteRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
@@ -152,54 +151,6 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
             }
         }
 
-        patch("{taskId}/complete") {
-            val taskId = call.parameters["taskId"]?.toIntOrNull()
-                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
-            val request = call.receive<PlanTaskCompleteRequest>()
-
-            val response = planTaskService.completeTask(call.userId(), taskId, request.isCompleted)
-            call.respond(HttpStatusCode.OK, response)
-        }.describe {
-            tag("PlanTask")
-            summary = "태스크 완료 처리/취소"
-            description = "isCompleted를 true/false로 보내 완료 상태를 토글. 본인 플랜보드 소유 태스크만 가능. " +
-                "태스크 퀴즈로 결과가 확정된 태스크(통과했거나, 3차까지 모두 불합격)는 완료 상태를 바꿀 수 없음 (지금과 같은 값은 그대로 성공). " +
-                "미완료 → 완료(isCompleted=true)는 태스크 퀴즈 통과(POST .../quiz/submit)로만 되고 이 API 로는 거부됨 — 사실상 완료 취소 전용"
-            parameters {
-                path("taskId") {
-                    description = "태스크 ID"
-                    required = true
-                    schema = jsonSchema<Int>()
-                }
-            }
-            requestBody {
-                ContentType.Application.Json {
-                    schema = jsonSchema<PlanTaskCompleteRequest>()
-                }
-            }
-            responses {
-                HttpStatusCode.OK {
-                    description = "처리 성공"
-                    ContentType.Application.Json {
-                        schema = jsonSchema<PlanTaskResponse>()
-                    }
-                }
-                HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 퀴즈로 결과가 확정된 태스크의 완료 상태 변경 (code=TASK_FINALIZED), " +
-                        "또는 미완료 태스크를 완료로 변경 (code=TASK_QUIZ_REQUIRED)"
-                }
-                HttpStatusCode.Unauthorized {
-                    description = "인증되지 않음"
-                }
-                HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 태스크"
-                }
-                HttpStatusCode.InternalServerError {
-                    description = "서버 오류"
-                }
-            }
-        }
-
         patch("{taskId}") {
             val taskId = call.parameters["taskId"]?.toIntOrNull()
                 ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
@@ -209,9 +160,12 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
             call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("PlanTask")
-            summary = "태스크 수정"
-            description = "taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정. 본인 플랜보드 소유 태스크만 가능. " +
-                "startTime·endTime 을 바꾸고 estimatedMinutes 를 안 보내면 예상 시간은 바뀐 길이(끝−시작, 분)로 자동으로 맞춘다 (태스크 퀴즈 문항 수·캘린더 공부 시간 기준)"
+            summary = "태스크 수정 · 상태 변경"
+            description = "taskName/startTime/endTime/estimatedMinutes/status 중 전달된 필드만 수정. 본인 플랜보드 소유 태스크만 가능. " +
+                "startTime·endTime 을 바꾸고 estimatedMinutes 를 안 보내면 예상 시간은 바뀐 길이(끝−시작, 분)로 자동으로 맞춘다 (태스크 퀴즈 문항 수·캘린더 공부 시간 기준). " +
+                "status 는 사용자가 할 수 있는 전환만 됨: PENDING → FAILED(실패 처리), DONE → PENDING(완료 취소, 태스크 퀴즈로 완료된 태스크는 불가). " +
+                "DONE 은 태스크 퀴즈 통과(POST .../quiz/submit)로만 됨. FAILED 는 되돌릴 수 없고, 실패한 태스크에는 태스크 퀴즈가 자동 생성되지 않음. " +
+                "지금과 같은 status 는 그대로 성공. 하나라도 거부되면 다른 필드도 바뀌지 않음"
             parameters {
                 path("taskId") {
                     description = "태스크 ID"
@@ -234,7 +188,9 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 태스크 이름 오류 (code=INVALID_TASK_NAME), 시간 형식 오류 (code=INVALID_TIME_FORMAT), " +
                         "종료 시간이 시작 시간보다 빠르거나 같음 (code=INVALID_TIME_RANGE), 예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES), " +
-                        "또는 퀴즈로 결과가 확정된(통과 / 마지막 차수까지 불합격) 할일의 시간·예상 시간 변경 (code=TASK_FINALIZED, 이름 변경·같은 값 재전송은 허용)"
+                        "status 를 DONE 으로 변경 (code=TASK_QUIZ_REQUIRED), " +
+                        "또는 결과가 확정된 태스크(실패 처리 · 퀴즈 통과 / 마지막 차수까지 불합격)의 status·시간·예상 시간 변경이나 DONE → FAILED " +
+                        "(code=TASK_FINALIZED, 이름 변경·같은 값 재전송은 허용)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
