@@ -11,6 +11,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
+import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 
 /**
@@ -68,12 +69,16 @@ class NiceApiClient(
     // NICE 호출마다 서비스·걸린 시간·행 수를 남긴다 (캐시가 실제로 NICE 호출을 얼마나 줄이는지 운영 로그로 확인용)
     private suspend fun <T> fetchPage(service: String, params: Map<String, String>, serializer: KSerializer<T>): NicePage<T> {
         val startedAt = System.nanoTime()
-        val result = runCatching { requestPage(service, params, serializer) }
-        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
-        result
-            .onSuccess { logger.info("NICE {} {}ms rows={}", service, elapsedMs, it.rows.size) }
-            .onFailure { logger.warn("NICE {} {}ms 실패: {}", service, elapsedMs, it.message) }
-        return result.getOrThrow()
+        fun elapsedMs() = (System.nanoTime() - startedAt) / 1_000_000
+        try {
+            return requestPage(service, params, serializer)
+                .also { logger.info("NICE {} {}ms rows={}", service, elapsedMs(), it.rows.size) }
+        } catch (e: CancellationException) {
+            throw e // 요청이 취소된 것(앱 연결 끊김 등)은 NICE 실패가 아니라 로그 없이 그대로 올린다
+        } catch (e: Exception) {
+            logger.warn("NICE {} {}ms 실패: {}", service, elapsedMs(), e.message)
+            throw e
+        }
     }
 
     private suspend fun <T> requestPage(service: String, params: Map<String, String>, serializer: KSerializer<T>): NicePage<T> {

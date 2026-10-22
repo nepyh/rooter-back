@@ -14,6 +14,8 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -149,7 +151,7 @@ class SchoolDataFetcherCacheTest : StringSpec({
         nice.timetableRanges().size shouldBe 2
     }
 
-    "아직 등록 전일 수 있는 미래 날짜의 빈 시간표는 1시간마다, 내용 있는 날짜는 12시간마다 다시 본다" {
+    "아직 등록 전일 수 있는 미래 평일의 빈 시간표는 1시간마다, 내용 있는 날짜·주말은 12시간마다 다시 본다" {
         val (nice, clock, fetcher) = setup()
         nice.emptyFrom = d(26) // 다음 주(26일~) 시간표 미등록
         fetcher.periods(d(22), d(27))
@@ -159,9 +161,45 @@ class SchoolDataFetcherCacheTest : StringSpec({
         fetcher.periods(d(22), d(27))
         fetcher.awaitCacheRefreshes()
 
-        // 내용 있는 22·23일은 그대로 두고, 빈 미래 날짜(24~27일, 주말 포함)만 다시 받는다
-        nice.timetableRanges() shouldBe listOf("20261022" to "20261027", "20261024" to "20261027")
+        // 내용 있는 22·23일과 원래 비어 있는 주말(24·25일)은 그대로 두고, 빈 미래 평일(26·27일)만 다시 받는다
+        nice.timetableRanges() shouldBe listOf("20261022" to "20261027", "20261026" to "20261027")
         fetcher.periods(d(22), d(27)) shouldBe mapOf(d(22) to 6, d(23) to 6, d(26) to 6, d(27) to 6)
+    }
+
+    "주말은 원래 시간표가 없으니, 1시간이 지나도 다시 부르지 않는다" {
+        val (nice, clock, fetcher) = setup()
+        fetcher.periods(d(19), d(25)) // 월~일, 토·일(24·25일)은 빈 시간표
+
+        clock.advance(Duration.ofHours(1))
+        fetcher.periods(d(19), d(25))
+        fetcher.awaitCacheRefreshes()
+
+        nice.timetableRanges().size shouldBe 1
+    }
+
+    "갱신할 날짜가 떨어져 있으면 구간마다 따로 받아, 사이의 멀쩡한 날짜는 다시 받지 않는다" {
+        val (nice, clock, fetcher) = setup()
+        fetcher.periods(d(19), d(20))
+        fetcher.periods(d(26), d(27))
+        clock.advance(Duration.ofHours(11))
+        fetcher.periods(d(21), d(25)) // 사이 날짜는 11시간 뒤에 받아서 아직 신선함
+
+        clock.advance(Duration.ofHours(1)) // 19·20·26·27 일만 12시간이 지남
+        fetcher.periods(d(19), d(27))
+        fetcher.awaitCacheRefreshes()
+
+        nice.timetableRanges().drop(3) shouldBe listOf("20261019" to "20261020", "20261026" to "20261027")
+    }
+
+    "여러 요청이 동시에 와도 같은 날짜는 한 번만 갱신한다" {
+        val (nice, clock, fetcher) = setup()
+        fetcher.periods(d(19), d(23))
+        clock.advance(Duration.ofHours(12))
+
+        coroutineScope { repeat(5) { launch { fetcher.periods(d(19), d(23)) } } }
+        fetcher.awaitCacheRefreshes()
+
+        nice.timetableRanges().size shouldBe 2 // 처음 1번 + 갱신 1번
     }
 
     "백그라운드 갱신이 실패하면 옛 값을 그대로 쓰고, 다음 요청 때 다시 갱신한다" {

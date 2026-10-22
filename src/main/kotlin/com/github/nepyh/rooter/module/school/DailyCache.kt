@@ -24,7 +24,8 @@ import java.util.concurrent.ConcurrentHashMap
  * 요청이 오면 캐시에 없는 날짜만 모아 그 범위로 NICE 를 한 번 부른다.
  *
  * - 캐시에 없는 날짜: 그 자리에서 받아 저장 (결과가 없는 날도 [emptyValue] 로 저장해 매번 다시 묻지 않는다)
- * - [refreshAfter] 가 지난 날짜: 저장된 값을 바로 돌려주고, 뒤에서 그 범위를 한 번에 다시 받아 바꾼다.
+ * - [refreshAfter] 가 지난 날짜: 저장된 값을 바로 돌려주고, 뒤에서 **연속된 날짜 구간마다** 한 번씩 다시 받아 바꾼다
+ *   (떨어진 날짜를 한 범위로 묶으면 사이의 멀쩡한 날짜까지 다시 받게 된다).
  *   같은 날짜를 동시에 여러 번 갱신하지 않고, 갱신이 실패하면 옛 값을 그대로 둔다
  * - 실패는 저장하지 않는다 — [get] 의 fetch 가 예외를 던지면 저장 전에 그대로 올라간다
  * - [expireAfterAccess] 동안 아무도 조회하지 않은 날짜는 지운다
@@ -90,21 +91,26 @@ internal class DailyCache<G : Any, V : Any>(
     }
 
     private fun refreshInBackground(group: G, staleDates: List<LocalDate>, fetch: suspend (LocalDate, LocalDate) -> Map<LocalDate, V>) {
-        // 이미 다른 요청이 갱신 중인 날짜는 빼고, 남은 날짜를 감싸는 범위로 한 번만 다시 받는다
+        // 이미 다른 요청이 갱신 중인 날짜는 빼고, 남은 날짜를 연속 구간으로 나눠 구간마다 한 번씩 다시 받는다
         val claimed = staleDates.filter { refreshing.add(Key(group, it)) }
         if (claimed.isEmpty()) return
-        val from = claimed.first()
-        val to = claimed.last()
 
         // 바로 끝나는 갱신이 목록에 남지 않게, 등록을 먼저 하고 시작한다
         val job = refreshScope.launch(start = CoroutineStart.LAZY) {
             try {
-                store(group, from, to, fetch(from, to))
-                logger.info("NICE 캐시 {} 백그라운드 갱신 {}~{}", name, from, to)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.warn("NICE 캐시 {} 백그라운드 갱신 실패 {}~{} — 옛 값 유지: {}", name, from, to, e.message)
+                // 구간을 순서대로 받는다 (한꺼번에 동시에 부르면 NICE 호출이 몰린다). 한 구간이 실패해도 나머지는 받는다
+                for (run in consecutiveRuns(claimed)) {
+                    val from = run.first()
+                    val to = run.last()
+                    try {
+                        store(group, from, to, fetch(from, to))
+                        logger.info("NICE 캐시 {} 백그라운드 갱신 {}~{}", name, from, to)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.warn("NICE 캐시 {} 백그라운드 갱신 실패 {}~{} — 옛 값 유지: {}", name, from, to, e.message)
+                    }
+                }
             } finally {
                 claimed.forEach { refreshing.remove(Key(group, it)) }
             }
@@ -113,6 +119,14 @@ internal class DailyCache<G : Any, V : Any>(
         job.invokeOnCompletion { refreshJobs -= job }
         job.start()
     }
+
+    /** 날짜 목록(오름차순)을 하루씩 이어지는 구간들로 나눈다. 예: 19,20,26,27 → [19,20], [26,27] */
+    private fun consecutiveRuns(dates: List<LocalDate>): List<List<LocalDate>> =
+        dates.fold(mutableListOf<MutableList<LocalDate>>()) { runs, date ->
+            val last = runs.lastOrNull()
+            if (last != null && last.last().plusDays(1) == date) last += date else runs += mutableListOf(date)
+            runs
+        }
 
     private fun datesBetween(from: LocalDate, to: LocalDate): List<LocalDate> =
         generateSequence(from) { it.plusDays(1) }.takeWhile { !it.isAfter(to) }.toList()
