@@ -5,6 +5,7 @@ import com.github.nepyh.rooter.common.matchQuizChapter
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
+import com.github.nepyh.rooter.module.planboard.userRoutine
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.review.ReviewChoiceDraft
@@ -39,8 +40,6 @@ import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestionRow
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizQuestionTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
-import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
-import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.and
@@ -348,9 +347,10 @@ class TaskQuizService(
         if (toShift.isEmpty()) return emptyList()
 
         val weekday = dailyPlan.planDate.dayOfWeek.value
-        val unavailable = UnavailableTimeRow.find { UnavailableTimeTable.user eq dailyPlan.planBoard.user.id }
-            .filter { it.dayOfWeek.code.toInt() == weekday }
-            .map { PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime) }
+        // 사용자가 직접 등록한 시간(학원·식사 등)만 피한다. 식사 기본값까지 막으면 15분 밀기가 저녁 뒤로 1시간 넘게 튄다
+        val unavailable = userRoutine(dailyPlan.planBoard.user.id.value).slots
+            .filter { it.dayOfWeek == weekday }
+            .map { it.start to it.end }
         val stayRanges = stay.map { PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime) }
 
         val shifted = shiftLaterTasks(

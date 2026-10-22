@@ -25,8 +25,6 @@ import com.github.nepyh.rooter.module.studystyle.StudyStyleProfile
 import com.github.nepyh.rooter.module.studystyle.userStudyStyle
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
-import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
-import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -55,8 +53,7 @@ private data class PlanContext(
     val grade: Int,
     val schoolId: String?,
     val classNumber: Int?,
-    val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>,
-    val sleepTime: SleepTime,
+    val routine: UserRoutine,
     val existingTaskRanges: Map<LocalDate, List<Pair<Int, Int>>>,
     val studyStyle: StudyStyleProfile
 )
@@ -101,11 +98,6 @@ class PlanGenerationService(
             val tiers = resolved.map { (_, subject) -> subject.subjectName to levelTierFor(userId, subject.subjectName) }.toMap()
             val profileRow = StudentProfileRow.find { StudentProfileTable.user eq userId }
                 .firstOrNull()
-            val customRows = UnavailableTimeRow.find { UnavailableTimeTable.user eq userId }
-                .map {
-                    it.dayOfWeek.code.toInt() to
-                        (PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime))
-                }
 
             // 이미 있는 할일(다른 플랜보드 것 포함)과 겹치지 않게 배치하려고 기간 안의 할일 시간을 날짜별로 모은다
             val existingTaskRanges = userTaskRanges(userId, startDate, endDate)
@@ -116,8 +108,7 @@ class PlanGenerationService(
                 grade = profileRow?.grade ?: 2,
                 schoolId = profileRow?.schoolId,
                 classNumber = profileRow?.classNumber,
-                customUnavailableRows = customRows,
-                sleepTime = userSleepTime(userId),
+                routine = userRoutine(userId),
                 existingTaskRanges = existingTaskRanges,
                 studyStyle = userStudyStyle(userId)
             )
@@ -133,8 +124,7 @@ class PlanGenerationService(
             schoolId = planContext.schoolId,
             classNumber = planContext.classNumber,
             grade = planContext.grade,
-            customRows = planContext.customUnavailableRows,
-            sleepTime = planContext.sleepTime
+            routine = planContext.routine
         )
         val baseUnavailableRanges = PlanTaskScheduler.withExistingTasks(
             typedUnavailableRanges.mapValues { (_, ranges) -> ranges.map { it.start to it.end } },
@@ -144,7 +134,7 @@ class PlanGenerationService(
         val placementByDate = typedUnavailableRanges.mapValues { (_, ranges) ->
             planContext.studyStyle.placementOptions(
                 isSchoolDay = ranges.any { it.type == UnavailableType.SCHOOL },
-                sleepTime = planContext.sleepTime
+                sleepTime = planContext.routine.sleepTime
             )
         }
         // 오늘부터 시작하는 계획이면 지금 이전 시간에는 배치하지 않는다 (챗봇 재조정과 같은 기준, 10분 단위 올림).

@@ -50,6 +50,7 @@ import com.github.nepyh.rooter.module.leveltest.model.LevelTestResultTable
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
+import com.github.nepyh.rooter.module.user.model.UnavailableKind
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.user.model.UserRow
@@ -567,7 +568,7 @@ class PlanBoardServiceTest : StringSpec({
         transaction(db) { PlanBoardRow.find { PlanBoardTable.userId eq userId }.count() } shouldBe 0L
     }
 
-    "busy-times: 등교일은 하교 전·취침·등록한 불가능 시간을, 주말은 취침·기존 할일만 막고 나머지를 빈 시간으로 준다" {
+    "busy-times: 등교일은 하교 전·귀가·취침·식사·등록한 불가능 시간을, 주말은 취침·식사·기존 할일만 막고 나머지를 빈 시간으로 준다" {
         val userId = seedUser("busy@test.com")
         val otherUserId = seedUser("busy-other@test.com")
         transaction(db) {
@@ -585,20 +586,22 @@ class PlanBoardServiceTest : StringSpec({
 
         val (friday, saturday) = response.days
         friday.isSchoolDay shouldBe true
+        // 귀가 기본 40분, 식사 기본값(아침 기상 후 30분·점심 12:00~13:00·저녁 18:00~19:00)
         friday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf(
-            "SLEEP 00:00~06:30", "SCHOOL 00:00~16:30", "UNAVAILABLE 18:00~20:00", "SLEEP 23:00~24:00"
+            "SLEEP 00:00~06:30", "SCHOOL 00:00~16:30", "MEAL 06:30~07:00", "MEAL 12:00~13:00", "COMMUTE 16:30~17:10",
+            "MEAL 18:00~19:00", "UNAVAILABLE 18:00~20:00", "SLEEP 23:00~24:00"
         )
-        friday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:30~18:00", "20:00~23:00")
+        friday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("17:10~18:00", "20:00~23:00")
 
         saturday.isSchoolDay shouldBe false
         saturday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf(
-            "SLEEP 00:00~06:30", "TASK 10:00~11:00", "SLEEP 23:00~24:00"
+            "SLEEP 00:00~06:30", "MEAL 06:30~07:00", "TASK 10:00~11:00", "MEAL 12:00~13:00", "MEAL 18:00~19:00", "SLEEP 23:00~24:00"
         )
-        saturday.busyTimes[1].let {
+        saturday.busyTimes[2].let {
             it.taskName shouldBe "영어 단어"
             it.planBoardId shouldBe boardId
         }
-        saturday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("06:30~10:00", "11:00~23:00")
+        saturday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("07:00~10:00", "11:00~12:00", "13:00~18:00", "19:00~23:00")
     }
 
     "busy-times: 사용자가 저장한 수면시간(01:00 취침, 07:30 기상)을 SLEEP 으로 주고 기본 23:00~06:30 은 막지 않는다" {
@@ -608,8 +611,35 @@ class PlanBoardServiceTest : StringSpec({
         // 2026-07-04 토요일
         val saturday = BusyTimeService(noNiceSchoolDataFetcher()).getBusyTimes(userId, LocalDate.of(2026, 7, 4), LocalDate.of(2026, 7, 4)).days.single()
 
-        saturday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf("SLEEP 01:00~07:30")
-        saturday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("00:00~01:00", "07:30~24:00")
+        // 아침 기본값은 저장한 기상 시각(07:30) 기준
+        saturday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf(
+            "SLEEP 01:00~07:30", "MEAL 07:30~08:00", "MEAL 12:00~13:00", "MEAL 18:00~19:00"
+        )
+        saturday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("00:00~01:00", "08:00~12:00", "13:00~18:00", "19:00~24:00")
+    }
+
+    "busy-times: 저장한 귀가 시간과 그 요일에 등록한 식사를 기본값 대신 쓴다" {
+        val userId = seedUser("busy-routine@test.com")
+        transaction(db) {
+            UserRow[userId].commuteMinutes = 20
+            UnavailableTimeRow.new {
+                user = UserRow[userId]; dayOfWeek = DayOfWeek.FRIDAY; kind = UnavailableKind.DINNER; label = "가족 저녁"
+                startTime = LocalTime.of(19, 0); endTime = LocalTime.of(19, 40)
+            }
+            UnavailableTimeRow.new {
+                user = UserRow[userId]; dayOfWeek = DayOfWeek.FRIDAY; kind = UnavailableKind.ACADEMY
+                startTime = LocalTime.of(20, 0); endTime = LocalTime.of(21, 0)
+            }
+        }
+
+        // 2026-07-03 금요일(등교일, 하교 16:30)
+        val friday = BusyTimeService(noNiceSchoolDataFetcher()).getBusyTimes(userId, LocalDate.of(2026, 7, 3), LocalDate.of(2026, 7, 3)).days.single()
+
+        friday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf(
+            "SLEEP 00:00~06:30", "SCHOOL 00:00~16:30", "MEAL 06:30~07:00", "MEAL 12:00~13:00", "COMMUTE 16:30~16:50",
+            "MEAL 19:00~19:40", "UNAVAILABLE 20:00~21:00", "SLEEP 23:00~24:00"
+        )
+        friday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:50~19:00", "19:40~20:00", "21:00~23:00")
     }
 
     "busy-times: endDate 가 startDate 보다 빠르거나 31일을 넘으면 InvalidDateRangeException" {
@@ -739,10 +769,11 @@ class PlanBoardServiceTest : StringSpec({
 
         response.dailyPlans.first().date shouldBe "2026-10-05"
         response.dailyPlans.first().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("20:30~21:30", "21:40~22:10")
-        response.dailyPlans[1].tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:30~17:30", "17:40~18:10") // 내일은 그대로
-        // 오늘은 20:30~23:00 (150분), 내일(화)은 하교 16:30~23:00 (390분)
+        // 내일은 평소대로 — 귀가 뒤 17:10~18:00 엔 60분 할일이 안 들어가 저녁(18:00~19:00) 뒤로
+        response.dailyPlans[1].tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("19:00~20:00", "20:10~20:40")
+        // 오늘은 20:30~23:00 (150분), 내일(화)은 귀가 뒤 17:10~18:00 (50분) + 저녁 뒤 19:00~23:00 (240분)
         llm.contexts.single().contains("- day 1 (2026-10-05 월, 오늘이라 지금 20:28 이후만): 공부 가능 150분, 가장 긴 연속 150분, 권장 90~150분") shouldBe true
-        llm.contexts.single().contains("- day 2 (2026-10-06 화): 공부 가능 390분, 가장 긴 연속 390분, 권장 90~150분") shouldBe true
+        llm.contexts.single().contains("- day 2 (2026-10-06 화): 공부 가능 290분, 가장 긴 연속 240분, 권장 90~150분") shouldBe true
     }
 
     "plan-generation: 주말 오후 4시에 오늘부터 만들면 아침(06:30)이 아니라 지금(16:00)부터 잡힌다" {
@@ -754,9 +785,9 @@ class PlanBoardServiceTest : StringSpec({
     "plan-generation: 내일부터 시작하는 계획은 지금 시각과 상관없이 평소대로 잡히고, 공부 가능 시간도 하루 전체 기준이다" {
         val (response, llm) = generateToday("now-tomorrow@test.com", kstClock("2026-10-05T20:28"), startDate = "2026-10-06")
 
-        response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:30~17:30", "17:40~18:10")
+        response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("19:00~20:00", "20:10~20:40")
         llm.contexts.single().contains("오늘이라 지금") shouldBe false
-        llm.contexts.single().contains("- day 1 (2026-10-06 화): 공부 가능 390분, 가장 긴 연속 390분, 권장 90~150분") shouldBe true
+        llm.contexts.single().contains("- day 1 (2026-10-06 화): 공부 가능 290분, 가장 긴 연속 240분, 권장 90~150분") shouldBe true
     }
 
     "plan-generation: 밤 늦게(22:50) 만들어 오늘 남은 시간이 부족하면 오늘 할일은 비고, 다음 날부터 잡힌다" {
@@ -772,7 +803,7 @@ class PlanBoardServiceTest : StringSpec({
         val math = seedTextbook(seedSubject("수학"), title = "수학")
         val math1 = seedChapter(math, 1)
         transaction(db) {
-            // 수요일 학원 18:00~20:00 → 하교 16:30~23:00 이 16:30~18:00(90분) + 20:00~23:00(180분) 으로 쪼개진다
+            // 수요일 학원 18:00~20:00 → 귀가 뒤 17:10~23:00 이 17:10~18:00(50분) + 20:00~23:00(180분) 으로 쪼개진다 (저녁 18:00~19:00 은 학원에 포함)
             UnavailableTimeRow.new {
                 user = UserRow[userId]; dayOfWeek = DayOfWeek.WEDNESDAY
                 startTime = LocalTime.of(18, 0); endTime = LocalTime.of(20, 0)
@@ -788,9 +819,10 @@ class PlanBoardServiceTest : StringSpec({
 
         val context = llm.contexts.single()
         context.contains("할일 사이에는 쉬는 시간 10분이 들어간다") shouldBe true
-        context.contains("- day 1 (2026-07-01 수): 공부 가능 270분, 가장 긴 연속 180분, 권장 90~150분") shouldBe true
-        context.contains("- day 2 (2026-07-02 목): 공부 가능 390분, 가장 긴 연속 390분, 권장 90~150분") shouldBe true
-        context.contains("- day 4 (2026-07-04 토): 공부 가능 990분, 가장 긴 연속 990분, 권장 150~240분") shouldBe true
+        context.contains("- day 1 (2026-07-01 수): 공부 가능 230분, 가장 긴 연속 180분, 권장 90~150분") shouldBe true
+        // 목: 17:10~18:00 + 19:00~23:00, 토: 아침·점심·저녁 사이 07:00~12:00 + 13:00~18:00 + 19:00~23:00
+        context.contains("- day 2 (2026-07-02 목): 공부 가능 290분, 가장 긴 연속 240분, 권장 90~150분") shouldBe true
+        context.contains("- day 4 (2026-07-04 토): 공부 가능 840분, 가장 긴 연속 300분, 권장 150~240분") shouldBe true
     }
 
     "plan-generation: 벼락치기 모드면 하루 권장 공부량을 1.5배로 알려준다" {
@@ -804,8 +836,8 @@ class PlanBoardServiceTest : StringSpec({
             PlanGenerationRequest(title = "벼락치기", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-03", daysRemaining = 2, isCramMode = true)
         )
 
-        llm.contexts.single().contains("- day 1 (2026-07-03 금): 공부 가능 390분, 가장 긴 연속 390분, 권장 135~225분") shouldBe true
-        llm.contexts.single().contains("- day 2 (2026-07-04 토): 공부 가능 990분, 가장 긴 연속 990분, 권장 225~360분") shouldBe true
+        llm.contexts.single().contains("- day 1 (2026-07-03 금): 공부 가능 290분, 가장 긴 연속 240분, 권장 135~225분") shouldBe true
+        llm.contexts.single().contains("- day 2 (2026-07-04 토): 공부 가능 840분, 가장 긴 연속 300분, 권장 225~360분") shouldBe true
     }
 
     "addSubject: 정상 등록되면 subjectName/textbookTitle 이 채워진다" {

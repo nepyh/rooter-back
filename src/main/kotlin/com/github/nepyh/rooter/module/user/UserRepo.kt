@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module.user
 
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
+import com.github.nepyh.rooter.module.user.model.UnavailableKind
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.ResultRow
@@ -34,6 +35,8 @@ interface UserRepo {
 
     fun updateSleepTime(userId: Int, sleepTime: LocalTime, wakeTime: LocalTime): UserRow
 
+    fun updateCommuteMinutes(userId: Int, commuteMinutes: Int): UserRow
+
     fun findStudentProfileByUserId(userId: Int): StudentProfileRow?
 
     fun findUnavailableTimesByUserId(userId: Int): List<UnavailableTimeRow>
@@ -51,7 +54,9 @@ interface UserRepo {
         userId: Int,
         dayOfWeek: DayOfWeek,
         startTime: LocalTime,
-        endTime: LocalTime
+        endTime: LocalTime,
+        kind: UnavailableKind,
+        label: String?
     ): UnavailableTimeRow
 
     /** 삭제된 row 수를 반환한다. 0이면 존재하지 않거나 본인 소유가 아님. */

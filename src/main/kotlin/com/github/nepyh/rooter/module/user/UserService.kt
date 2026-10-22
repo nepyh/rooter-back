@@ -1,10 +1,13 @@
 package com.github.nepyh.rooter.module.user
 
 import com.github.nepyh.rooter.module.planboard.SleepTime
+import com.github.nepyh.rooter.module.planboard.UserRoutine
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.storage.FileStorage
 import com.github.nepyh.rooter.module.storage.toUploadableFile
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
+import com.github.nepyh.rooter.module.user.dto.CommuteTimeRequest
+import com.github.nepyh.rooter.module.user.dto.CommuteTimeResponse
 import com.github.nepyh.rooter.module.user.dto.SleepTimeRequest
 import com.github.nepyh.rooter.module.user.dto.SleepTimeResponse
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
@@ -23,6 +26,7 @@ import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundExce
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
+import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import io.ktor.http.content.PartData
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
@@ -41,6 +45,8 @@ private val AVATAR_CONTENT_TYPES = mapOf(
     "webp" to "image/webp",
 )
 private const val MAX_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024L // 5MB
+private const val MAX_UNAVAILABLE_LABEL_LENGTH = 50
+private const val MAX_COMMUTE_MINUTES = 180 // users.commute_minutes check (0~180)
 
 // STRICT: 기본(SMART)이면 "24:00" 이 00:00 으로 통과한다
 private val HOUR_MINUTE_FORMAT = DateTimeFormatter.ofPattern("HH:mm").withResolverStyle(ResolverStyle.STRICT)
@@ -163,14 +169,7 @@ class UserService(
     fun getUnavailableTimes(id: Int): List<UnavailableTimeResponse> {
         userRepo.findUserById(id) ?: throw UserNotFoundException()
 
-        return userRepo.findUnavailableTimesByUserId(id).map { row ->
-            UnavailableTimeResponse(
-                id = row.id.value,
-                dayOfWeek = row.dayOfWeek,
-                startTime = row.startTime.toString(),
-                endTime = row.endTime.toString()
-            )
-        }
+        return userRepo.findUnavailableTimesByUserId(id).map { it.toResponse() }
     }
 
     fun createStudentProfile(userId: Int, request: StudentProfileRequest): StudentProfileResponse {
@@ -260,21 +259,32 @@ class UserService(
         } catch (_: IllegalArgumentException) {
             throw UserValidationException.WrongDayOfWeekException()
         }
+        // 이름은 앞뒤 공백을 떼고, 비어 있으면 저장하지 않는다 (user_unavailable_times.label varchar(50))
+        val label = request.label?.trim()?.takeIf { it.isNotEmpty() }
+        if (label != null && label.length > MAX_UNAVAILABLE_LABEL_LENGTH) {
+            throw UserValidationException.WrongUnavailableLabelException()
+        }
 
         val row = userRepo.insertUnavailableTime(
             userId = userId,
             dayOfWeek = dayOfWeek,
             startTime = LocalTime.parse(request.startTime),
-            endTime = LocalTime.parse(request.endTime)
+            endTime = LocalTime.parse(request.endTime),
+            kind = request.kind,
+            label = label
         )
 
-        return UnavailableTimeResponse(
-            id = row.id.value,
-            dayOfWeek = row.dayOfWeek,
-            startTime = row.startTime.toString(),
-            endTime = row.endTime.toString()
-        )
+        return row.toResponse()
     }
+
+    private fun UnavailableTimeRow.toResponse() = UnavailableTimeResponse(
+        id = id.value,
+        dayOfWeek = dayOfWeek,
+        startTime = startTime.toString(),
+        endTime = endTime.toString(),
+        kind = kind,
+        label = label
+    )
 
     /** 저장한 수면시간. 저장하지 않았으면 기본값(23:00 / 06:30)과 isDefault=true */
     fun getSleepTime(userId: Int): SleepTimeResponse {
@@ -293,6 +303,26 @@ class UserService(
         val user = userRepo.updateSleepTime(userId, sleepTime, wakeTime)
         return sleepTimeResponseOf(user.sleepTime, user.wakeTime)
     }
+
+    /** 저장한 하교 후 귀가 시간. 저장하지 않았으면 기본값(40분)과 isDefault=true */
+    fun getCommuteTime(userId: Int): CommuteTimeResponse {
+        val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
+        return commuteTimeResponseOf(user.commuteMinutes?.toInt())
+    }
+
+    /** 하교 후 귀가 시간 저장 (0~180분). 0 이면 하교하자마자 할일을 잡을 수 있다 */
+    fun updateCommuteTime(userId: Int, request: CommuteTimeRequest): CommuteTimeResponse {
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+        if (request.commuteMinutes !in 0..MAX_COMMUTE_MINUTES) throw UserValidationException.WrongCommuteMinutesException()
+
+        val user = userRepo.updateCommuteMinutes(userId, request.commuteMinutes)
+        return commuteTimeResponseOf(user.commuteMinutes?.toInt())
+    }
+
+    private fun commuteTimeResponseOf(commuteMinutes: Int?): CommuteTimeResponse = CommuteTimeResponse(
+        commuteMinutes = commuteMinutes ?: UserRoutine.DEFAULT_COMMUTE_MINUTES,
+        isDefault = commuteMinutes == null
+    )
 
     private fun parseHourMinute(value: String): LocalTime =
         runCatching { LocalTime.parse(value, HOUR_MINUTE_FORMAT) }.getOrElse { throw UserValidationException.WrongTimeFormatException() }

@@ -18,6 +18,8 @@ object UnavailableTimeTable : IntIdTable("user_unavailable_times") {
     )
     val startTime = time("start_time")
     val endTime = time("end_time")
+    val kind = enumerationByName("kind", 20, UnavailableKind::class).default(UnavailableKind.CUSTOM)
+    val label = varchar("label", 50).nullable()
 }
 
 class UnavailableTimeRow(id: EntityID<Int>) : IntEntity(id) {
@@ -27,4 +29,6 @@ class UnavailableTimeRow(id: EntityID<Int>) : IntEntity(id) {
     var dayOfWeek by UnavailableTimeTable.dayOfWeek
     var startTime by UnavailableTimeTable.startTime
     var endTime by UnavailableTimeTable.endTime
+    var kind by UnavailableTimeTable.kind
+    var label by UnavailableTimeTable.label
 }

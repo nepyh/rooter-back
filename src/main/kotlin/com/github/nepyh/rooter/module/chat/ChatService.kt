@@ -12,7 +12,7 @@ import com.github.nepyh.rooter.module.chat.exception.DailyPlanNotFoundException
 import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
-import com.github.nepyh.rooter.module.planboard.SleepTime
+import com.github.nepyh.rooter.module.planboard.UserRoutine
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
@@ -20,7 +20,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
-import com.github.nepyh.rooter.module.planboard.userSleepTime
+import com.github.nepyh.rooter.module.planboard.userRoutine
 import com.github.nepyh.rooter.module.planboard.userTaskRanges
 import com.github.nepyh.rooter.module.planboard.isManualPlanBoard
 import com.github.nepyh.rooter.module.planboard.subjectNameFrom
@@ -29,8 +29,6 @@ import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.studystyle.userStudyStyle
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
-import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
-import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.chat.dto.AiChatEdit
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
@@ -101,11 +99,6 @@ class ChatService(
             val grade = profileRow?.grade ?: 2
             val schoolId = profileRow?.schoolId
             val classNumber = profileRow?.classNumber
-            val customUnavailableRows = UnavailableTimeRow.find { UnavailableTimeTable.user eq userId }
-                .map {
-                    it.dayOfWeek.code.toInt() to
-                        (PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime))
-                }
 
             // 숫자(문항1=2)가 아니라 학생이 고른 보기 문구로 넘겨야 AI 가 뜻을 안다
             val studyStyleSummary = userStudyStyle(userId).summary()
@@ -161,8 +154,7 @@ class ChatService(
                 grade = grade,
                 schoolId = schoolId,
                 classNumber = classNumber,
-                customUnavailableRows = customUnavailableRows,
-                sleepTime = userSleepTime(userId),
+                routine = userRoutine(userId),
                 studyStyleSummary = studyStyleSummary,
                 planBoardSummary = planBoardSummaryOf(board.title, board.startDate, board.endDate, board.examDate, planDate),
                 history = history,
@@ -213,8 +205,7 @@ class ChatService(
                 schoolId = context.schoolId,
                 classNumber = context.classNumber,
                 grade = context.grade,
-                customRows = context.customUnavailableRows,
-                sleepTime = context.sleepTime
+                routine = context.routine
             )[planDate].orEmpty()
             val extraBusy = if (update!!.busy_window_start != null && update.busy_window_end != null) {
                 listOf(
@@ -324,8 +315,7 @@ class ChatService(
             schoolId = context.schoolId,
             classNumber = context.classNumber,
             grade = context.grade,
-            customRows = context.customUnavailableRows,
-            sleepTime = context.sleepTime
+            routine = context.routine
         )[planDate].orEmpty()
         val day = EditDay(
             blocked = unavailable + context.completedRanges + context.otherBoardRanges,
@@ -424,8 +414,7 @@ class ChatService(
                 schoolId = context.schoolId,
                 classNumber = context.classNumber,
                 grade = context.grade,
-                customRows = context.customUnavailableRows,
-                sleepTime = context.sleepTime
+                routine = context.routine
             ),
             existingOnTarget
         )[toDate].orEmpty()
@@ -581,8 +570,7 @@ private data class ChatContext(
     val grade: Int,
     val schoolId: String?,
     val classNumber: Int?,
-    val customUnavailableRows: List<Pair<Int, Pair<Int, Int>>>,
-    val sleepTime: SleepTime,
+    val routine: UserRoutine,
     val studyStyleSummary: String,
     val planBoardSummary: String,
     val history: List<AiChatTurn>,

@@ -2,7 +2,11 @@ import com.github.nepyh.rooter.module.planboard.PlacedTask
 import com.github.nepyh.rooter.module.planboard.PlacementOptions
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
 import com.github.nepyh.rooter.module.planboard.placementOptions
+import com.github.nepyh.rooter.module.planboard.RoutineSlot
 import com.github.nepyh.rooter.module.planboard.SleepTime
+import com.github.nepyh.rooter.module.planboard.TypedRange
+import com.github.nepyh.rooter.module.planboard.UnavailableType
+import com.github.nepyh.rooter.module.planboard.UserRoutine
 import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.studystyle.BestTime
@@ -10,6 +14,7 @@ import com.github.nepyh.rooter.module.studystyle.Distraction
 import com.github.nepyh.rooter.module.studystyle.FocusSpan
 import com.github.nepyh.rooter.module.studystyle.StudyStyleProfile
 import com.github.nepyh.rooter.module.studystyle.VolatileTime
+import com.github.nepyh.rooter.module.user.model.UnavailableKind
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.shouldBe
@@ -31,9 +36,11 @@ class PlanTaskSchedulerTest : StringSpec({
 
     val monday = LocalDate.of(2026, 9, 28)
     val sunday = LocalDate.of(2026, 10, 4)
-    val mondayEvening = 1 to ((18 * 60) to (20 * 60)) // 월 18:00~20:00
+    val mondayEvening = RoutineSlot(1, UnavailableKind.ACADEMY, 18 * 60, 20 * 60) // 월 18:00~20:00 학원
+    // 기본 식사: 아침 기상(06:30) 후 30분, 점심 12:00~13:00, 저녁 18:00~19:00
+    val defaultMeals = listOf((6 * 60 + 30) to (7 * 60), (12 * 60) to (13 * 60), (18 * 60) to (19 * 60))
 
-    suspend fun buildRanges(customRows: List<Pair<Int, Pair<Int, Int>>>, sleepTime: SleepTime = SleepTime.DEFAULT) =
+    suspend fun buildRanges(slots: List<RoutineSlot>, sleepTime: SleepTime = SleepTime.DEFAULT, commuteMinutes: Int = UserRoutine.DEFAULT_COMMUTE_MINUTES) =
         PlanTaskScheduler.buildUnavailableRanges(
             schoolDataFetcher = schoolDataFetcher,
             startDate = monday,
@@ -41,24 +48,24 @@ class PlanTaskSchedulerTest : StringSpec({
             schoolId = null,
             classNumber = null,
             grade = 1,
-            customRows = customRows,
-            sleepTime = sleepTime
+            routine = UserRoutine(sleepTime, commuteMinutes, slots)
         )
 
-    "사용자 수면시간: 자정 전에 자면 00:00~기상, 취침~24:00 두 구간을 막고 주말엔 기상 시각부터 잡힌다" {
+    "사용자 수면시간: 자정 전에 자면 00:00~기상, 취침~24:00 두 구간을 막고 주말엔 아침 식사 뒤부터 잡힌다" {
         val ranges = buildRanges(emptyList(), SleepTime(LocalTime.of(22, 30), LocalTime.of(8, 0)))
         val saturday = ranges.getValue(monday.plusDays(5))
 
-        saturday shouldBe listOf(0 to (8 * 60), (22 * 60 + 30) to (24 * 60))
+        // 아침 기본값은 기상(08:00) 후 30분
+        saturday shouldBe listOf(0 to (8 * 60), (22 * 60 + 30) to (24 * 60), (8 * 60) to (8 * 60 + 30), (12 * 60) to (13 * 60), (18 * 60) to (19 * 60))
         PlanTaskScheduler.placeTasks(listOf("A" to 60), PlanTaskScheduler.freeIntervalsFromBusyRanges(saturday))
-            .single().startTime shouldBe LocalTime.of(8, 0)
+            .single().startTime shouldBe LocalTime.of(8, 30)
     }
 
     "사용자 수면시간: 자정 넘어 자면 취침~기상 한 구간만 막아, 전날 밤 23시대에도 할일이 들어갈 수 있다" {
         val ranges = buildRanges(emptyList(), SleepTime(LocalTime.of(1, 0), LocalTime.of(7, 0)))
         val saturday = ranges.getValue(monday.plusDays(5))
 
-        saturday shouldBe listOf(60 to (7 * 60))
+        saturday shouldBe listOf(60 to (7 * 60), (7 * 60) to (7 * 60 + 30), (12 * 60) to (13 * 60), (18 * 60) to (19 * 60))
         PlanTaskScheduler.freeIntervalsFromBusyRanges(saturday).last().second shouldBe 24 * 60
     }
 
@@ -100,8 +107,7 @@ class PlanTaskSchedulerTest : StringSpec({
             endDate = sunday,
             schoolId = "B107132131",
             classNumber = 1,
-            grade = 1,
-            customRows = emptyList()
+            grade = 1
         )
 
         requestedRanges shouldBe listOf("20260928" to "20261004")
@@ -115,41 +121,90 @@ class PlanTaskSchedulerTest : StringSpec({
 
         ranges.getValue(monday) shouldContainAll listOf(
             0 to (16 * 60 + 30),   // 평일: 자정~하교까지 통째로
+            (16 * 60 + 30) to (17 * 60 + 10), // 하교 후 귀가 40분
             (23 * 60) to (24 * 60),
             (18 * 60) to (20 * 60)
         )
         // 등록 안 한 요일도 기본값이 그대로 들어간다
         ranges.getValue(monday.plusDays(1)) shouldContainAll listOf(0 to (16 * 60 + 30))
-        // 주말은 취침시간만
-        ranges.getValue(monday.plusDays(5)) shouldBe listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60))
+        // 주말은 취침시간과 기본 식사만
+        ranges.getValue(monday.plusDays(5)) shouldBe listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60)) + defaultMeals
     }
 
     "직접 등록한 불가 시간이 있어도 태스크가 새벽 00:00 에 배치되지 않는다" {
         val ranges = buildRanges(listOf(mondayEvening))
 
         val mondayTasks = PlanTaskScheduler.placeTasks(
-            listOf("A" to 60, "B" to 60),
+            listOf("A" to 40, "B" to 60),
             PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(monday))
         )
-        mondayTasks[0].startTime shouldBe LocalTime.of(16, 30)
-        mondayTasks[1].startTime shouldBe LocalTime.of(20, 0) // 16:30~17:30 뒤 18:00~20:00 은 막혀 있음
+        mondayTasks[0].startTime shouldBe LocalTime.of(17, 10) // 하교 16:30 + 귀가 40분
+        mondayTasks[1].startTime shouldBe LocalTime.of(20, 0) // 17:10~17:50 뒤 18:00~20:00 은 학원(저녁 기본값과 겹침)
 
         val saturdayTasks = PlanTaskScheduler.placeTasks(
             listOf("A" to 60),
             PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(monday.plusDays(5)))
         )
-        saturdayTasks[0].startTime shouldBe LocalTime.of(6, 30)
+        saturdayTasks[0].startTime shouldBe LocalTime.of(7, 0) // 06:30 기상 + 아침 30분
     }
 
-    "평일엔 짧은 태스크도 등교 전(06:30~07:00, 08:00~08:30)에 안 들어가고 하교 후에만, 주말엔 아침부터 들어간다" {
+    "평일엔 짧은 태스크도 등교 전(06:30~07:00, 08:00~08:30)에 안 들어가고 귀가 후에만, 주말엔 아침 식사 뒤부터 들어간다" {
         val ranges = buildRanges(emptyList())
         val shortTasks = listOf("A" to 20, "B" to 30, "C" to 20)
 
+        // 17:10~18:00 에 A 가 들어가고, B 는 저녁(18:00~19:00) 에 걸려 저녁 뒤로 간다
         val weekday = PlanTaskScheduler.placeTasks(shortTasks, PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(monday)))
-        weekday.map { it.startTime } shouldBe listOf(LocalTime.of(16, 30), LocalTime.of(17, 0), LocalTime.of(17, 40))
+        weekday.map { it.startTime } shouldBe listOf(LocalTime.of(17, 10), LocalTime.of(19, 0), LocalTime.of(19, 40))
 
         val saturday = PlanTaskScheduler.placeTasks(shortTasks, PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(monday.plusDays(5))))
-        saturday.first().startTime shouldBe LocalTime.of(6, 30)
+        saturday.first().startTime shouldBe LocalTime.of(7, 0)
+    }
+
+    "등교일엔 하교 뒤 귀가 시간을 막고, 귀가 시간을 0 으로 저장하면 하교하자마자 잡을 수 있다" {
+        val withCommute = buildRanges(emptyList(), commuteMinutes = 60)
+        withCommute.getValue(monday) shouldContainAll listOf((16 * 60 + 30) to (17 * 60 + 30))
+        withCommute.getValue(monday.plusDays(5)).none { it.first == 16 * 60 + 30 } shouldBe true // 주말엔 귀가 시간 없음
+
+        val noCommute = buildRanges(emptyList(), commuteMinutes = 0)
+        PlanTaskScheduler.placeTasks(listOf("A" to 60), PlanTaskScheduler.freeIntervalsFromBusyRanges(noCommute.getValue(monday)))
+            .single().startTime shouldBe LocalTime.of(16, 30)
+    }
+
+    "식사를 등록한 요일은 그 시간을, 등록 안 한 요일·끼니는 기본값을 막는다" {
+        val mondayDinner = RoutineSlot(1, UnavailableKind.DINNER, 19 * 60, 20 * 60) // 월 저녁 19:00~20:00
+        val saturdayLunch = RoutineSlot(6, UnavailableKind.LUNCH, 12 * 60 + 30, 13 * 60 + 30)
+        val ranges = buildRanges(listOf(mondayDinner, saturdayLunch))
+
+        ranges.getValue(monday) shouldContainAll listOf((19 * 60) to (20 * 60))
+        ranges.getValue(monday).contains((18 * 60) to (19 * 60)) shouldBe false // 등록한 저녁이 기본 저녁을 대신한다
+        ranges.getValue(monday.plusDays(1)) shouldContainAll listOf((18 * 60) to (19 * 60)) // 화요일은 기본 저녁
+        ranges.getValue(monday.plusDays(5)) shouldBe listOf(
+            0 to (6 * 60 + 30), (23 * 60) to (24 * 60),
+            (6 * 60 + 30) to (7 * 60), (12 * 60 + 30) to (13 * 60 + 30), (18 * 60) to (19 * 60)
+        )
+    }
+
+    "막힌 시간마다 종류를 붙인다 — 귀가 COMMUTE, 식사 MEAL, 학원·기타 UNAVAILABLE" {
+        val typed = PlanTaskScheduler.buildTypedUnavailableRanges(
+            schoolDataFetcher = schoolDataFetcher,
+            startDate = monday,
+            endDate = monday,
+            schoolId = null,
+            classNumber = null,
+            grade = 1,
+            routine = UserRoutine(slots = listOf(mondayEvening))
+        ).getValue(monday)
+
+        typed shouldBe listOf(
+            TypedRange(UnavailableType.SLEEP, 0, 6 * 60 + 30),
+            TypedRange(UnavailableType.SLEEP, 23 * 60, 24 * 60),
+            TypedRange(UnavailableType.SCHOOL, 0, 16 * 60 + 30),
+            TypedRange(UnavailableType.COMMUTE, 16 * 60 + 30, 17 * 60 + 10),
+            TypedRange(UnavailableType.MEAL, 6 * 60 + 30, 7 * 60),
+            TypedRange(UnavailableType.MEAL, 12 * 60, 13 * 60),
+            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60),
+            TypedRange(UnavailableType.UNAVAILABLE, 18 * 60, 20 * 60)
+        )
     }
 
     "공휴일·방학처럼 학교 안 가는 날은 평일이어도 주말처럼 아침부터 계획이 잡힌다" {
@@ -177,18 +232,17 @@ class PlanTaskSchedulerTest : StringSpec({
             endDate = holidayMonday.plusDays(6),
             schoolId = "B107132131",
             classNumber = 1,
-            grade = 1,
-            customRows = emptyList()
+            grade = 1
         )
 
-        val sleepOnly = listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60))
-        ranges.getValue(holidayMonday) shouldBe sleepOnly                                  // 대체공휴일 → 주말처럼
-        ranges.getValue(LocalDate.of(2026, 10, 9)) shouldBe sleepOnly                     // 한글날(금)
+        val noSchoolDay = listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60)) + defaultMeals
+        ranges.getValue(holidayMonday) shouldBe noSchoolDay                                  // 대체공휴일 → 주말처럼
+        ranges.getValue(LocalDate.of(2026, 10, 9)) shouldBe noSchoolDay                     // 한글날(금)
         ranges.getValue(LocalDate.of(2026, 10, 6)) shouldContainAll listOf(0 to (16 * 60 + 30)) // 평일 등교일은 그대로
         ranges.getValue(LocalDate.of(2026, 10, 7)) shouldContainAll listOf(0 to (16 * 60 + 30)) // 행사 있어도 등교일
 
         val holidayTasks = PlanTaskScheduler.placeTasks(listOf("A" to 30), PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(holidayMonday)))
-        holidayTasks.single().startTime shouldBe LocalTime.of(6, 30)
+        holidayTasks.single().startTime shouldBe LocalTime.of(7, 0)
     }
 
     // ── 공부 스타일 설문 배치 (PlacementOptions) ──

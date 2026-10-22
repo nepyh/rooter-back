@@ -5,6 +5,7 @@ import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
+import com.github.nepyh.rooter.module.user.model.UnavailableKind
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.user.model.UserRow
@@ -37,6 +38,7 @@ class InMemoryUserRepo : UserRepo {
         var tokenVersion: Int,
         var sleepTime: LocalTime? = null,
         var wakeTime: LocalTime? = null,
+        var commuteMinutes: Short? = null,
     )
 
     private data class StoredProfile(
@@ -53,6 +55,8 @@ class InMemoryUserRepo : UserRepo {
         val dayOfWeek: DayOfWeek,
         val startTime: LocalTime,
         val endTime: LocalTime,
+        val kind: UnavailableKind,
+        val label: String?,
     )
 
     private data class StoredTask(val userId: Int, val planDate: LocalDate, val status: PlanTaskStatus)
@@ -129,6 +133,12 @@ class InMemoryUserRepo : UserRepo {
         return stored.toRow()
     }
 
+    override fun updateCommuteMinutes(userId: Int, commuteMinutes: Int): UserRow {
+        val stored = users[userId] ?: throw UserNotFoundException()
+        stored.commuteMinutes = commuteMinutes.toShort()
+        return stored.toRow()
+    }
+
     override fun findStudentProfileByUserId(userId: Int): StudentProfileRow? =
         profiles.firstOrNull { it.userId == userId }?.toRow()
 
@@ -162,7 +172,9 @@ class InMemoryUserRepo : UserRepo {
         userId: Int,
         dayOfWeek: DayOfWeek,
         startTime: LocalTime,
-        endTime: LocalTime
+        endTime: LocalTime,
+        kind: UnavailableKind,
+        label: String?
     ): UnavailableTimeRow {
         users[userId] ?: throw UserNotFoundException()
         val stored = StoredUnavailableTime(
@@ -171,6 +183,8 @@ class InMemoryUserRepo : UserRepo {
             dayOfWeek = dayOfWeek,
             startTime = startTime,
             endTime = endTime,
+            kind = kind,
+            label = label,
         )
         unavailableTimes += stored
         return stored.toRow()
@@ -205,6 +219,7 @@ class InMemoryUserRepo : UserRepo {
                 UserTable.tokenVersion to tokenVersion,
                 UserTable.sleepTime to sleepTime,
                 UserTable.wakeTime to wakeTime,
+                UserTable.commuteMinutes to commuteMinutes,
             )
         )
     }
@@ -228,6 +243,8 @@ class InMemoryUserRepo : UserRepo {
                     UnavailableTimeTable.dayOfWeek to dayOfWeek,
                     UnavailableTimeTable.startTime to startTime,
                     UnavailableTimeTable.endTime to endTime,
+                UnavailableTimeTable.kind to kind,
+                UnavailableTimeTable.label to label,
                 )
             )
         }
