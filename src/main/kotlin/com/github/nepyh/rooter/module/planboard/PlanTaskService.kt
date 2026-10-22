@@ -182,25 +182,6 @@ class PlanTaskService {
     }
 
     /**
-     * 태스크 완료 처리/취소 (본인 플랜보드 소유권 확인). 예전 앱 호환용 — 상태 변경은 [updateTask] 의 status 로 한다.
-     * isCompleted=true 는 DONE, false 는 PENDING 으로 바꾸는 것과 같고 규칙은 [changeStatus] 를 따른다.
-     * 지금 상태와 같은 값을 보내는 건 막지 않는다 (실패한 할일에 false 를 보내도 그대로 성공).
-     */
-    fun completeTask(userId: Int, taskId: Int, isCompleted: Boolean): PlanTaskResponse = transaction {
-        val task = PlanTaskRow.findById(taskId)
-            ?: throw PlanTaskNotFoundException()
-
-        if (task.dailyPlan.planBoard.user.id.value != userId) {
-            throw PlanTaskNotFoundException()
-        }
-
-        if ((task.status == PlanTaskStatus.DONE) != isCompleted) {
-            task.changeStatus(if (isCompleted) PlanTaskStatus.DONE else PlanTaskStatus.PENDING)
-        }
-        task.toResponse(planBoardIdOf(task), isManualPlanBoard(task.dailyPlan.planBoard.examDate), subjectNameOf(task))
-    }
-
-    /**
      * 사용자가 바꿀 수 있는 상태 전환만 허용한다. 지금과 같은 상태면 아무것도 하지 않는다.
      * - PENDING → FAILED: 실패 처리
      * - DONE → PENDING: 완료 취소. 태스크 퀴즈를 통과해 완료된 할일은 TASK_FINALIZED
@@ -295,7 +276,6 @@ class PlanTaskService {
         startTime = startTime.format(timeFormat),
         endTime = endTime.format(timeFormat),
         estimatedMinutes = estimatedMinutes,
-        isCompleted = status == PlanTaskStatus.DONE,
         status = status,
         subjectId = readValues[PlanTaskTable.subjectId]?.value,
         subjectName = subjectName

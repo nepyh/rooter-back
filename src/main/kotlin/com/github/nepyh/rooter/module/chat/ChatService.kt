@@ -547,7 +547,6 @@ private fun PlanTaskRow.toResponse(dailyPlanId: Int, planBoardId: Int, isManual:
     startTime = startTime.toString(),
     endTime = endTime.toString(),
     estimatedMinutes = estimatedMinutes,
-    isCompleted = status == PlanTaskStatus.DONE,
     status = status,
     subjectId = subjectId?.value,
     subjectName = subjectName

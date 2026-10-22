@@ -192,10 +192,10 @@ class ChatServiceTest : StringSpec({
 
         // 새 일정(busy window) 없이 소요시간만 줄였으므로 겹치는 게 없다 → 남은 태스크는 원래 시각에서 길이만 바뀐다
         response.planChanged shouldBe true
-        response.updatedTasks!!.map { Triple(it.taskName, it.startTime, it.isCompleted) } shouldBe listOf(
-            Triple("완료한 태스크", "17:00", true),
-            Triple("남은 태스크1", "18:10", false),
-            Triple("남은 태스크2", "19:10", false)
+        response.updatedTasks!!.map { Triple(it.taskName, it.startTime, it.status) } shouldBe listOf(
+            Triple("완료한 태스크", "17:00", PlanTaskStatus.DONE),
+            Triple("남은 태스크1", "18:10", PlanTaskStatus.PENDING),
+            Triple("남은 태스크2", "19:10", PlanTaskStatus.PENDING)
         )
         response.updatedTasks!!.map { it.endTime } shouldBe listOf("18:00", "18:50", "19:50")
     }

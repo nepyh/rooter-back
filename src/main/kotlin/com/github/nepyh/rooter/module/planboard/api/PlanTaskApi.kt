@@ -5,7 +5,6 @@ import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
-import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCompleteRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
@@ -145,55 +144,6 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                         "종료 시간이 시작 시간보다 빠르거나 같음 (code=INVALID_TIME_RANGE), " +
                         "예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES), 계획 날짜가 플랜보드 기간을 벗어남 (code=PLAN_DATE_OUT_OF_RANGE), " +
                         "또는 존재하지 않는 교과서 (code=INVALID_TEXTBOOK)"
-                }
-                HttpStatusCode.InternalServerError {
-                    description = "서버 오류"
-                }
-            }
-        }
-
-        patch("{taskId}/complete") {
-            val taskId = call.parameters["taskId"]?.toIntOrNull()
-                ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
-            val request = call.receive<PlanTaskCompleteRequest>()
-
-            val response = planTaskService.completeTask(call.userId(), taskId, request.isCompleted)
-            call.respond(HttpStatusCode.OK, response)
-        }.describe {
-            tag("PlanTask")
-            summary = "태스크 완료 취소 (예전 앱 호환용)"
-            description = "상태 변경은 PATCH /plan-tasks/{taskId} 의 status 를 쓸 것. 이 API 는 예전 앱 호환용으로 남겨둠. " +
-                "isCompleted=false 는 status=PENDING(완료 취소), true 는 status=DONE 으로 바꾸는 것과 같고 규칙도 같음 — " +
-                "완료는 태스크 퀴즈 통과(POST .../quiz/submit)로만 되므로 true 는 이미 완료된 태스크에만 성공. " +
-                "지금과 같은 값은 그대로 성공 (실패한 태스크에 false 를 보내도 성공). 본인 플랜보드 소유 태스크만 가능"
-            parameters {
-                path("taskId") {
-                    description = "태스크 ID"
-                    required = true
-                    schema = jsonSchema<Int>()
-                }
-            }
-            requestBody {
-                ContentType.Application.Json {
-                    schema = jsonSchema<PlanTaskCompleteRequest>()
-                }
-            }
-            responses {
-                HttpStatusCode.OK {
-                    description = "처리 성공"
-                    ContentType.Application.Json {
-                        schema = jsonSchema<PlanTaskResponse>()
-                    }
-                }
-                HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 미완료 태스크를 완료로 변경 (code=TASK_QUIZ_REQUIRED), " +
-                        "또는 퀴즈를 통과했거나 실패한 태스크의 완료 상태 변경 (code=TASK_FINALIZED)"
-                }
-                HttpStatusCode.Unauthorized {
-                    description = "인증되지 않음"
-                }
-                HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 태스크"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"

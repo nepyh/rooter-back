@@ -13,8 +13,7 @@ data class PlanTaskResponse(
     val startTime: String,        // "17:30"
     val endTime: String,          // "19:30"
     val estimatedMinutes: Int,    // "2시간" 표시용
-    val isCompleted: Boolean,     // status == DONE. 예전 앱 호환용으로 남겨둠
-    val status: PlanTaskStatus,   // PENDING(대기) / DONE(완료) / FAILED(실패) — 앱은 이 값으로 그린다
+    val status: PlanTaskStatus,   // PENDING(대기) / DONE(완료) / FAILED(실패)
     // 할일 목록을 과목별로 분류해 제목으로 보여주기 위한 값. null = 과목 미지정(파생 할일·컬럼 추가 전 행)
     val subjectId: Int? = null,
     val subjectName: String? = null
@@ -51,11 +50,6 @@ data class PlanTaskCreateRequest(
 @Serializable
 data class PlanTaskCreateResponse(
     val message: String
-)
-
-@Serializable
-data class PlanTaskCompleteRequest(
-    val isCompleted: Boolean
 )
 
 @Serializable

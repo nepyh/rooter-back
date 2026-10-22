@@ -375,7 +375,6 @@ class TaskQuizService(
                 startTime = row.startTime.toString(),
                 endTime = row.endTime.toString(),
                 estimatedMinutes = row.estimatedMinutes,
-                isCompleted = row.status == PlanTaskStatus.DONE,
                 status = row.status,
                 subjectId = row.subjectId?.value,
                 subjectName = row.subjectNameFrom(subjectNames)

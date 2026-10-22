@@ -105,7 +105,6 @@ class CalendarService {
                         startTime = row.startTime.toString(),
                         endTime = row.endTime.toString(),
                         estimatedMinutes = row.estimatedMinutes,
-                        isCompleted = row.status == PlanTaskStatus.DONE,
                         status = row.status,
                         subjectId = row.subjectId?.value,
                         subjectName = row.subjectNameFrom(subjectNames)
@@ -113,7 +112,7 @@ class CalendarService {
                 }
 
             val totalTasks = tasks.size
-            val completedTasks = tasks.count { it.isCompleted }
+            val completedTasks = tasks.count { it.status == PlanTaskStatus.DONE }
             val completionRate = if (totalTasks == 0) 0.0 else (completedTasks.toDouble() / totalTasks) * 100
 
             val events = CalendarEventRow.find {
