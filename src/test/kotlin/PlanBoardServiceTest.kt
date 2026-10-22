@@ -740,8 +740,8 @@ class PlanBoardServiceTest : StringSpec({
         response.dailyPlans.first().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("20:30~21:30", "21:40~22:10")
         response.dailyPlans[1].tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:30~17:30", "17:40~18:10") // 내일은 그대로
         // 오늘은 20:30~23:00 (150분), 내일(화)은 하교 16:30~23:00 (390분)
-        llm.contexts.single().contains("- day 1 (2026-10-05 월, 오늘이라 지금 20:28 이후만): 공부 가능 150분, 가장 긴 연속 150분") shouldBe true
-        llm.contexts.single().contains("- day 2 (2026-10-06 화): 공부 가능 390분, 가장 긴 연속 390분") shouldBe true
+        llm.contexts.single().contains("- day 1 (2026-10-05 월, 오늘이라 지금 20:28 이후만): 공부 가능 150분, 가장 긴 연속 150분, 권장 90~150분") shouldBe true
+        llm.contexts.single().contains("- day 2 (2026-10-06 화): 공부 가능 390분, 가장 긴 연속 390분, 권장 90~150분") shouldBe true
     }
 
     "plan-generation: 주말 오후 4시에 오늘부터 만들면 아침(06:30)이 아니라 지금(16:00)부터 잡힌다" {
@@ -755,7 +755,7 @@ class PlanBoardServiceTest : StringSpec({
 
         response.dailyPlans.single().tasks.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:30~17:30", "17:40~18:10")
         llm.contexts.single().contains("오늘이라 지금") shouldBe false
-        llm.contexts.single().contains("- day 1 (2026-10-06 화): 공부 가능 390분, 가장 긴 연속 390분") shouldBe true
+        llm.contexts.single().contains("- day 1 (2026-10-06 화): 공부 가능 390분, 가장 긴 연속 390분, 권장 90~150분") shouldBe true
     }
 
     "plan-generation: 밤 늦게(22:50) 만들어 오늘 남은 시간이 부족하면 오늘 할일은 비고, 다음 날부터 잡힌다" {
@@ -763,7 +763,7 @@ class PlanBoardServiceTest : StringSpec({
 
         response.dailyPlans.first().tasks shouldBe emptyList()
         response.dailyPlans[1].tasks.size shouldBe 2
-        llm.contexts.single().contains("- day 1 (2026-10-05 월, 오늘이라 지금 22:50 이후만): 공부 가능 10분, 가장 긴 연속 10분") shouldBe true
+        llm.contexts.single().contains("- day 1 (2026-10-05 월, 오늘이라 지금 22:50 이후만): 공부 가능 10분, 가장 긴 연속 10분, 권장 10~10분") shouldBe true
     }
 
     "plan-generation: 날짜마다 학원 같은 불가능 시간·다른 할일을 뺀 공부 가능 시간과 가장 긴 연속 시간, 쉬는 시간을 AI 에 알려준다" {
@@ -787,9 +787,24 @@ class PlanBoardServiceTest : StringSpec({
 
         val context = llm.contexts.single()
         context.contains("할일 사이에는 쉬는 시간 10분이 들어간다") shouldBe true
-        context.contains("- day 1 (2026-07-01 수): 공부 가능 270분, 가장 긴 연속 180분") shouldBe true
-        context.contains("- day 2 (2026-07-02 목): 공부 가능 390분, 가장 긴 연속 390분") shouldBe true
-        context.contains("- day 4 (2026-07-04 토): 공부 가능 990분, 가장 긴 연속 990분") shouldBe true
+        context.contains("- day 1 (2026-07-01 수): 공부 가능 270분, 가장 긴 연속 180분, 권장 90~150분") shouldBe true
+        context.contains("- day 2 (2026-07-02 목): 공부 가능 390분, 가장 긴 연속 390분, 권장 90~150분") shouldBe true
+        context.contains("- day 4 (2026-07-04 토): 공부 가능 990분, 가장 긴 연속 990분, 권장 150~240분") shouldBe true
+    }
+
+    "plan-generation: 벼락치기 모드면 하루 권장 공부량을 1.5배로 알려준다" {
+        val userId = seedUser("gen-cram-target@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient()
+
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "벼락치기", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-03", daysRemaining = 2, isCramMode = true)
+        )
+
+        llm.contexts.single().contains("- day 1 (2026-07-03 금): 공부 가능 390분, 가장 긴 연속 390분, 권장 135~225분") shouldBe true
+        llm.contexts.single().contains("- day 2 (2026-07-04 토): 공부 가능 990분, 가장 긴 연속 990분, 권장 225~360분") shouldBe true
     }
 
     "addSubject: 정상 등록되면 subjectName/textbookTitle 이 채워진다" {

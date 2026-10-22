@@ -166,7 +166,14 @@ class PlanGenerationService(
             val longest = free.maxOfOrNull { (start, end) -> end - start } ?: 0
             val weekday = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)
             val todayNote = if (date == today) ", 오늘이라 지금 $nowLabel 이후만" else ""
-            return "- day $dayNumber ($date $weekday$todayNote): 공부 가능 ${total}분, 가장 긴 연속 ${longest}분"
+            // 공부 가능 시간만 주면 AI 가 그걸 기준 삼아 평일에도 5시간 넘게 채운다 → 하루 적정 분량(권장)을 함께 준다.
+            // 등교일은 평일 기준, 주말·공휴일·방학은 쉬는 날 기준, 벼락치기는 1.5배. 공부 가능 시간보다 크게 주지는 않는다
+            val isSchoolDay = typedUnavailableRanges[date].orEmpty().any { it.type == UnavailableType.SCHOOL }
+            val target = if (isSchoolDay) SCHOOL_DAY_TARGET_MINUTES else NO_SCHOOL_DAY_TARGET_MINUTES
+            val factor = if (request.isCramMode) CRAM_TARGET_FACTOR else 1.0
+            val low = minOf((target.first * factor).toInt(), total)
+            val high = minOf((target.last * factor).toInt(), total)
+            return "- day $dayNumber ($date $weekday$todayNote): 공부 가능 ${total}분, 가장 긴 연속 ${longest}분, 권장 ${low}~${high}분"
         }
         val breakMinutes = (placementByDate.values.firstOrNull() ?: PlacementOptions.DEFAULT).breakMinutes
 
@@ -369,6 +376,11 @@ private const val CHUNK_DAYS = 14
 private const val MAX_ATTEMPTS = 2
 private const val MAX_PARALLEL_CHUNKS = 4
 private const val MAX_TIPS = 5
+
+// 하루 권장 공부량(분) — 중학생 기준. 등교일 / 주말·공휴일·방학, 벼락치기 모드는 1.5배 (#304)
+private val SCHOOL_DAY_TARGET_MINUTES = 90..150
+private val NO_SCHOOL_DAY_TARGET_MINUTES = 150..240
+private const val CRAM_TARGET_FACTOR = 1.5
 
 // LLM 은 한 번에 긴 기간을 요청하면 8~10일치만 돌려주고 끊는다.
 // 그래서 14일을 넘으면 비슷한 길이의 구간으로 나눠 따로 생성한다. (예: 30일 → 10/10/10)
