@@ -190,6 +190,55 @@ class TaskQuizServiceTest : StringSpec({
         transaction(db) { TaskQuizAttemptTable.selectAll().count() } shouldBe 1L
     }
 
+    /** 수학·과학 두 과목 범위가 있는 보드에 할일 하나를 만든다. taskSubject 가 "수학"/"과학" 이면 할일 subject_id 를 그 과목으로 저장한다 */
+    fun seedTwoSubjectTask(taskName: String, taskSubject: String? = null): Int = transaction(db) {
+        val user = UserRow.new { email = "tq${UserRow.count()}@test.com"; username = "t"; password = "x"; createdAt = OffsetDateTime.now() }
+        val board = PlanBoardRow.new {
+            this.user = user; title = "보드"; startDate = day; endDate = day; createdAt = OffsetDateTime.now()
+        }
+        val subjects = listOf("수학" to "이차방정식", "과학" to "지구계").associate { (subjectName, unitName) ->
+            val subject = SubjectRow.new { name = subjectName }
+            val textbook = TextbookRow.new { this.subject = subject; title = "$subjectName 3" }
+            val chapter = ChapterRow.new { this.textbook = textbook; chapterName = unitName; chapterOrder = 1 }
+            PlanSubjectRow.new { planBoard = board; this.textbook = textbook; startChapter = chapter; endChapter = chapter }
+            subjectName to subject
+        }
+        val dailyPlan = DailyPlanRow.new { planBoard = board; planDate = day }
+        PlanTaskRow.new {
+            this.dailyPlan = dailyPlan; this.taskName = taskName
+            startTime = LocalTime.of(16, 0); endTime = LocalTime.of(17, 0); estimatedMinutes = 60
+            subjectId = taskSubject?.let { subjects.getValue(it).id }
+        }.id.value
+    }
+
+    "여러 과목 보드에서는 할일 이름으로 추정한 과목의 범위만 넘긴다 (수학 할일에 과학 문제가 섞이지 않게)" {
+        val taskId = seedTwoSubjectTask("수학 문제집 30쪽 풀기")
+        val llm = FakeTaskQuizLlmClient()
+
+        TaskQuizService(llm).generateAttempt(taskId, 1, "수학 문제집 30쪽 풀기")
+
+        llm.lastStudyScope shouldBe "수학: 이차방정식"
+        llm.lastCount shouldBe 5
+    }
+
+    "할일에 저장된 과목(subject_id)이 있으면 이름에 과목명이 없어도 그 과목 범위만 넘긴다" {
+        val taskId = seedTwoSubjectTask("문제집 30쪽 풀기", taskSubject = "과학")
+        val llm = FakeTaskQuizLlmClient()
+
+        TaskQuizService(llm).generateAttempt(taskId, 1, "문제집 30쪽 풀기")
+
+        llm.lastStudyScope shouldBe "과학: 지구계"
+    }
+
+    "할일 과목을 정할 수 없으면 보드 범위 전체를 넘긴다" {
+        val taskId = seedTwoSubjectTask("문제집 30쪽 풀기")
+        val llm = FakeTaskQuizLlmClient()
+
+        TaskQuizService(llm).generateAttempt(taskId, 1, "문제집 30쪽 풀기")
+
+        llm.lastStudyScope shouldBe "수학: 이차방정식\n과학: 지구계"
+    }
+
     "getCurrentQuiz: 플랜보드 학습 범위 과목(subjects)과 태스크 이름으로 추정한 과목(subject)을 함께 준다" {
         val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = true)
         val service = TaskQuizService(FakeTaskQuizLlmClient())
