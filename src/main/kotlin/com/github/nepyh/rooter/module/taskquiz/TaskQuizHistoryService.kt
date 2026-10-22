@@ -7,6 +7,7 @@ import com.github.nepyh.rooter.module.planboard.planBoardSubjects
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.taskquiz.dto.QuizHistoryChoiceResponse
 import com.github.nepyh.rooter.module.taskquiz.dto.QuizHistoryDetailResponse
@@ -30,6 +31,8 @@ import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.isNotNull
 import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.core.less
+import org.jetbrains.exposed.v1.core.neq
+import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -42,8 +45,7 @@ const val QUIZ_HISTORY_PAGE_SIZE = 50
 
 /**
  * 응시 상태. 퀴즈는 할일이 끝나면 한 일·안 한 일 가리지 않고 자동 생성되므로, 채점 전 차수를 기한으로 나눈다.
- * TODO = 채점 전이고 계획 날짜가 오늘(이후) · MISSED = 채점 전인데 계획 날짜가 지남(놓친 퀴즈, 지금 풀어도 제출되고 풀면 DONE) · DONE = 채점 끝
- * TODO: 할일 실패(plan_tasks.is_failed, PR #283) 가 들어오면 실패한 할일의 채점 전 차수도 MISSED 로 본다
+ * TODO = 채점 전이고 계획 날짜가 오늘(이후) · MISSED = 채점 전인데 계획 날짜가 지났거나 할일이 실패 처리됨(놓친 퀴즈, 지금 풀어도 제출되고 풀면 DONE) · DONE = 채점 끝
  */
 enum class QuizHistoryStatus { TODO, MISSED, DONE }
 
@@ -66,8 +68,10 @@ class TaskQuizHistoryService(private val clock: Clock = Clock.systemUTC()) {
         fun condition(after: Int?): Op<Boolean> {
             var cond = PlanBoardTable.userId eq userId
             when (status) {
-                QuizHistoryStatus.TODO -> cond = cond and TaskQuizAttemptTable.passed.isNull() and (DailyPlanTable.planDate greaterEq today)
-                QuizHistoryStatus.MISSED -> cond = cond and TaskQuizAttemptTable.passed.isNull() and (DailyPlanTable.planDate less today)
+                QuizHistoryStatus.TODO -> cond = cond and TaskQuizAttemptTable.passed.isNull() and
+                    (DailyPlanTable.planDate greaterEq today) and (PlanTaskTable.status neq PlanTaskStatus.FAILED)
+                QuizHistoryStatus.MISSED -> cond = cond and TaskQuizAttemptTable.passed.isNull() and
+                    ((DailyPlanTable.planDate less today) or (PlanTaskTable.status eq PlanTaskStatus.FAILED))
                 QuizHistoryStatus.DONE -> cond = cond and TaskQuizAttemptTable.passed.isNotNull()
                 null -> Unit
             }
@@ -136,7 +140,7 @@ class TaskQuizHistoryService(private val clock: Clock = Clock.systemUTC()) {
                 QuizHistoryItemResponse(
                     quizId = row[TaskQuizAttemptTable.id].value,
                     type = "TASK",
-                    status = statusOf(passed, row[DailyPlanTable.planDate], today).name,
+                    status = statusOf(passed, row[DailyPlanTable.planDate], row[PlanTaskTable.status], today).name,
                     planTaskId = row[TaskQuizAttemptTable.planTaskId].value,
                     attemptNumber = row[TaskQuizAttemptTable.attemptNumber],
                     title = row[PlanTaskTable.taskName],
@@ -183,7 +187,7 @@ class TaskQuizHistoryService(private val clock: Clock = Clock.systemUTC()) {
         QuizHistoryDetailResponse(
             quizId = attemptId,
             type = "TASK",
-            status = statusOf(passed, row[DailyPlanTable.planDate], todayInAppZone(clock)).name,
+            status = statusOf(passed, row[DailyPlanTable.planDate], row[PlanTaskTable.status], todayInAppZone(clock)).name,
             planTaskId = row[TaskQuizAttemptTable.planTaskId].value,
             attemptNumber = row[TaskQuizAttemptTable.attemptNumber],
             title = row[PlanTaskTable.taskName],
@@ -270,8 +274,8 @@ private fun pickSubject(
 }
 
 /** 차수 하나의 응시 상태. 목록 필터([QuizHistoryStatus])와 같은 기준이다 */
-internal fun statusOf(passed: Boolean?, planDate: LocalDate, today: LocalDate): QuizHistoryStatus = when {
+internal fun statusOf(passed: Boolean?, planDate: LocalDate, taskStatus: PlanTaskStatus, today: LocalDate): QuizHistoryStatus = when {
     passed != null -> QuizHistoryStatus.DONE
-    planDate.isBefore(today) -> QuizHistoryStatus.MISSED
+    planDate.isBefore(today) || taskStatus == PlanTaskStatus.FAILED -> QuizHistoryStatus.MISSED
     else -> QuizHistoryStatus.TODO
 }

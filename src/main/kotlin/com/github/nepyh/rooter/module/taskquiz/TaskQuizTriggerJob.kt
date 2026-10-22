@@ -28,7 +28,7 @@ private val ZONE: ZoneId = ZoneId.of("Asia/Seoul")
 private data class TaskQuizJobPayload(val planTaskId: Int, val attemptNumber: Int, val taskName: String)
 
 /**
- * 태스크 종료 시각이 지나면 완료(is_completed) 여부와 상관없이 완료 확인 퀴즈를 자동 생성한다.
+ * 태스크 종료 시각이 지나면 완료 여부와 상관없이 완료 확인 퀴즈를 자동 생성한다 (실패(FAILED) 처리한 할일은 제외).
  * 퀴즈 자체가 사실상 완료 확인 수단: 통과하면 자동으로 완료 처리되고, 직전 시도가 불합격이면
  * RETRY_DELAY_MINUTES(10)분 뒤 재시도를 자동 생성한다 (최초 1회 + 재시도 2회, MAX_ATTEMPTS(3)).
  */

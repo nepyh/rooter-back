@@ -10,6 +10,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
@@ -206,6 +207,18 @@ class TaskQuizHistoryServiceTest : StringSpec({
 
         nextDay.list(userId, QuizHistoryStatus.MISSED).quizzes shouldBe emptyList()
         nextDay.list(userId, QuizHistoryStatus.DONE).quizzes.single().status shouldBe "DONE"
+    }
+
+    "목록·상세: 실패 처리한 할일의 채점 전 퀴즈는 계획 날짜가 오늘이어도 missed 로 나온다" {
+        val (userId, _, taskId) = seedTask("수학 문제집 풀기", withScope = false)
+        makeQuiz(taskId, "수학 문제집 풀기")
+        transaction(db) { PlanTaskRow[taskId].status = PlanTaskStatus.FAILED }
+        val history = TaskQuizHistoryService(onDay)
+
+        history.list(userId, QuizHistoryStatus.TODO).quizzes shouldBe emptyList()
+        val missed = history.list(userId, QuizHistoryStatus.MISSED).quizzes.single()
+        missed.status shouldBe "MISSED"
+        history.detail(userId, missed.quizId).status shouldBe "MISSED"
     }
 
     "목록: 남의 퀴즈는 나오지 않는다" {
