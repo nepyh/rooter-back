@@ -43,7 +43,9 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
+import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 
 private data class ResolvedSubject(val subjectId: Int, val subjectName: String, val topics: List<String>)
 
@@ -155,17 +157,25 @@ class PlanGenerationService(
         } else {
             baseUnavailableRanges
         }
-        // AI 가 첫날 분량을 남은 시간에 맞추도록 알려준다 (오늘 시작일 때만)
-        val firstDayNote = if (startDate == today) {
-            val freeMinutes = PlanTaskScheduler.freeIntervalsFromBusyRanges(unavailableRanges[today].orEmpty())
-                .sumOf { (start, end) -> end - start }
-            val nowLabel = LocalTime.now(clock.withZone(APP_ZONE)).withSecond(0).withNano(0)
-            "첫날(${today})은 지금 ${nowLabel} 이후만 공부할 수 있고, 남은 공부 가능 시간은 약 ${freeMinutes}분이다. " +
-                "첫날(day 1) tasks 의 estimated_minutes 합은 ${freeMinutes}분을 넘기지 마라" +
-                if (freeMinutes < 30) " (남은 시간이 거의 없으면 첫날 tasks 는 비워도 된다)." else "."
-        } else {
-            null
+        // AI 가 날짜마다 실제로 들어갈 수 있는 분량만 만들도록 그날 빈 시간을 알려준다.
+        // 예전엔 오늘 시작하는 계획의 첫날만 알려줘서, 학원 있는 날처럼 빈 시간이 적은 날에 넘친 할일을 배치(placeTasks)가 조용히 버렸다
+        val nowLabel = LocalTime.now(clock.withZone(APP_ZONE)).withSecond(0).withNano(0)
+        fun capacityLine(dayNumber: Int, date: LocalDate): String {
+            val free = PlanTaskScheduler.freeIntervalsFromBusyRanges(unavailableRanges[date].orEmpty())
+            val total = free.sumOf { (start, end) -> end - start }
+            val longest = free.maxOfOrNull { (start, end) -> end - start } ?: 0
+            val weekday = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)
+            val todayNote = if (date == today) ", 오늘이라 지금 $nowLabel 이후만" else ""
+            // 공부 가능 시간만 주면 AI 가 그걸 기준 삼아 평일에도 5시간 넘게 채운다 → 하루 적정 분량(권장)을 함께 준다.
+            // 등교일은 평일 기준, 주말·공휴일·방학은 쉬는 날 기준, 벼락치기는 1.5배. 공부 가능 시간보다 크게 주지는 않는다
+            val isSchoolDay = typedUnavailableRanges[date].orEmpty().any { it.type == UnavailableType.SCHOOL }
+            val target = if (isSchoolDay) SCHOOL_DAY_TARGET_MINUTES else NO_SCHOOL_DAY_TARGET_MINUTES
+            val factor = if (request.isCramMode) CRAM_TARGET_FACTOR else 1.0
+            val low = minOf((target.first * factor).toInt(), total)
+            val high = minOf((target.last * factor).toInt(), total)
+            return "- day $dayNumber ($date $weekday$todayNote): 공부 가능 ${total}분, 가장 긴 연속 ${longest}분, 권장 ${low}~${high}분"
         }
+        val breakMinutes = (placementByDate.values.firstOrNull() ?: PlacementOptions.DEFAULT).breakMinutes
 
         val chunks = splitIntoChunks(totalDays)
         val generatedChunks = coroutineScope {
@@ -180,7 +190,10 @@ class PlanGenerationService(
                             if (chunks.size > 1) {
                                 appendLine("전체 계획 ${totalDays}일 (${startDate} ~ ${endDate}) 중 ${days.first}~${days.last}일차 구간이다. day 는 이 구간 안에서 1부터 ${days.count()}까지 매겨라.")
                             }
-                            if (index == 0) firstDayNote?.let { appendLine(it) }
+                            appendLine("날짜별 공부 가능 시간 (수면·등교·학원 등 불가능 시간·다른 할일을 뺀 빈 시간, 할일 사이에는 쉬는 시간 ${breakMinutes}분이 들어간다):")
+                            days.forEachIndexed { dayIndex, day ->
+                                appendLine(capacityLine(dayIndex + 1, startDate.plusDays((day - 1).toLong())))
+                            }
                             appendLine("학년(중학교): $grade")
                             request.targetScore?.let { appendLine("목표 점수: $it") }
                             appendLine("벼락치기 모드: ${request.isCramMode}")
@@ -363,6 +376,11 @@ private const val CHUNK_DAYS = 14
 private const val MAX_ATTEMPTS = 2
 private const val MAX_PARALLEL_CHUNKS = 4
 private const val MAX_TIPS = 5
+
+// 하루 권장 공부량(분) — 중학생 기준. 등교일 / 주말·공휴일·방학, 벼락치기 모드는 1.5배 (#304)
+private val SCHOOL_DAY_TARGET_MINUTES = 90..150
+private val NO_SCHOOL_DAY_TARGET_MINUTES = 150..240
+private const val CRAM_TARGET_FACTOR = 1.5
 
 // LLM 은 한 번에 긴 기간을 요청하면 8~10일치만 돌려주고 끊는다.
 // 그래서 14일을 넘으면 비슷한 길이의 구간으로 나눠 따로 생성한다. (예: 30일 → 10/10/10)
