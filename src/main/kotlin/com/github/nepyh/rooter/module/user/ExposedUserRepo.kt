@@ -7,6 +7,7 @@ import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
+import com.github.nepyh.rooter.module.user.model.UnavailableKind
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import com.github.nepyh.rooter.module.user.model.UserRow
@@ -87,6 +88,15 @@ class ExposedUserRepo : UserRepo {
         }
     }
 
+    override fun updateCommuteMinutes(userId: Int, commuteMinutes: Int): UserRow {
+        return transaction {
+            val user = UserRow.findById(userId)
+                ?: throw UserNotFoundException()
+            user.commuteMinutes = commuteMinutes.toShort()
+            user
+        }
+    }
+
     override fun updatePassword(userId: Int, hashedPassword: String): UserRow {
         return transaction {
             val user = UserRow.findById(userId)
@@ -156,7 +166,9 @@ class ExposedUserRepo : UserRepo {
         userId: Int,
         dayOfWeek: DayOfWeek,
         startTime: LocalTime,
-        endTime: LocalTime
+        endTime: LocalTime,
+        kind: UnavailableKind,
+        label: String?
     ): UnavailableTimeRow {
         return transaction {
             val user = UserRow.findById(userId) ?: throw UserNotFoundException()
@@ -165,6 +177,8 @@ class ExposedUserRepo : UserRepo {
                 this.dayOfWeek = dayOfWeek
                 this.startTime = startTime
                 this.endTime = endTime
+                this.kind = kind
+                this.label = label
             }
         }
     }

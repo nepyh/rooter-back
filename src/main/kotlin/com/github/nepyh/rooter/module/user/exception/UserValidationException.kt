@@ -92,4 +92,14 @@ sealed class UserValidationException(
         "INVALID_SLEEP_TIME",
         "취침 시각과 기상 시각이 같을 수 없습니다."
     )
+    class WrongUnavailableLabelException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_UNAVAILABLE_LABEL",
+        "불가능 시간 이름은 50자를 초과할 수 없습니다."
+    )
+    class WrongCommuteMinutesException : UserValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_COMMUTE_MINUTES",
+        "귀가 시간은 0~180분이어야 합니다."
+    )
 }

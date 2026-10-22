@@ -7,6 +7,8 @@ import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
 import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
+import com.github.nepyh.rooter.module.user.dto.CommuteTimeRequest
+import com.github.nepyh.rooter.module.user.dto.CommuteTimeResponse
 import com.github.nepyh.rooter.module.user.dto.SleepTimeRequest
 import com.github.nepyh.rooter.module.user.dto.SleepTimeResponse
 import com.github.nepyh.rooter.module.user.dto.StreakResponse
@@ -448,7 +450,9 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
         }.describe {
             tag("User")
             summary = "불가능 시간 추가"
-            description = "요일(1~7)과 시작/종료 시간을 등록. 본인 정보만 등록 가능"
+            description = "요일(1~7)과 시작/종료 시간을 등록. kind 로 종류를 고름: BREAKFAST·LUNCH·DINNER(식사) / ACADEMY(학원) / CUSTOM(기타, 생략 시 기본). " +
+                "label 은 사용자가 붙인 이름(50자 이하, 생략 가능). " +
+                "식사는 그 요일에 등록하면 등록한 시간을, 등록하지 않으면 기본값(아침 기상 후 30분, 점심 12:00~13:00, 저녁 18:00~19:00)을 막음. 본인 정보만 등록 가능"
             parameters {
                 path("id") {
                     description = "유저 ID"
@@ -469,7 +473,8 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID, 또는 dayOfWeek 가 1~7 범위 밖 (code=INVALID_DAY_OF_WEEK)"
+                    description = "유효하지 않은 ID, dayOfWeek 가 1~7 범위 밖 (code=INVALID_DAY_OF_WEEK), label 이 50자 초과 (code=INVALID_UNAVAILABLE_LABEL), " +
+                        "또는 kind 가 정해진 값이 아님 (code=INVALID_REQUEST_BODY)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -617,6 +622,103 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 시각 형식 오류 (code=INVALID_TIME_FORMAT), 또는 취침·기상 시각이 같음 (code=INVALID_SLEEP_TIME)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 정보가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        get("{id}/commute-time") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 조회할 수 있습니다."))
+            }
+            val response = userService.getCommuteTime(id)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("User")
+            summary = "귀가 시간 조회"
+            description = "하교 후 집에 도착하기까지 걸리는 시간(분). 아직 저장하지 않았으면 기본값 40 과 isDefault=true. 본인 정보만 조회 가능"
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "조회 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<CommuteTimeResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 정보가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        put("{id}/commute-time") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@put call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@put call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 수정할 수 있습니다."))
+            }
+            val request = call.receive<CommuteTimeRequest>()
+            val response = userService.updateCommuteTime(id, request)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("User")
+            summary = "귀가 시간 저장"
+            description = "하교 후 집에 도착하기까지 걸리는 시간(분, 0~180)을 저장. 이후 AI 계획 생성·바쁜 시간 조회(COMMUTE)·챗봇 재조정/미루기·복습 배치가 " +
+                "등교일의 하교 시각부터 이 시간만큼은 할일을 잡지 않음. 0 이면 하교하자마자 할일을 잡을 수 있음. 이미 잡혀 있는 할일은 옮기지 않음. 본인 정보만 저장 가능"
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<CommuteTimeRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "저장 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<CommuteTimeResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 0~180 범위 밖 (code=INVALID_COMMUTE_MINUTES)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

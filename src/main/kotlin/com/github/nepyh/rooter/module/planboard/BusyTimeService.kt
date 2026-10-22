@@ -11,8 +11,6 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
-import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
-import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
@@ -32,9 +30,9 @@ private data class ExistingTask(
 )
 
 /**
- * 날짜별로 이미 막혀 있는 시간(취침·등교·사용자 등록 불가능 시간·기존 할일)과 남은 빈 시간을 알려준다.
+ * 날짜별로 이미 막혀 있는 시간(취침·등교·귀가·식사·사용자 등록 불가능 시간·기존 할일)과 남은 빈 시간을 알려준다.
  * 앱이 할일을 직접 추가하거나 끌어서 옮길 때 겹치지 않는 시간을 보여주는 용도.
- * 취침·등교 계산은 AI 계획 생성과 같은 [PlanTaskScheduler.buildTypedUnavailableRanges] 를 쓴다.
+ * 할일 외의 막힌 시간 계산은 AI 계획 생성과 같은 [PlanTaskScheduler.buildTypedUnavailableRanges] 를 쓴다.
  */
 class BusyTimeService(private val schoolDataFetcher: SchoolDataFetcher) {
 
@@ -47,18 +45,12 @@ class BusyTimeService(private val schoolDataFetcher: SchoolDataFetcher) {
             val schoolId: String?,
             val classNumber: Int?,
             val grade: Int,
-            val customRows: List<Pair<Int, Pair<Int, Int>>>,
-            val sleepTime: SleepTime,
+            val routine: UserRoutine,
             val tasks: List<ExistingTask>
         )
 
         val context = newSuspendedTransaction {
             val profile = StudentProfileRow.find { StudentProfileTable.user eq userId }.firstOrNull()
-            val customRows = UnavailableTimeRow.find { UnavailableTimeTable.user eq userId }
-                .map {
-                    it.dayOfWeek.code.toInt() to
-                        (PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime))
-                }
             val tasks = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
                 .select(
                     PlanTaskTable.id, PlanTaskTable.taskName, PlanTaskTable.startTime, PlanTaskTable.endTime,
@@ -87,7 +79,7 @@ class BusyTimeService(private val schoolDataFetcher: SchoolDataFetcher) {
                         end = end
                     )
                 }
-            Context(profile?.schoolId, profile?.classNumber, profile?.grade ?: 2, customRows, userSleepTime(userId), tasks)
+            Context(profile?.schoolId, profile?.classNumber, profile?.grade ?: 2, userRoutine(userId), tasks)
         }
 
         // NICE 조회(외부 호출)는 트랜잭션 밖에서
@@ -98,8 +90,7 @@ class BusyTimeService(private val schoolDataFetcher: SchoolDataFetcher) {
             schoolId = context.schoolId,
             classNumber = context.classNumber,
             grade = context.grade,
-            customRows = context.customRows,
-            sleepTime = context.sleepTime
+            routine = context.routine
         )
         val tasksByDate = context.tasks.groupBy { it.date }
 

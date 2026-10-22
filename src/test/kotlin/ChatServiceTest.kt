@@ -165,9 +165,10 @@ class ChatServiceTest : StringSpec({
 
     "채팅으로 계획을 재조정해도 이미 완료한 태스크는 그대로 남고, 새 태스크는 그 시간대를 피해 배치된다" {
         val (userId, dailyPlanId) = seedDailyPlan()
-        val doneId = seedTask(dailyPlanId, "완료한 태스크", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = true)
-        seedTask(dailyPlanId, "남은 태스크1", LocalTime.of(18, 10), LocalTime.of(19, 0), completed = false)
-        seedTask(dailyPlanId, "남은 태스크2", LocalTime.of(19, 10), LocalTime.of(20, 0), completed = false)
+        // 귀가(16:30~17:10)·저녁(18:00~19:00) 기본값과 안 겹치게 저녁 뒤에 둔다
+        val doneId = seedTask(dailyPlanId, "완료한 태스크", LocalTime.of(19, 0), LocalTime.of(20, 0), completed = true)
+        seedTask(dailyPlanId, "남은 태스크1", LocalTime.of(20, 10), LocalTime.of(21, 0), completed = false)
+        seedTask(dailyPlanId, "남은 태스크2", LocalTime.of(21, 10), LocalTime.of(22, 0), completed = false)
 
         val llm = FakeChatLlmClient(
             AiChatResult(
@@ -185,19 +186,19 @@ class ChatServiceTest : StringSpec({
         transaction(db) {
             val done = PlanTaskRow.findById(doneId)!!
             done.status shouldBe PlanTaskStatus.DONE
-            done.startTime shouldBe LocalTime.of(17, 0)
-            done.endTime shouldBe LocalTime.of(18, 0)
+            done.startTime shouldBe LocalTime.of(19, 0)
+            done.endTime shouldBe LocalTime.of(20, 0)
             PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.count() shouldBe 3L
         }
 
         // 새 일정(busy window) 없이 소요시간만 줄였으므로 겹치는 게 없다 → 남은 태스크는 원래 시각에서 길이만 바뀐다
         response.planChanged shouldBe true
         response.updatedTasks!!.map { Triple(it.taskName, it.startTime, it.status) } shouldBe listOf(
-            Triple("완료한 태스크", "17:00", PlanTaskStatus.DONE),
-            Triple("남은 태스크1", "18:10", PlanTaskStatus.PENDING),
-            Triple("남은 태스크2", "19:10", PlanTaskStatus.PENDING)
+            Triple("완료한 태스크", "19:00", PlanTaskStatus.DONE),
+            Triple("남은 태스크1", "20:10", PlanTaskStatus.PENDING),
+            Triple("남은 태스크2", "21:10", PlanTaskStatus.PENDING)
         )
-        response.updatedTasks!!.map { it.endTime } shouldBe listOf("18:00", "18:50", "19:50")
+        response.updatedTasks!!.map { it.endTime } shouldBe listOf("20:00", "20:50", "21:50")
     }
     "채팅으로 계획을 재조정해도 실패한 태스크는 AI 에 보내지 않고, 지우거나 옮기지 않는다" {
         val (userId, dailyPlanId) = seedDailyPlan()
@@ -286,29 +287,29 @@ class ChatServiceTest : StringSpec({
 
         response.planChanged shouldBe true
         response.reply shouldBe "학원 시간을 피해서 옮겼어요"
-        response.updatedTasks!!.single().startTime shouldBe "18:00"
+        response.updatedTasks!!.single().startTime shouldBe "19:00" // 학원 끝(18:00) 뒤, 저녁(18:00~19:00) 다음
     }
 
     "재조정해도 새 일정과 안 겹치는 태스크는 id·시각이 그대로고, 겹치는 태스크만 원래 시각 이후로 옮긴다" {
         val (userId, dailyPlanId) = seedDailyPlan()
-        val a = seedTask(dailyPlanId, "개념 정리", LocalTime.of(16, 40), LocalTime.of(17, 20), completed = false)
-        val b = seedTask(dailyPlanId, "문제 풀이", LocalTime.of(18, 0), LocalTime.of(18, 30), completed = false)
+        val a = seedTask(dailyPlanId, "개념 정리", LocalTime.of(19, 0), LocalTime.of(19, 40), completed = false)
+        val b = seedTask(dailyPlanId, "문제 풀이", LocalTime.of(20, 30), LocalTime.of(21, 0), completed = false)
         val llm = FakeChatLlmClient(
             AiChatResult(
                 reply_message = "학원 시간을 피해서 옮겼어요",
                 plan_changed = true,
                 plan_update = AiChatPlanUpdate(
                     tasks = listOf(AiChatTask("개념 정리", 40), AiChatTask("문제 풀이", 30)),
-                    busy_window_start = "17:30", busy_window_end = "19:00"
+                    busy_window_start = "20:00", busy_window_end = "21:30"
                 )
             )
         )
 
-        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "5시 반부터 7시까지 학원")
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "8시부터 9시 반까지 학원")
 
         response.updatedTasks!!.map { Triple(it.id, it.taskName, "${it.startTime}~${it.endTime}") } shouldBe listOf(
-            Triple(a, "개념 정리", "16:40~17:20"),   // 안 겹침 → 그대로 (id 유지)
-            Triple(b, "문제 풀이", "19:00~19:30")    // 겹침 → 학원 끝난 뒤로 (id 유지)
+            Triple(a, "개념 정리", "19:00~19:40"),   // 안 겹침 → 그대로 (id 유지)
+            Triple(b, "문제 풀이", "21:30~22:00")    // 겹침 → 학원 끝난 뒤로 (id 유지)
         )
     }
 
@@ -322,12 +323,12 @@ class ChatServiceTest : StringSpec({
                 plan_update = AiChatPlanUpdate(tasks = listOf(AiChatTask("개념 정리", 40)), busy_window_start = "16:30", busy_window_end = "17:30")
             )
         )
-        // 계획 날짜(2026-09-29) 한국 시간 18:05 — 지금 이후인 18:10 부터
-        val todayClock = Clock.fixed(Instant.parse("2026-09-29T09:05:00Z"), ZoneOffset.UTC)
+        // 계획 날짜(2026-09-29) 한국 시간 19:05 — 학원 끝(17:30) 뒤 빈 시간 중 지금 이후인 19:10 부터 (17:30~18:00 은 이미 지남)
+        val todayClock = Clock.fixed(Instant.parse("2026-09-29T10:05:00Z"), ZoneOffset.UTC)
 
         val response = ChatService(llm, schoolDataFetcher, todayClock).sendMessage(userId, dailyPlanId, "4시 반부터 5시 반까지 학원이었어")
 
-        response.updatedTasks!!.single().startTime shouldBe "18:10"
+        response.updatedTasks!!.single().startTime shouldBe "19:10"
     }
 
     "시험 날짜를 물으면 답할 수 있도록 플랜보드의 시험일과 D-day 를 AI 에 넘긴다" {
@@ -371,22 +372,23 @@ class ChatServiceTest : StringSpec({
         val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
         val conceptId = seedTask(dailyPlanId, "개념 정리", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false)
         val problemId = seedTask(dailyPlanId, "문제 풀이", LocalTime.of(18, 10), LocalTime.of(19, 0), completed = false)
-        // 수요일(등교일, 학교 정보 없음 → 16:30 하교)에 이미 있는 할일 16:30~17:00
+        // 수요일(등교일, 학교 정보 없음 → 16:30 하교·17:10 귀가, 저녁 18:00~19:00)에 이미 있는 할일 19:00~19:30
         val wednesdayPlanId = transaction(db) {
             DailyPlanRow.new { planBoard = DailyPlanRow[dailyPlanId].planBoard; planDate = wednesday }.id.value
         }
-        seedTask(wednesdayPlanId, "영어 단어", LocalTime.of(16, 30), LocalTime.of(17, 0), completed = false)
+        seedTask(wednesdayPlanId, "영어 단어", LocalTime.of(19, 0), LocalTime.of(19, 30), completed = false)
         val llm = postponeLlm(listOf("개념 정리", "문제 풀이"))
 
         val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "오늘 거 내일로 미뤄줘")
 
         response.planChanged shouldBe true
         response.updatedTasks shouldBe emptyList()
+        // 17:10~18:00(50분)엔 60분 할일이 안 들어가고, 기존 할일 앞뒤 10분을 비운 19:40 부터
         response.movedTasks!!.map { "${it.taskName} ${it.startTime}~${it.endTime}" } shouldBe listOf(
-            "개념 정리 17:10~18:10", "문제 풀이 18:20~19:10"
+            "개념 정리 19:40~20:40", "문제 풀이 20:50~21:40"
         )
         response.movedTasks!!.map { it.dailyPlanId }.toSet() shouldBe setOf(wednesdayPlanId)
-        response.reply shouldBe "'개념 정리', '문제 풀이' 할일을 9월 30일(수) 17:10~18:10, 18:20~19:10로 미뤘어요."
+        response.reply shouldBe "'개념 정리', '문제 풀이' 할일을 9월 30일(수) 19:40~20:40, 20:50~21:40로 미뤘어요."
         transaction(db) {
             listOf(conceptId, problemId).map { PlanTaskRow[it].postponedFromDate } shouldBe listOf(tuesday, tuesday)
         }
@@ -432,21 +434,22 @@ class ChatServiceTest : StringSpec({
 
     "할일 직접 편집: 모두 거절되면 계획은 그대로 두고 이유와 빈 시간을 답한다, 퀴즈를 시작한 할일은 못 뺀다" {
         val (userId, dailyPlanId) = seedDailyPlan()
-        val mathId = seedTask(dailyPlanId, "수학 문제 풀기", LocalTime.of(17, 0), LocalTime.of(18, 0), completed = false)
-        seedTask(dailyPlanId, "영어 단어", LocalTime.of(18, 10), LocalTime.of(18, 40), completed = false)
+        val mathId = seedTask(dailyPlanId, "수학 문제 풀기", LocalTime.of(19, 0), LocalTime.of(20, 0), completed = false)
+        seedTask(dailyPlanId, "영어 단어", LocalTime.of(20, 10), LocalTime.of(20, 40), completed = false)
         transaction(db) {
             TaskQuizAttemptTable.insert {
                 it[planTaskId] = mathId; it[attemptNumber] = 1; it[totalCount] = 5; it[createdAt] = OffsetDateTime.now()
             }
         }
-        val llm = editLlm(AiChatEdit("delete", "수학 문제 풀기"), AiChatEdit("move", "영어 단어", start_time = "17:30"))
+        val llm = editLlm(AiChatEdit("delete", "수학 문제 풀기"), AiChatEdit("move", "영어 단어", start_time = "19:30"))
 
-        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "수학 빼고 영어 5시 반으로")
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "수학 빼고 영어 7시 반으로")
 
         response.planChanged shouldBe false
         response.updatedTasks shouldBe null
+        // 빈 시간은 귀가(~17:10)·저녁(18:00~19:00)·두 할일을 뺀 시간
         response.reply shouldBe "'수학 문제 풀기'은(는) 이미 퀴즈를 시작한 할일이라 뺄 수 없어요. " +
-            "'영어 단어'을(를) 17:30로 옮기지 못했어요 — 그 시간에 '수학 문제 풀기' 할일이 있어요. 오늘 빈 시간: 16:30~17:00, 18:00~18:10, 18:40~23:00"
+            "'영어 단어'을(를) 19:30로 옮기지 못했어요 — 그 시간에 '수학 문제 풀기' 할일이 있어요. 오늘 빈 시간: 17:10~18:00, 20:00~20:10, 20:40~23:00"
         transaction(db) { PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.count() } shouldBe 2L
     }
 
@@ -478,7 +481,7 @@ class ChatServiceTest : StringSpec({
 
         response.movedTasks!!.map { it.taskName } shouldBe listOf("문제 풀이")
         response.updatedTasks!!.map { it.taskName } shouldBe listOf("개념 정리")
-        response.reply shouldBe "'문제 풀이' 할일을 9월 30일(수) 16:30~17:20로 미뤘어요. '개념 정리'은(는) 어제 미룬 할일이라 이틀 연속으로는 미룰 수 없어요."
+        response.reply shouldBe "'문제 풀이' 할일을 9월 30일(수) 17:10~18:00로 미뤘어요. '개념 정리'은(는) 어제 미룬 할일이라 이틀 연속으로는 미룰 수 없어요."
         transaction(db) { PlanTaskRow[postponedId].dailyPlan.id.value } shouldBe dailyPlanId
         // AI 에도 미룰 수 없는 할일이라고 알려준다
         llm.lastCurrentTasksJson!!.contains("\"can_postpone\":false") shouldBe true
@@ -492,7 +495,8 @@ class ChatServiceTest : StringSpec({
 
         val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "오늘 거 다 내일로")
 
-        response.reply shouldBe "'수학 개념' 할일을 9월 30일(수) 16:30~17:30로 미뤘어요. '영어 단어'은(는) 어제 미룬 할일이라 이틀 연속으로는 미룰 수 없어요."
+        // 귀가 뒤 17:10~18:00(50분)엔 60분이 안 들어가 저녁 뒤로
+        response.reply shouldBe "'수학 개념' 할일을 9월 30일(수) 19:00~20:00로 미뤘어요. '영어 단어'은(는) 어제 미룬 할일이라 이틀 연속으로는 미룰 수 없어요."
     }
 
     "미루기: 미룰 수 있는 할일이 하나도 없거나, 기간 밖·과거 날짜거나, 이름이 안 맞으면 옮기지 않고 이유를 답한다" {

@@ -19,6 +19,8 @@ object UserTable : IntIdTable("users") {
     // 수면시간 (취침·기상). 둘 다 null = 설정 안 함 → 기본 23:00 / 06:30 (rooter-ddl 이슈 #29, PR #31 — nullable, 기본값 없음)
     val sleepTime = time("sleep_time").nullable()
     val wakeTime = time("wake_time").nullable()
+    // 하교 후 귀가 시간(분, 0~180). null = 설정 안 함 → 기본 40분 (planboard/UserRoutine.kt)
+    val commuteMinutes = short("commute_minutes").nullable()
 }
 
 class UserRow(id: EntityID<Int>) : IntEntity(id) {
@@ -33,4 +35,5 @@ class UserRow(id: EntityID<Int>) : IntEntity(id) {
     var tokenVersion by UserTable.tokenVersion
     var sleepTime by UserTable.sleepTime
     var wakeTime by UserTable.wakeTime
+    var commuteMinutes by UserTable.commuteMinutes
 }
