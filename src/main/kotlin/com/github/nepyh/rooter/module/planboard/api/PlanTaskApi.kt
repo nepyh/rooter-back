@@ -210,7 +210,8 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("PlanTask")
             summary = "태스크 수정"
-            description = "taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정. 본인 플랜보드 소유 태스크만 가능"
+            description = "taskName/startTime/endTime/estimatedMinutes 중 전달된 필드만 수정. 본인 플랜보드 소유 태스크만 가능. " +
+                "startTime·endTime 을 바꾸고 estimatedMinutes 를 안 보내면 예상 시간은 바뀐 길이(끝−시작, 분)로 자동으로 맞춘다 (태스크 퀴즈 문항 수·캘린더 공부 시간 기준)"
             parameters {
                 path("taskId") {
                     description = "태스크 ID"
@@ -232,7 +233,8 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 태스크 이름 오류 (code=INVALID_TASK_NAME), 시간 형식 오류 (code=INVALID_TIME_FORMAT), " +
-                        "종료 시간이 시작 시간보다 빠르거나 같음 (code=INVALID_TIME_RANGE), 또는 예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES)"
+                        "종료 시간이 시작 시간보다 빠르거나 같음 (code=INVALID_TIME_RANGE), 예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES), " +
+                        "또는 퀴즈로 결과가 확정된(통과 / 마지막 차수까지 불합격) 할일의 시간·예상 시간 변경 (code=TASK_FINALIZED, 이름 변경·같은 값 재전송은 허용)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

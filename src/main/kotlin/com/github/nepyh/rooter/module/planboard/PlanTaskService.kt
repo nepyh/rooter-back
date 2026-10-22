@@ -32,6 +32,7 @@ import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.DayOfWeek
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -238,13 +239,23 @@ class PlanTaskService {
         if (!newEndTime.isAfter(newStartTime)) {
             throw PlanTaskValidationException.InvalidTimeRangeException()
         }
+        // 예상 시간은 태스크 퀴즈 문항 수·캘린더 공부 시간 합계를 정한다. 시간만 바꾸고 예상 시간을 안 보내면
+        // 옛 값이 남아(1시간 → 30분으로 줄여도 퀴즈는 1시간 기준) 바뀐 시간 길이로 맞춘다. 보내면 그 값을 쓴다
+        val timeChanged = request.startTime != null || request.endTime != null
+        val newEstimatedMinutes = request.estimatedMinutes
+            ?: if (timeChanged) Duration.between(newStartTime, newEndTime).toMinutes().toInt() else task.estimatedMinutes
+        if (newEstimatedMinutes < 1) throw PlanTaskValidationException.InvalidEstimatedMinutesException()
+
+        // 퀴즈로 결과가 확정된 할일은 지난 기록이라 시간·예상 시간을 못 바꾼다 (완료 상태 변경과 같은 규칙, completeTask).
+        // 이름 변경과 지금과 같은 값을 다시 보내는 것은 막지 않는다 — 프론트는 수정 시 모든 필드를 함께 보낸다
+        val scheduleChanged = newStartTime != task.startTime || newEndTime != task.endTime || newEstimatedMinutes != task.estimatedMinutes
+        if (scheduleChanged && isFinalizedByQuiz(taskId)) {
+            throw PlanTaskValidationException.TaskFinalizedException()
+        }
+
         task.startTime = newStartTime
         task.endTime = newEndTime
-
-        request.estimatedMinutes?.let {
-            if (it < 1) throw PlanTaskValidationException.InvalidEstimatedMinutesException()
-            task.estimatedMinutes = it
-        }
+        task.estimatedMinutes = newEstimatedMinutes
 
         task.toResponse(planBoardIdOf(task), isManualPlanBoard(task.dailyPlan.planBoard.examDate), subjectNameOf(task))
     }

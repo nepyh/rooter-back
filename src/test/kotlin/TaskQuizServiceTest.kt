@@ -2,6 +2,7 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
+import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
 import com.github.nepyh.rooter.module.planboard.guessTaskSubject
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
@@ -467,6 +468,34 @@ class TaskQuizServiceTest : StringSpec({
             PlanTaskService().completeTask(lastUserId, taskId, true)
         }
         transaction(db) { PlanTaskRow[taskId].isCompleted } shouldBe false
+    }
+
+    "updateTask: 퀴즈로 결과가 확정된 태스크는 시간·예상 시간을 못 바꾸고, 이름 변경과 같은 값 재전송은 된다" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        seedGradedAttempt(taskId, 1, passed = true)
+        val (start, end, minutes) = transaction(db) {
+            PlanTaskRow[taskId].let { Triple(it.startTime.toString(), it.endTime.toString(), it.estimatedMinutes) }
+        }
+
+        shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
+            PlanTaskService().updateTask(lastUserId, taskId, PlanTaskUpdateRequest(startTime = "21:00", endTime = "21:30"))
+        }
+        shouldThrow<PlanTaskValidationException.TaskFinalizedException> {
+            PlanTaskService().updateTask(lastUserId, taskId, PlanTaskUpdateRequest(estimatedMinutes = minutes + 10))
+        }
+        // 프론트처럼 모든 필드를 지금 값 그대로 보내면서 이름만 바꾸는 건 된다
+        PlanTaskService().updateTask(
+            lastUserId, taskId, PlanTaskUpdateRequest(taskName = "과학 문제집 31쪽", startTime = start, endTime = end, estimatedMinutes = minutes)
+        ).taskName shouldBe "과학 문제집 31쪽"
+        transaction(db) { PlanTaskRow[taskId].let { it.startTime.toString() to it.endTime.toString() } } shouldBe (start to end)
+    }
+
+    "updateTask: 재시도가 남아 결과가 확정되지 않은 태스크는 시간을 바꿀 수 있다" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false)
+        seedGradedAttempt(taskId, 1, passed = false)
+
+        PlanTaskService().updateTask(lastUserId, taskId, PlanTaskUpdateRequest(startTime = "21:00", endTime = "21:30"))
+            .let { it.startTime to it.estimatedMinutes } shouldBe ("21:00" to 30)
     }
 
     "completeTask: 퀴즈를 통과하지 않은 태스크는 완료로 바꿀 수 없다 (퀴즈 없음 / 재시도 남음, #259)" {
