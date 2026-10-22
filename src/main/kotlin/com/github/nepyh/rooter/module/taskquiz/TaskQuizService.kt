@@ -393,6 +393,8 @@ class TaskQuizService(
     /**
      * 퀴즈 출제에 쓸 학년 표시와 학습 범위(과목·단원), 할일 길이에 맞춘 문항 수. 사용자가 직접 추가한 태스크는 이름만 있어서
      * ("영어 단어 30개 외우기" 등) 학년·범위가 없으면 AI 가 "학생이 완료한 활동은?" 같은 문제를 냈다.
+     * 학습 범위는 그 할일의 과목만 넘긴다. 보드의 모든 과목을 넘기면 문항 수가 5개 이상일 때 AI 가 할일 개념으로
+     * 다 채우지 못하고 다른 과목(수학 할일에 과학) 문제로 넘어갔다.
      */
     private fun quizContextOf(planTaskId: Int): TaskQuizContext {
         val task = PlanTaskRow.findById(planTaskId)
@@ -403,8 +405,15 @@ class TaskQuizService(
         val grade = StudentProfileRow.find { StudentProfileTable.user eq board.user.id }.firstOrNull()?.grade
         val gradeLabel = grade?.let { "중학교 ${it}학년" } ?: "중학생(학년 정보 없음)"
 
+        val planSubjects = PlanSubjectRow.find { PlanSubjectTable.planBoardId eq board.id }.toList()
+        // 할일 과목: 저장된 subject_id, 없으면(복습·재조정·챗봇으로 파생된 할일) 이름으로 추정.
+        // 과목을 못 정했거나 그 과목이 보드 범위에 없으면 보드 범위 전체를 넘긴다
+        val taskSubjectId = task.subjectId?.value
+            ?: guessTaskSubject(task.taskName, planSubjects.map { it.textbook.subject.id.value to it.textbook.subject.name }.distinctBy { it.first })?.first
+        val scopedSubjects = planSubjects.filter { it.textbook.subject.id.value == taskSubjectId }.ifEmpty { planSubjects }
+
         val chapterNames = mutableListOf<String>()
-        val studyScope = PlanSubjectRow.find { PlanSubjectTable.planBoardId eq board.id }.joinToString("\n") { subject ->
+        val studyScope = scopedSubjects.joinToString("\n") { subject ->
             val textbookChapters = orderedChaptersInRange(subject.textbook, subject.startChapter, subject.endChapter).map { it.chapterName }
             chapterNames += textbookChapters // 직접 적은 범위(customRangeText)는 단원이 아니라 리포트 기준에서 뺀다
             val chapters = textbookChapters + listOfNotNull(subject.customRangeText?.takeIf { it.isNotBlank() })

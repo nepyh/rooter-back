@@ -13,10 +13,13 @@ data class FeedbackSubmitRequest(
 data class FeedbackResponse(
     val id: Int,
     val dailyPlanId: Int,
+    // 설문 대상 할일. 이 컬럼이 생기기 전에 제출된 행은 null
+    val taskId: Int? = null,
     val difficulty: String,
     val timeSpentMinutes: Int?,
     val focusLevel: Int?,
     val createdAt: String,
+    // 조정(보충 태스크)은 자정 배치(FeedbackReplanJob)가 하루 1회 실행하므로 제출 응답에서는 항상 빈 배열
     val insertedAdjustmentTasks: List<ReplanAdjustmentResponse> = emptyList()
 )
 

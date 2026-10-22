@@ -46,7 +46,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
 | M8 | AI 계획 생성·스케줄링 | 9/14 | doing |
-| M9 | 퀴즈 고도화 | 14/17 | doing |
+| M9 | 퀴즈 고도화 | 14/18 | doing |
 | M10 | 챗봇 재조정 | 5/6 | doing |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
@@ -89,6 +89,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] doing RB-144 할일 응답에 `isManual`(직접 만든 일정 보드의 할일인지, #294 개요에 있었으나 #295 에서 빠짐) + 과목 누락 3곳 채움 — `isManualPlanBoard`(시험일 없음 = 직접 만든 보드, 프론트 `board.examDate === null` 과 같은 규칙, DDL 없음)로 할일 조회 3종·수정·완료·캘린더·챗봇·퀴즈 재배치에 채움. 캘린더 하루 요약·챗봇 재조정·미루기·퀴즈 재배치 응답은 #293 이후에도 `subjectId`·`subjectName` 이 항상 null 이던 것을 `PlanTaskSubjects.kt` 공용 벌크 조회로 채움 — 이슈 #296, PR #297 open · `./gradlew test` 280건 0 실패 · 프론트는 `getBoardInfo` 워터폴 대신 응답 값 사용 가능
 - [ ] doing RB-147 할일 수정(PATCH) 보강 (#302, 할일 위치·길이 조정용) — 시간만 바꾸고 `estimatedMinutes` 를 안 보내면 바뀐 길이로 자동 맞춤(태스크 퀴즈 문항 수·캘린더 합계 기준이라), 퀴즈로 결과가 확정된 할일의 시간·예상 시간 변경은 400 `TASK_FINALIZED`(이름 변경·같은 값 재전송은 허용) — 이슈 #302, PR #303 open · `./gradlew test` 291건 0 실패 · 다른 날로 옮기기·겹침 검사·자정 넘김(RB-077)은 범위 밖
 - [ ] doing RB-138 할일 상태를 `status`(PENDING/DONE/FAILED) 하나로 통합 (#258) — `is_completed`·`is_failed` 를 `plan_tasks.status` 로 교체, 실패 처리·완료 취소는 `PATCH /plan-tasks/{taskId}` 의 `status` 로 (`/fail` 제거), →DONE 은 퀴즈 통과로만 (`TASK_QUIZ_REQUIRED`). 퀴즈 히스토리는 실패 처리한 할일의 채점 전 차수를 `MISSED` 로. 응답·API 에 남아 있던 `isCompleted`(`PlanTaskResponse`·예전 앱 호환용)와 `PATCH .../complete` 도 제거해 상태는 `status` 하나로만 오감 — 프론트 `main` 이 아직 `isCompleted`·`/complete` 를 쓰므로 프론트 PR 동반 필요. PR #283 open (`f9a4f4f`·`a465bbd`, #288 병합 후 `changeStatus` 가 그 규칙을 포함, 10-22 main 재병합 `59e8456` 으로 RB-147 의 시간 변경 금지에 실패 할일 포함) · `./gradlew test` 317건 0 실패 · rooter-ddl #36 / PR #37 머지됨(10-20, status 추가 1단계) — **운영 DB 적용 확인 후 머지** · 구 컬럼 삭제는 배포 후 rooter-ddl 다음 PR
+- [ ] doing RB-150 피드백을 할일 단위로 분리 + AI 재조정을 자정 배치 1회로 (#269, rooter-front #128 — 같은 날 한 할일의 설문을 내면 다른 할일도 제출된 것으로 보이던 문제) — `daily_feedback.plan_task_id`(rooter-ddl #33, main 머지 10-19)로 할일당 1건, API 는 `POST/GET /plan-tasks/{taskId}/feedback` 신규 + `GET /daily-plans/{dailyPlanId}/feedback`(그날 제출 목록)으로 의미 변경, 기존 `POST /daily-plans/{id}/feedback` 제거. 제출 시 replan 을 빼고(`insertedAdjustmentTasks` 필드만 유지·항상 빈 배열) `FeedbackReplanJob`(`job_type=feedback_replan`)이 KST 자정에 직전 하루의 (보드, 날짜)마다 1회 조정 — 설문 0건이면 후보 없음, `run_key` claim 으로 중복 방지, 오답 0건·전부 적당이면 AI 생략. PR #310 open (`develop` 기준으로 닫힌 PR #271 커밋 4개를 `main` `c8c9793` 위로 cherry-pick — `27457b9`·`6968ea4`·`08ea696`·`bee85ab`) · `./gradlew test` 323건 0 실패(기준선 317, 신규 6, `FeedbackServiceTest` 13건) · **운영 DB 에 `daily_feedback.plan_task_id` 적용 확인 후 머지** · 프론트는 피드백 호출 경로 변경 필요
 
 ## M2. 컨벤션·구조 정비
 
@@ -204,6 +205,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-134 복습 퀴즈 3단계 — 단원별 오답률 리포트 — `GET /review-questions/report` 단원별 오답률(틀린 수 ÷ 푼 수)·남은 복습 수·단원 미상 수 — 이슈 #267, PR #274 머지 (10-15) (`030aa3e`·`f47de4e`) · `./gradlew test` 퀴즈·복습 5개 스펙 65건 0 실패 · 문항 단원 값만 읽음(스키마 변경 없음)
 - [ ] doing RB-137 퀴즈 히스토리 목록 조회 — `GET /quiz-history` 차수 단위 최신순(id 커서 50개)·todo/missed/done 필터(자동 생성된 채 안 푼 퀴즈는 계획 날짜 자정이 지나면 missed, 풀면 done), 항목에 제목(`plan_tasks.task_name`)·과목(문항 단원 → 교과서 → 과목, 실패 시 할일 이름 폴백)·시간 3종(생성/응시 예정/완료)·점수, 제출 시각(`submitted_at`) 기록 — 이슈 #275, PR #277 open (`a3bf5ee`) · `./gradlew test` 퀴즈·복습 6개 스펙 71건 0 실패 · 조회 전용(LLM 없음) · **DDL 선행: rooter-ddl #34 (PR #35 머지) → 운영 DB 에 `submitted_at` 컬럼 적용 → 이 PR 머지** (main 머지가 곧 운영 배포라 컬럼 없이 나가면 퀴즈 제출 실패) · 일일 퀴즈·상세 조회는 범위 밖
 - [ ] doing RB-138 퀴즈 히스토리 상세 조회 — `GET /quiz-history/{quizId}` 문항별 내가 고른 답·정답·문항 풀이(`explanation`)·오답 보기별 틀린 이유(`reason`, 답변 API 와 같은 이름), 상태는 목록과 같은 TODO/MISSED/DONE, 채점 전 차수는 정답·풀이 null 로 숨김, 본인 차수만(아니면 404) — 이슈 #276, PR #278 open (`68fb2dd`) · `./gradlew test` 퀴즈·복습 6개 스펙 74건 0 실패 → RB-137 MISSED 반영 후 태스크 퀴즈 3개 스펙 51건 0 실패 · 조회 전용 · RB-137(목록) 위에 얹은 브랜치
+- [ ] doing RB-150 할일 퀴즈 문항이 5개 이상이면 수학 할일에 과학 문제가 섞이던 것 (#308) — `quizContextOf` 가 보드의 모든 과목 범위를 프롬프트에 넘겨 AI 가 문항 수를 채우려고 다른 과목으로 넘어감. 할일 과목(`plan_tasks.subject_id`, 없으면 이름으로 추정)의 범위만 넘기고 못 정하면 전체 범위, 프롬프트에 "같은 과목에서만 출제" 규칙 추가 (`2ad9c0c`·`fbcb9ad`) · `./gradlew test` 320건 0 실패(신규 3건, 수정 전 코드에서는 2건 실패 확인) · 실제 DeepSeek(deepseek-flash, 7문항, 조건별 5회): 수정 전 "수학 문제집 30쪽 풀기" 5회 모두 4·5번째 문항부터 과학(35문항 중 18개) → 수정 후 70문항 중 0개, 프롬프트 규칙만(전체 범위)으로도 35문항 중 0개 · 이슈 #308, PR #309 open · DB 변경 없음
 
 ## M10. 챗봇 재조정
 
