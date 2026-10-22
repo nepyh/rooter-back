@@ -1,6 +1,9 @@
 package com.github.nepyh.rooter.module
 
 import com.github.nepyh.rooter.common.ApiRoute
+import com.github.nepyh.rooter.common.monitoring.ErrorMonitoring
+import com.github.nepyh.rooter.common.monitoring.ErrorSource
+import kotlinx.coroutines.CancellationException
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
@@ -106,6 +109,14 @@ fun Application.configureAppModule() {
         }
     }
 
+    configureErrorResponses()
+
+    val schedulerEngine: SchedulerEngine by inject()
+    schedulerEngine.start(this)
+}
+
+/** API 계약과 오류 수집을 같은 예외 경계에서 처리한다. */
+fun Application.configureErrorResponses() {
     install(StatusPages) {
         exception<UserNotFoundException> { call, cause ->
             call.respondError(HttpStatusCode.NotFound, "USER_NOT_FOUND", cause.message)
@@ -114,9 +125,11 @@ fun Application.configureAppModule() {
             call.respondError(HttpStatusCode.NotFound, "UNAVAILABLE_TIME_NOT_FOUND", cause.message)
         }
         exception<UserValidationException> { call, cause ->
+            ErrorMonitoring.capture(cause, ErrorSource.HTTP, cause.status.value)
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<NiceApiException> { call, cause ->
+            ErrorMonitoring.capture(cause, ErrorSource.HTTP, cause.status.value)
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<CalendarEventNotFoundException> { call, cause ->
@@ -129,6 +142,7 @@ fun Application.configureAppModule() {
             call.respondError(HttpStatusCode.NotFound, "PLAN_BOARD_NOT_FOUND", cause.message)
         }
         exception<PlanBoardValidationException> { call, cause ->
+            ErrorMonitoring.capture(cause, ErrorSource.HTTP, cause.status.value)
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<PlanBoardForbiddenException> { call, cause ->
@@ -174,6 +188,7 @@ fun Application.configureAppModule() {
             call.respondError(HttpStatusCode.NotFound, "TASK_QUIZ_NOT_FOUND", cause.message)
         }
         exception<TaskQuizValidationException> { call, cause ->
+            ErrorMonitoring.capture(cause, ErrorSource.HTTP, cause.status.value)
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<QuizHistoryValidationException> { call, cause ->
@@ -210,6 +225,8 @@ fun Application.configureAppModule() {
             }
         }
         exception<Throwable> { call, cause ->
+            if (cause is CancellationException) throw cause
+            ErrorMonitoring.capture(cause, ErrorSource.HTTP)
             call.application.log.error("Unhandled exception", cause)
             call.respondError(HttpStatusCode.InternalServerError, "INTERNAL_SERVER_ERROR", "서버 오류가 발생했습니다.")
         }
@@ -238,8 +255,6 @@ fun Application.configureAppModule() {
         }
     }
 
-    val schedulerEngine: SchedulerEngine by inject()
-    schedulerEngine.start(this)
 }
 
 private suspend fun ApplicationCall.respondError(

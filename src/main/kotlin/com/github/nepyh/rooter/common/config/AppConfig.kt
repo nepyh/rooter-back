@@ -39,7 +39,12 @@ data class AppConfig(
 
     // social login (Google/Apple) related. 클라이언트 ID 발급 전까지는 빈 문자열
     val googleClientId: String,
-    val appleClientId: String
+    val appleClientId: String,
+
+    // 오류 수집은 DSN 을 설정한 환경에서만 활성화한다.
+    val sentryDsn: String = "",
+    val sentryEnvironment: String = "development",
+    val sentryRelease: String = ""
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
@@ -89,7 +94,11 @@ data class AppConfig(
                     ?: "https://open.neis.go.kr/hub",
 
                 googleClientId = config.propertyOrNull("oauth.googleClientId")?.getString().orEmpty(),
-                appleClientId = config.propertyOrNull("oauth.appleClientId")?.getString().orEmpty()
+                appleClientId = config.propertyOrNull("oauth.appleClientId")?.getString().orEmpty(),
+                sentryDsn = config.propertyOrNull("sentry.dsn")?.getString().orEmpty(),
+                sentryEnvironment = config.propertyOrNull("sentry.environment")?.getString()
+                    ?.takeIf { it.isNotBlank() } ?: envMode.name.lowercase(),
+                sentryRelease = config.propertyOrNull("sentry.release")?.getString().orEmpty()
             )
         }
     }

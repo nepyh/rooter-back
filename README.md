@@ -6,6 +6,8 @@
 
 서버가 잘 켜졌는지가 궁금하다면 그냥 `http://localhost:8080/api/health` 을 접속하라
 
+서버 오류 수집은 선택 사항입니다. Sentry 프로젝트 생성, 환경변수 및 ECS 설정, 실제 수집 확인은 [Sentry 설정 안내](docs/sentry.md)를 참고하세요.
+
 # 개발 컨벤션
 
 ## ORM 테이블 정의

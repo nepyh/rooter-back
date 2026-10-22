@@ -2,6 +2,8 @@ package com.github.nepyh.rooter
 
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.github.nepyh.rooter.common.monitoring.ErrorMonitoring
+import com.github.nepyh.rooter.common.monitoring.MonitoringConfig
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.auth.JwtValidator
 import com.github.nepyh.rooter.common.config.AppConfig
@@ -25,6 +27,7 @@ import org.koin.logger.slf4jLogger
 
 fun Application.appEntryModule() {
     val appConfig = AppConfig.fromApplicationConfig(environment.config)
+    ErrorMonitoring.initialize(MonitoringConfig(appConfig.sentryDsn, appConfig.sentryEnvironment, appConfig.sentryRelease))
 
     install(Koin) {
         slf4jLogger()

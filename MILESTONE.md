@@ -50,9 +50,11 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M10 | 챗봇 재조정 | 5/6 | doing |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
-| M13 | 인프라·배포 | 7/11 | doing |
+| M13 | 인프라·배포 | 7/12 | doing |
 
 ## 블로커
+
+- RB-152 실제 Sentry 수집 확인은 서버 프로젝트 생성과 DSN 설정 후 진행한다. 로컬 자동 테스트는 외부로 전송하지 않는다.
 
 - **RB-014 planboard 네이밍 통일** — `rooter-ddl` #10 open. DDL `schema.sql` 에 구 표기(`plan_boards`, `plan_board_id`)가 그대로 남아 있어 코드만 바꾸면 배포 시 터진다. **DDL 먼저.**
 - **RB-043 소셜 로그인 실동작** — 구조만 머지된 상태. 운영 태스크 정의에 `GOOGLE_CLIENT_ID` / `APPLE_CLIENT_ID` 없음 (10-04 확인). 클라이언트 ID 미발급.
@@ -252,6 +254,8 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] todo RB-127 서버 DB 초기화 여부 (B-01) + 운영에 남은 테스트 계정 정리 — 결정 필요
 - [ ] todo RB-128 운영 `textbooks.file_url` 잔여 컬럼 정리 — DDL main 은 삭제했는데 운영 DB 에는 남아 있음 (10-04 확인)
 
+- [ ] doing RB-152 서버 Sentry 오류 수집 (#313) — DSN 선택 활성화, 5xx·기동·스케줄러 예외의 종류와 스택만 전송, 원문 메시지·요청·개인정보 제외. 환경변수·ECS 배선 및 메모리 transport 테스트 5개, 격리 PostgreSQL에서 전체 test/build 통과. 실제 프로젝트 수집 검증은 DSN 설정 후 별도 확인.
+
 ## 다음 후보 (우선순위)
 
 | 우선 | 항목 | 규모 | 의존 | 비고 |
@@ -265,6 +269,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | 6 | RB-060 Notification (B-12) | L | 브랜치 재정렬 | `feature/notification-settings` 를 main 위에 다시 얹기 |
 | 7 | RB-014 planboard 네이밍 | M | rooter-ddl #10 | DDL 선행 필요 (블로커) |
 | - | 정책 결정 대기 | - | 팀 결정 | RB-077 자정 넘김 · RB-116 JWT 만료 · RB-126 도메인 · RB-127 DB 초기화 |
+| - | RB-152 실제 Sentry 수집 확인 | S | 프로젝트·DSN 설정 | 개발 환경에서 이벤트·release·개인정보 제외 확인 |
 
 ## 폐기/보류
 

@@ -22,6 +22,11 @@ services:
 
       - NICE_API_KEY=${NICE_API_KEY}
 
+      # Sentry — DSN 미설정 시 비활성
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
+
       # LLM(퀴즈·계획 생성) — dev.conf 가 필수 치환으로 참조해서, 값이 아예 없으면
       # 컨테이너가 기동하지 않음. 빈 값이어도 치환은 성공하므로 ${VAR} 형태로 항상 넘긴다
       - LLM_BASE_URL=${LLM_BASE_URL}
