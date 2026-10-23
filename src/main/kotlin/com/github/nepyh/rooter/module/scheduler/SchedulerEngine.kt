@@ -1,5 +1,8 @@
 package com.github.nepyh.rooter.module.scheduler
 
+import com.github.nepyh.rooter.common.monitoring.ErrorMonitoring
+import com.github.nepyh.rooter.common.monitoring.ErrorSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -27,7 +30,14 @@ class SchedulerEngine(
         scope.launch(Dispatchers.IO) {
             logger.info("scheduler 엔진 시작: 잡 {} 개, 틱 {} 초", jobs.size, tickInterval.seconds)
             while (isActive) {
-                runTick()
+                try {
+                    runTick()
+                } catch (cause: CancellationException) {
+                    throw cause
+                } catch (cause: Exception) {
+                    ErrorMonitoring.capture(cause, ErrorSource.SCHEDULER)
+                    throw cause
+                }
                 delay(tickInterval.toMillis())
             }
         }
@@ -39,6 +49,8 @@ class SchedulerEngine(
             val dueJobs = try {
                 job.findDue(now)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                ErrorMonitoring.capture(e, ErrorSource.SCHEDULER)
                 logger.error("파생 규칙 평가 실패: jobType={}", job.jobType, e)
                 emptyList()
             }
@@ -50,6 +62,8 @@ class SchedulerEngine(
                     job.execute(due)
                     jobRunRepo.markDone(job.jobType, due.runKey)
                 } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    ErrorMonitoring.capture(e, ErrorSource.SCHEDULER)
                     logger.error("잡 실행 실패: jobType={} runKey={}", job.jobType, due.runKey, e)
                     jobRunRepo.markFailed(job.jobType, due.runKey, e)
                 }
