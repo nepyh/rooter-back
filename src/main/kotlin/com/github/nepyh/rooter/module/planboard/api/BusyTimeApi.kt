@@ -40,7 +40,7 @@ fun BusyTimeApi(busyTimeService: BusyTimeService) = ApiRoute("busy-times") {
                 "MEAL(식사 — 그 요일에 등록한 BREAKFAST·LUNCH·DINNER 불가능 시간, 없으면 기본값 아침 기상 후 30분·점심 12:00~13:00·저녁 18:00~19:00. " +
                 "등교일엔 학교 시간 안에 드는 아침·점심을 빼서 보통 저녁만, 쉬는 날엔 세 끼 모두) / " +
                 "UNAVAILABLE(사용자가 등록한 요일별 학원·기타 불가능 시간) / TASK(모든 플랜보드의 기존 할일, taskId·planBoardId 포함). " +
-                "busyTimes.label 은 앱에 보여줄 이름: 수면 / 등교 준비 / 학교 /하교 후 귀가 / 아침·점심·저녁 / 학원·개인 일정(등록한 label 이 있으면 그것) / 할일 이름. " +
+                "busyTimes.label 은 앱에 보여줄 이름: 수면 / 등교 준비 / 학교 /하교 후 귀가 / 아침 식사·점심 식사·저녁 식사 / 학원·개인 일정(등록한 label 이 있으면 그것) / 할일 이름. " +
                 "freeTimes 는 busyTimes 를 전부 뺀 시간. 시각은 HH:mm, 하루 끝은 24:00. " +
                 "AI 계획 생성과 같은 기준으로 계산함 (공휴일·방학은 isSchoolDay=false)"
             parameters {
