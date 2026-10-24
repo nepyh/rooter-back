@@ -111,22 +111,23 @@ class PlanTaskSchedulerTest : StringSpec({
         )
 
         requestedRanges shouldBe listOf("20260928" to "20261004")
-        ranges.getValue(monday) shouldContainAll listOf(0 to (15 * 60 + 10)) // 6교시 → 15:10 까지 막힘
-        ranges.getValue(monday.plusDays(1)) shouldContainAll listOf(0 to (16 * 60 + 10)) // 7교시 → 16:10
-        ranges.getValue(monday.plusDays(2)) shouldContainAll listOf(0 to (16 * 60 + 30)) // 데이터 없음 → 기본값 16:30
+        ranges.getValue(monday) shouldContainAll listOf((8 * 60 + 30) to (15 * 60 + 10)) // 6교시 → 학교 08:30~15:10
+        ranges.getValue(monday.plusDays(1)) shouldContainAll listOf((8 * 60 + 30) to (16 * 60 + 10)) // 7교시 → 16:10
+        ranges.getValue(monday.plusDays(2)) shouldContainAll listOf((8 * 60 + 30) to (16 * 60 + 30)) // 데이터 없음 → 기본값 16:30
     }
 
     "직접 등록한 불가 시간이 있어도 취침시간·학교시간 기본값은 유지된다" {
         val ranges = buildRanges(listOf(mondayEvening))
 
         ranges.getValue(monday) shouldContainAll listOf(
-            0 to (16 * 60 + 30),   // 평일: 자정~하교까지 통째로
+            (6 * 60 + 30) to (8 * 60 + 30), // 평일: 기상~등교 준비, 등교~하교 학교
+            (8 * 60 + 30) to (16 * 60 + 30),
             (16 * 60 + 30) to (17 * 60 + 10), // 하교 후 귀가 40분
             (23 * 60) to (24 * 60),
             (18 * 60) to (20 * 60)
         )
         // 등록 안 한 요일도 기본값이 그대로 들어간다
-        ranges.getValue(monday.plusDays(1)) shouldContainAll listOf(0 to (16 * 60 + 30))
+        ranges.getValue(monday.plusDays(1)) shouldContainAll listOf((8 * 60 + 30) to (16 * 60 + 30))
         // 주말은 취침시간과 기본 식사만
         ranges.getValue(monday.plusDays(5)) shouldBe listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60)) + defaultMeals
     }
@@ -184,6 +185,45 @@ class PlanTaskSchedulerTest : StringSpec({
         )
     }
 
+    "등교일엔 학교 시간 안의 아침·점심을 빼고 저녁만, 쉬는 날엔 세 끼 모두 이름을 붙여 막는다" {
+        val typed = PlanTaskScheduler.buildTypedUnavailableRanges(
+            schoolDataFetcher = schoolDataFetcher,
+            startDate = monday,
+            endDate = sunday,
+            schoolId = null,
+            classNumber = null,
+            grade = 1
+        )
+
+        typed.getValue(monday).filter { it.type == UnavailableType.MEAL } shouldBe listOf(
+            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60, "저녁")
+        )
+        typed.getValue(monday.plusDays(5)).filter { it.type == UnavailableType.MEAL } shouldBe listOf(
+            TypedRange(UnavailableType.MEAL, 6 * 60 + 30, 7 * 60, "아침"),
+            TypedRange(UnavailableType.MEAL, 12 * 60, 13 * 60, "점심"),
+            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60, "저녁")
+        )
+    }
+
+    "하교가 이른 날(시험 기간 등)엔 하교 뒤에 걸치는 점심은 남긴다" {
+        UserRoutine().ranges(1, schoolEnd = 12 * 60 + 10).map { it.label to (it.start to it.end) } shouldBe listOf(
+            "점심" to ((12 * 60) to (13 * 60)),
+            "저녁" to ((18 * 60) to (19 * 60))
+        )
+    }
+
+    "등록한 불가능 시간은 붙인 이름을, 이름이 없으면 끼니·종류 이름을 쓴다" {
+        val routine = UserRoutine(
+            slots = listOf(
+                RoutineSlot(6, UnavailableKind.DINNER, 19 * 60, 20 * 60, "가족 저녁"),
+                RoutineSlot(6, UnavailableKind.ACADEMY, 14 * 60, 16 * 60),
+                RoutineSlot(6, UnavailableKind.CUSTOM, 16 * 60, 17 * 60, "피아노")
+            )
+        )
+
+        routine.ranges(6).map { it.label } shouldBe listOf("아침", "점심", "가족 저녁", "학원", "피아노")
+    }
+
     "막힌 시간마다 종류를 붙인다 — 귀가 COMMUTE, 식사 MEAL, 학원·기타 UNAVAILABLE" {
         val typed = PlanTaskScheduler.buildTypedUnavailableRanges(
             schoolDataFetcher = schoolDataFetcher,
@@ -198,13 +238,29 @@ class PlanTaskSchedulerTest : StringSpec({
         typed shouldBe listOf(
             TypedRange(UnavailableType.SLEEP, 0, 6 * 60 + 30),
             TypedRange(UnavailableType.SLEEP, 23 * 60, 24 * 60),
-            TypedRange(UnavailableType.SCHOOL, 0, 16 * 60 + 30),
+            TypedRange(UnavailableType.SCHOOL_PREP, 6 * 60 + 30, 8 * 60 + 30),
+            TypedRange(UnavailableType.SCHOOL, 8 * 60 + 30, 16 * 60 + 30),
             TypedRange(UnavailableType.COMMUTE, 16 * 60 + 30, 17 * 60 + 10),
-            TypedRange(UnavailableType.MEAL, 6 * 60 + 30, 7 * 60),
-            TypedRange(UnavailableType.MEAL, 12 * 60, 13 * 60),
-            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60),
-            TypedRange(UnavailableType.UNAVAILABLE, 18 * 60, 20 * 60)
+            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60, "저녁"),
+            TypedRange(UnavailableType.UNAVAILABLE, 18 * 60, 20 * 60, "학원")
         )
+        typed.map { it.label } shouldBe listOf("수면", "수면", "등교 준비", "학교", "하교 후 귀가", "저녁", "학원")
+    }
+
+    "자정 넘어 자는 학생도 등교일 00:00~취침·기상~08:30 을 등교 준비로 막아, 평일 새벽·아침엔 할일이 안 들어간다" {
+        val typed = PlanTaskScheduler.buildTypedUnavailableRanges(
+            schoolDataFetcher = schoolDataFetcher,
+            startDate = monday,
+            endDate = monday,
+            schoolId = null,
+            classNumber = null,
+            grade = 1,
+            routine = UserRoutine(sleepTime = SleepTime(LocalTime.of(1, 0), LocalTime.of(7, 30)))
+        ).getValue(monday)
+
+        typed.filter { it.type == UnavailableType.SCHOOL_PREP }.map { it.start to it.end } shouldBe
+            listOf(0 to 60, (7 * 60 + 30) to (8 * 60 + 30))
+        PlanTaskScheduler.freeIntervalsFromBusyRanges(typed.map { it.start to it.end }).first().first shouldBe 17 * 60 + 10
     }
 
     "공휴일·방학처럼 학교 안 가는 날은 평일이어도 주말처럼 아침부터 계획이 잡힌다" {
@@ -238,8 +294,8 @@ class PlanTaskSchedulerTest : StringSpec({
         val noSchoolDay = listOf(0 to (6 * 60 + 30), (23 * 60) to (24 * 60)) + defaultMeals
         ranges.getValue(holidayMonday) shouldBe noSchoolDay                                  // 대체공휴일 → 주말처럼
         ranges.getValue(LocalDate.of(2026, 10, 9)) shouldBe noSchoolDay                     // 한글날(금)
-        ranges.getValue(LocalDate.of(2026, 10, 6)) shouldContainAll listOf(0 to (16 * 60 + 30)) // 평일 등교일은 그대로
-        ranges.getValue(LocalDate.of(2026, 10, 7)) shouldContainAll listOf(0 to (16 * 60 + 30)) // 행사 있어도 등교일
+        ranges.getValue(LocalDate.of(2026, 10, 6)) shouldContainAll listOf((8 * 60 + 30) to (16 * 60 + 30)) // 평일 등교일은 그대로
+        ranges.getValue(LocalDate.of(2026, 10, 7)) shouldContainAll listOf((8 * 60 + 30) to (16 * 60 + 30)) // 행사 있어도 등교일
 
         val holidayTasks = PlanTaskScheduler.placeTasks(listOf("A" to 30), PlanTaskScheduler.freeIntervalsFromBusyRanges(ranges.getValue(holidayMonday)))
         holidayTasks.single().startTime shouldBe LocalTime.of(7, 0)
