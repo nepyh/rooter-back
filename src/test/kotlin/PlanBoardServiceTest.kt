@@ -586,17 +586,19 @@ class PlanBoardServiceTest : StringSpec({
 
         val (friday, saturday) = response.days
         friday.isSchoolDay shouldBe true
-        // 귀가 기본 40분, 식사 기본값(아침 기상 후 30분·점심 12:00~13:00·저녁 18:00~19:00)
+        // 귀가 기본 40분, 등교일 식사는 학교 시간 밖의 저녁(기본 18:00~19:00)만
         friday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf(
-            "SLEEP 00:00~06:30", "SCHOOL 00:00~16:30", "MEAL 06:30~07:00", "MEAL 12:00~13:00", "COMMUTE 16:30~17:10",
+            "SLEEP 00:00~06:30", "SCHOOL_PREP 06:30~08:30", "SCHOOL 08:30~16:30", "COMMUTE 16:30~17:10",
             "MEAL 18:00~19:00", "UNAVAILABLE 18:00~20:00", "SLEEP 23:00~24:00"
         )
+        friday.busyTimes.map { it.label } shouldBe listOf("수면", "등교 준비", "학교", "하교 후 귀가", "저녁", "개인 일정", "수면")
         friday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("17:10~18:00", "20:00~23:00")
 
         saturday.isSchoolDay shouldBe false
         saturday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf(
             "SLEEP 00:00~06:30", "MEAL 06:30~07:00", "TASK 10:00~11:00", "MEAL 12:00~13:00", "MEAL 18:00~19:00", "SLEEP 23:00~24:00"
         )
+        saturday.busyTimes.map { it.label } shouldBe listOf("수면", "아침", "영어 단어", "점심", "저녁", "수면")
         saturday.busyTimes[2].let {
             it.taskName shouldBe "영어 단어"
             it.planBoardId shouldBe boardId
@@ -636,9 +638,10 @@ class PlanBoardServiceTest : StringSpec({
         val friday = BusyTimeService(noNiceSchoolDataFetcher()).getBusyTimes(userId, LocalDate.of(2026, 7, 3), LocalDate.of(2026, 7, 3)).days.single()
 
         friday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf(
-            "SLEEP 00:00~06:30", "SCHOOL 00:00~16:30", "MEAL 06:30~07:00", "MEAL 12:00~13:00", "COMMUTE 16:30~16:50",
+            "SLEEP 00:00~06:30", "SCHOOL_PREP 06:30~08:30", "SCHOOL 08:30~16:30", "COMMUTE 16:30~16:50",
             "MEAL 19:00~19:40", "UNAVAILABLE 20:00~21:00", "SLEEP 23:00~24:00"
         )
+        friday.busyTimes.map { it.label } shouldBe listOf("수면", "등교 준비", "학교", "하교 후 귀가", "가족 저녁", "학원", "수면")
         friday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("16:50~19:00", "19:40~20:00", "21:00~23:00")
     }
 

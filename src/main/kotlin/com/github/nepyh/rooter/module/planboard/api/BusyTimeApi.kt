@@ -34,10 +34,13 @@ fun BusyTimeApi(busyTimeService: BusyTimeService) = ApiRoute("busy-times") {
             tag("BusyTime")
             summary = "날짜별 바쁜 시간 / 빈 시간 조회"
             description = "로그인한 사용자의 날짜별 막힌 시간과 빈 시간을 돌려줌. 할일을 직접 추가하거나 옮길 때 겹치지 않는 시간을 보여주는 용도. " +
-                "busyTimes.type: SLEEP(취침, 기본 00:00~06:30·23:00~24:00) / SCHOOL(등교일 00:00~하교, NICE 시간표 기준·없으면 16:30) / " +
+                "busyTimes.type: SLEEP(취침, 기본 00:00~06:30·23:00~24:00) / SCHOOL_PREP(등교일 등교 전, 자는 시간을 뺀 00:00~08:30 — 보통 기상~08:30) / " +
+                "SCHOOL(등교일 08:30~하교, NICE 시간표 기준·없으면 16:30) / " +
                 "COMMUTE(등교일 하교 후 귀가, 기본 40분 — GET·PUT /api/users/{id}/commute-time) / " +
-                "MEAL(식사 — 그 요일에 등록한 BREAKFAST·LUNCH·DINNER 불가능 시간, 없으면 기본값 아침 기상 후 30분·점심 12:00~13:00·저녁 18:00~19:00) / " +
+                "MEAL(식사 — 그 요일에 등록한 BREAKFAST·LUNCH·DINNER 불가능 시간, 없으면 기본값 아침 기상 후 30분·점심 12:00~13:00·저녁 18:00~19:00. " +
+                "등교일엔 학교 시간 안에 드는 아침·점심을 빼서 보통 저녁만, 쉬는 날엔 세 끼 모두) / " +
                 "UNAVAILABLE(사용자가 등록한 요일별 학원·기타 불가능 시간) / TASK(모든 플랜보드의 기존 할일, taskId·planBoardId 포함). " +
+                "busyTimes.label 은 앱에 보여줄 이름: 수면 / 등교 준비 / 학교 /하교 후 귀가 / 아침·점심·저녁 / 학원·개인 일정(등록한 label 이 있으면 그것) / 할일 이름. " +
                 "freeTimes 는 busyTimes 를 전부 뺀 시간. 시각은 HH:mm, 하루 끝은 24:00. " +
                 "AI 계획 생성과 같은 기준으로 계산함 (공휴일·방학은 isSchoolDay=false)"
             parameters {

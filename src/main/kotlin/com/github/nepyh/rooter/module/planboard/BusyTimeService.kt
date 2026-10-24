@@ -68,6 +68,7 @@ class BusyTimeService(private val schoolDataFetcher: SchoolDataFetcher) {
                         date = it[DailyPlanTable.planDate],
                         item = BusyTimeItem(
                             type = "TASK",
+                            label = it[PlanTaskTable.taskName],
                             startTime = formatMinutes(start),
                             endTime = formatMinutes(end),
                             taskId = it[PlanTaskTable.id].value,
@@ -97,7 +98,7 @@ class BusyTimeService(private val schoolDataFetcher: SchoolDataFetcher) {
         val days = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.map { date ->
             val ranges = unavailable[date].orEmpty()
             val tasks = tasksByDate[date].orEmpty()
-            val busy = ranges.map { Triple(it.start, it.end, BusyTimeItem(it.type.name, formatMinutes(it.start), formatMinutes(it.end))) } +
+            val busy = ranges.map { Triple(it.start, it.end, BusyTimeItem(it.type.name, it.label, formatMinutes(it.start), formatMinutes(it.end))) } +
                 tasks.map { Triple(it.start, it.end, it.item) }
             DailyBusyTimeResponse(
                 date = date.toString(),

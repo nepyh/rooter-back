@@ -8,12 +8,16 @@ import java.time.LocalTime
 
 private const val DAY_MINUTES = 24 * 60
 private const val DEFAULT_DISMISSAL_MINUTES = 16 * 60 + 30 // NICE 시간표를 못 가져올 때 쓰는 하교시각 폴백값 (16:30)
+private const val SCHOOL_START_MINUTES = 8 * 60 + 30 // 등교 시각 (08:30 고정 — NICE 에 학교별 등교 시각이 없음)
 private const val DEFAULT_BREAK_MINUTES = 10
 
-/** 학습 불가 시간의 종류 — 바쁜 시간 조회 API 가 그대로 내려준다 */
-enum class UnavailableType { SLEEP, SCHOOL, COMMUTE, MEAL, UNAVAILABLE }
+/** 학습 불가 시간의 종류 — 바쁜 시간 조회 API 가 그대로 내려준다. [defaultLabel] 은 앱에 보여줄 기본 이름 */
+enum class UnavailableType(val defaultLabel: String) {
+    SLEEP("수면"), SCHOOL_PREP("등교 준비"), SCHOOL("학교"), COMMUTE("하교 후 귀가"), MEAL("식사"), UNAVAILABLE("개인 일정")
+}
 
-data class TypedRange(val type: UnavailableType, val start: Int, val end: Int)
+/** @property label 앱에 보여줄 이름 — 식사는 아침·점심·저녁, 사용자가 등록한 시간은 붙인 이름 (없으면 학원·개인 일정) */
+data class TypedRange(val type: UnavailableType, val start: Int, val end: Int, val label: String = type.defaultLabel)
 
 data class PlacedTask(
     val taskName: String,
@@ -50,11 +54,13 @@ object PlanTaskScheduler {
      * 하루짜리 범위 둘 다 이 함수로 통일해서 씀 — 재조정은 startDate == endDate 로 호출).
      *
      * 사용자 수면시간([UserRoutine.sleepTime], 설정 안 했으면 23:00~06:30)을 항상 채우고, 평일(학교 가는 날)은 **자정부터 하교 시각까지 통째로** 막는다.
+     *   자는 시간을 뺀 등교(08:30) 전은 SCHOOL_PREP(등교 준비), 08:30~하교는 SCHOOL 로 나눠 낸다 (막히는 범위는 같음).
      * → 평일에는 하교 후에만, 주말에는 아침(기상 시각)부터 계획이 잡힌다.
      *   공휴일·방학·재량휴업일처럼 학교를 안 가는 날(NICE 학사일정, [SchoolDataFetcher.getNoSchoolDays])은 평일이어도 주말처럼 취급한다.
      *   (예전엔 등교 준비 07:00~08:00 · 학교 08:30~ 만 막아서 06:30~07:00, 08:00~08:30 틈에 짧은 태스크가 들어갔음)
      * 등교일은 하교 뒤 귀가 시간([UserRoutine.commuteMinutes], 기본 40분)도 막아서 하교하자마자 할일이 붙지 않게 한다.
      * 식사(등록 안 했으면 기본값)와 사용자가 등록한 학원·기타 일정은 그 위에 더한다 ([UserRoutine.ranges]).
+     *   등교일의 아침·점심처럼 학교 시간 안에 다 들어가는 식사는 이미 막혀 있으니 따로 넣지 않는다 → 평일엔 저녁만, 쉬는 날엔 세 끼 모두.
      * 하교시각은 NICE 실시간 시간표로 그날의 마지막 교시를 조회해 계산한다 (실패/데이터없음 시 기본값 16:30 으로 폴백).
      */
     suspend fun buildUnavailableRanges(
@@ -101,14 +107,23 @@ object PlanTaskScheduler {
         return dates.associateWith { date ->
             val ranges = routine.sleepTime.ranges().map { (start, end) -> TypedRange(UnavailableType.SLEEP, start, end) }.toMutableList()
             // 등교일(평일이면서 공휴일·방학 등이 아닌 날): 등교 전 시간을 포함해 하교 시각까지 전부 막고, 이어서 귀가 시간을 막는다
-            if (date.dayOfWeek.value <= 5 && date !in noSchoolDays) {
-                val dismissal = dismissalMinutesByDate[date] ?: DEFAULT_DISMISSAL_MINUTES
-                ranges.add(TypedRange(UnavailableType.SCHOOL, 0, dismissal))
+            val dismissal = if (date.dayOfWeek.value <= 5 && date !in noSchoolDays) {
+                dismissalMinutesByDate[date] ?: DEFAULT_DISMISSAL_MINUTES
+            } else {
+                null
+            }
+            if (dismissal != null) {
+                // 등교 전 깨어 있는 시간(보통 기상~08:30)은 등교 준비로 막아 평일 아침엔 할일이 들어가지 않는다
+                val sleepRanges = ranges.map { it.start to it.end }
+                subtractRanges(listOf(0 to SCHOOL_START_MINUTES), sleepRanges).forEach { (start, end) ->
+                    ranges.add(TypedRange(UnavailableType.SCHOOL_PREP, start, end))
+                }
+                ranges.add(TypedRange(UnavailableType.SCHOOL, SCHOOL_START_MINUTES, dismissal))
                 if (routine.commuteMinutes > 0) {
                     ranges.add(TypedRange(UnavailableType.COMMUTE, dismissal, minOf(dismissal + routine.commuteMinutes, DAY_MINUTES)))
                 }
             }
-            ranges.addAll(routine.ranges(date.dayOfWeek.value))
+            ranges.addAll(routine.ranges(date.dayOfWeek.value, schoolEnd = dismissal))
             ranges
         }
     }
