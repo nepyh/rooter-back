@@ -65,9 +65,9 @@ data class UserRoutine(
 /** 이름을 붙이지 않은 불가능 시간을 앱에 보여줄 이름 */
 private val UnavailableKind.defaultLabel: String
     get() = when (this) {
-        UnavailableKind.BREAKFAST -> "아침"
-        UnavailableKind.LUNCH -> "점심"
-        UnavailableKind.DINNER -> "저녁"
+        UnavailableKind.BREAKFAST -> "아침 식사"
+        UnavailableKind.LUNCH -> "점심 식사"
+        UnavailableKind.DINNER -> "저녁 식사"
         UnavailableKind.ACADEMY -> "학원"
         UnavailableKind.CUSTOM -> UnavailableType.UNAVAILABLE.defaultLabel
     }

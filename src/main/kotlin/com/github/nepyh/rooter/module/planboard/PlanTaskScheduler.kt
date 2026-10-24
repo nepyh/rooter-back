@@ -16,7 +16,7 @@ enum class UnavailableType(val defaultLabel: String) {
     SLEEP("수면"), SCHOOL_PREP("등교 준비"), SCHOOL("학교"), COMMUTE("하교 후 귀가"), MEAL("식사"), UNAVAILABLE("개인 일정")
 }
 
-/** @property label 앱에 보여줄 이름 — 식사는 아침·점심·저녁, 사용자가 등록한 시간은 붙인 이름 (없으면 학원·개인 일정) */
+/** @property label 앱에 보여줄 이름 — 식사는 아침 식사·점심 식사·저녁 식사, 사용자가 등록한 시간은 붙인 이름 (없으면 학원·개인 일정) */
 data class TypedRange(val type: UnavailableType, val start: Int, val end: Int, val label: String = type.defaultLabel)
 
 data class PlacedTask(

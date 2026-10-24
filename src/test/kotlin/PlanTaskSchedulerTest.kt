@@ -196,19 +196,19 @@ class PlanTaskSchedulerTest : StringSpec({
         )
 
         typed.getValue(monday).filter { it.type == UnavailableType.MEAL } shouldBe listOf(
-            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60, "저녁")
+            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60, "저녁 식사")
         )
         typed.getValue(monday.plusDays(5)).filter { it.type == UnavailableType.MEAL } shouldBe listOf(
-            TypedRange(UnavailableType.MEAL, 6 * 60 + 30, 7 * 60, "아침"),
-            TypedRange(UnavailableType.MEAL, 12 * 60, 13 * 60, "점심"),
-            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60, "저녁")
+            TypedRange(UnavailableType.MEAL, 6 * 60 + 30, 7 * 60, "아침 식사"),
+            TypedRange(UnavailableType.MEAL, 12 * 60, 13 * 60, "점심 식사"),
+            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60, "저녁 식사")
         )
     }
 
     "하교가 이른 날(시험 기간 등)엔 하교 뒤에 걸치는 점심은 남긴다" {
         UserRoutine().ranges(1, schoolEnd = 12 * 60 + 10).map { it.label to (it.start to it.end) } shouldBe listOf(
-            "점심" to ((12 * 60) to (13 * 60)),
-            "저녁" to ((18 * 60) to (19 * 60))
+            "점심 식사" to ((12 * 60) to (13 * 60)),
+            "저녁 식사" to ((18 * 60) to (19 * 60))
         )
     }
 
@@ -221,7 +221,7 @@ class PlanTaskSchedulerTest : StringSpec({
             )
         )
 
-        routine.ranges(6).map { it.label } shouldBe listOf("아침", "점심", "가족 저녁", "학원", "피아노")
+        routine.ranges(6).map { it.label } shouldBe listOf("아침 식사", "점심 식사", "가족 저녁", "학원", "피아노")
     }
 
     "막힌 시간마다 종류를 붙인다 — 귀가 COMMUTE, 식사 MEAL, 학원·기타 UNAVAILABLE" {
@@ -241,10 +241,10 @@ class PlanTaskSchedulerTest : StringSpec({
             TypedRange(UnavailableType.SCHOOL_PREP, 6 * 60 + 30, 8 * 60 + 30),
             TypedRange(UnavailableType.SCHOOL, 8 * 60 + 30, 16 * 60 + 30),
             TypedRange(UnavailableType.COMMUTE, 16 * 60 + 30, 17 * 60 + 10),
-            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60, "저녁"),
+            TypedRange(UnavailableType.MEAL, 18 * 60, 19 * 60, "저녁 식사"),
             TypedRange(UnavailableType.UNAVAILABLE, 18 * 60, 20 * 60, "학원")
         )
-        typed.map { it.label } shouldBe listOf("수면", "수면", "등교 준비", "학교", "하교 후 귀가", "저녁", "학원")
+        typed.map { it.label } shouldBe listOf("수면", "수면", "등교 준비", "학교", "하교 후 귀가", "저녁 식사", "학원")
     }
 
     "자정 넘어 자는 학생도 등교일 00:00~취침·기상~08:30 을 등교 준비로 막아, 평일 새벽·아침엔 할일이 안 들어간다" {

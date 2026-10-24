@@ -591,14 +591,14 @@ class PlanBoardServiceTest : StringSpec({
             "SLEEP 00:00~06:30", "SCHOOL_PREP 06:30~08:30", "SCHOOL 08:30~16:30", "COMMUTE 16:30~17:10",
             "MEAL 18:00~19:00", "UNAVAILABLE 18:00~20:00", "SLEEP 23:00~24:00"
         )
-        friday.busyTimes.map { it.label } shouldBe listOf("수면", "등교 준비", "학교", "하교 후 귀가", "저녁", "개인 일정", "수면")
+        friday.busyTimes.map { it.label } shouldBe listOf("수면", "등교 준비", "학교", "하교 후 귀가", "저녁 식사", "개인 일정", "수면")
         friday.freeTimes.map { "${it.startTime}~${it.endTime}" } shouldBe listOf("17:10~18:00", "20:00~23:00")
 
         saturday.isSchoolDay shouldBe false
         saturday.busyTimes.map { "${it.type} ${it.startTime}~${it.endTime}" } shouldBe listOf(
             "SLEEP 00:00~06:30", "MEAL 06:30~07:00", "TASK 10:00~11:00", "MEAL 12:00~13:00", "MEAL 18:00~19:00", "SLEEP 23:00~24:00"
         )
-        saturday.busyTimes.map { it.label } shouldBe listOf("수면", "아침", "영어 단어", "점심", "저녁", "수면")
+        saturday.busyTimes.map { it.label } shouldBe listOf("수면", "아침 식사", "영어 단어", "점심 식사", "저녁 식사", "수면")
         saturday.busyTimes[2].let {
             it.taskName shouldBe "영어 단어"
             it.planBoardId shouldBe boardId
