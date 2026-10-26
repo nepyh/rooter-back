@@ -4,6 +4,8 @@ import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.user.AuthService
 import com.github.nepyh.rooter.module.user.UserService
+import com.github.nepyh.rooter.module.user.dto.AgreementsUpdateRequest
+import com.github.nepyh.rooter.module.user.dto.AgreementsUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
 import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
@@ -17,6 +19,7 @@ import com.github.nepyh.rooter.module.user.dto.StudentProfileResponse
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeRequest
 import com.github.nepyh.rooter.module.user.dto.UnavailableTimeResponse
 import com.github.nepyh.rooter.module.user.dto.UpdateProfileRequest
+import com.github.nepyh.rooter.module.user.dto.UserAgreementsResponse
 import com.github.nepyh.rooter.module.user.dto.UserInfoResponse
 import com.github.nepyh.rooter.module.user.dto.UserProfileUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
@@ -46,6 +49,9 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
     }.describe {
         tag("User")
         summary = "회원가입"
+        description = "agreements 는 선택 필드다(구버전 앱은 안 보냄). 보내면 필수 항목이 모두 agreed=true 이고 " +
+            "version 이 현재 버전과 같아야 201 이 나가고, 유저 생성과 같은 트랜잭션에서 이력이 저장된다. " +
+            "안 보내면 가입은 되고 로그인 응답의 pendingAgreements 로 다시 동의를 받는다."
         requestBody {
             ContentType.Application.Json {
                 schema = jsonSchema<UserRegisterRequest>()
@@ -59,7 +65,8 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
                 }
             }
             HttpStatusCode.BadRequest {
-                description = "사용할 수 없는 사용자 이름 (12자 초과, code=INVALID_USERNAME), 비밀번호 형식 오류 (code=INVALID_PASSWORD_FORMAT), 또는 이메일 320자 초과 (code=EMAIL_TOO_LONG)"
+                description = "사용할 수 없는 사용자 이름 (12자 초과, code=INVALID_USERNAME), 비밀번호 형식 오류 (code=INVALID_PASSWORD_FORMAT), 또는 이메일 320자 초과 (code=EMAIL_TOO_LONG), 또는 agreements 검증 실패 " +
+                        "(code=UNKNOWN_AGREEMENT_CODE / DUPLICATED_AGREEMENT_CODE / AGREEMENT_VERSION_MISMATCH / REQUIRED_AGREEMENT_MISSING / EMPTY_AGREEMENTS)"
             }
             HttpStatusCode.Conflict {
                 description = "이미 사용 중인 이메일 (code=DUPLICATED_EMAIL)"
@@ -71,6 +78,103 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
     }
 
     authenticate("auth-jwt") {
+        post("{id}/agreements") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 동의만 변경할 수 있습니다."))
+            }
+            val request = call.receive<AgreementsUpdateRequest>()
+            call.respond(HttpStatusCode.OK, userService.updateAgreements(id, request))
+        }.describe {
+            tag("User")
+            summary = "약관 재동의·철회"
+            description = "약관이 개정돼 pendingAgreements 로 안내된 뒤 앱이 호출한다. 보낸 항목만 검증해 새 행으로 남기고 " +
+                "(이력 append-only) 남은 필수 미동의 code 를 돌려준다. 필수 항목을 agreed=false 로 보내면 400 이다. " +
+                "본인 동의만 변경 가능."
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<AgreementsUpdateRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "저장 성공. pendingAgreements 가 비어 있으면 동의 화면을 닫아도 된다"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<AgreementsUpdateResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 agreements 검증 실패 " +
+                        "(code=UNKNOWN_AGREEMENT_CODE / DUPLICATED_AGREEMENT_CODE / AGREEMENT_VERSION_MISMATCH / REQUIRED_AGREEMENT_MISSING / EMPTY_AGREEMENTS)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 동의가 아님 (code=FORBIDDEN)"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저 (code=USER_NOT_FOUND)"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        get("{id}/agreements") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 동의만 조회할 수 있습니다."))
+            }
+            call.respond(HttpStatusCode.OK, userService.getAgreements(id))
+        }.describe {
+            tag("User")
+            summary = "내 동의 이력 조회"
+            description = "동의 항목별 가장 최근 1건만 준다. 한 번도 동의하지 않은 항목은 응답에서 빠진다. 본인 것만 조회 가능."
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "조회 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<UserAgreementsResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 동의가 아님 (code=FORBIDDEN)"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저 (code=USER_NOT_FOUND)"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
         get("{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
                 ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))

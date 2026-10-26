@@ -12,5 +12,6 @@ data class UserInfoResponse(
     val classNumber: Int? = null,
     val createdAt: String,
     val avatarUrl: String? = null,
-    val bio: String? = null
+    val bio: String? = null,
+    val pendingAgreements: List<String> = emptyList()
 )

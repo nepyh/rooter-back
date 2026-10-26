@@ -32,13 +32,13 @@ class UserCommuteTimeServiceTest : StringSpec({
         val repo = InMemoryUserRepo()
         val userId = seedUser(repo, "commute-default@test.com")
 
-        UserService(repo, noopFileStorage).getCommuteTime(userId) shouldBe CommuteTimeResponse(40, isDefault = true)
+        UserService(repo, noopFileStorage, testAgreementCatalog).getCommuteTime(userId) shouldBe CommuteTimeResponse(40, isDefault = true)
     }
 
     "updateCommuteTime: 0~180분을 저장하고, 조회해도 저장한 값이 나온다" {
         val repo = InMemoryUserRepo()
         val userId = seedUser(repo, "commute-save@test.com")
-        val service = UserService(repo, noopFileStorage)
+        val service = UserService(repo, noopFileStorage, testAgreementCatalog)
 
         service.updateCommuteTime(userId, CommuteTimeRequest(25)) shouldBe CommuteTimeResponse(25, isDefault = false)
         service.updateCommuteTime(userId, CommuteTimeRequest(0)) shouldBe CommuteTimeResponse(0, isDefault = false)
@@ -48,7 +48,7 @@ class UserCommuteTimeServiceTest : StringSpec({
     "updateCommuteTime: 0~180분 밖이면 INVALID_COMMUTE_MINUTES 이고 저장하지 않는다" {
         val repo = InMemoryUserRepo()
         val userId = seedUser(repo, "commute-range@test.com")
-        val service = UserService(repo, noopFileStorage)
+        val service = UserService(repo, noopFileStorage, testAgreementCatalog)
 
         listOf(-1, 181).forEach { bad ->
             shouldThrow<UserValidationException.WrongCommuteMinutesException> {
@@ -59,7 +59,7 @@ class UserCommuteTimeServiceTest : StringSpec({
     }
 
     "getCommuteTime·updateCommuteTime: 존재하지 않는 유저면 UserNotFoundException" {
-        val service = UserService(InMemoryUserRepo(), noopFileStorage)
+        val service = UserService(InMemoryUserRepo(), noopFileStorage, testAgreementCatalog)
 
         shouldThrow<UserNotFoundException> { service.getCommuteTime(999) }
         shouldThrow<UserNotFoundException> { service.updateCommuteTime(999, CommuteTimeRequest(30)) }

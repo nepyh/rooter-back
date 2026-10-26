@@ -38,7 +38,7 @@ class UserDeleteServiceTest : StringSpec({
         val userId = repo.insertUser("bye@test.com", "tester", "x").id.value
         repo.updateAvatarImageKey(userId, "avatars/me.png")
         val storage = DeleteRecordingFileStorage()
-        val userService = UserService(repo, storage)
+        val userService = UserService(repo, storage, testAgreementCatalog)
         userService.addUnavailableTime(userId, UnavailableTimeRequest(dayOfWeek = 1.toShort(), startTime = "18:00", endTime = "20:00"))
 
         userService.deleteUser(userId)
@@ -52,7 +52,7 @@ class UserDeleteServiceTest : StringSpec({
         val repo = InMemoryUserRepo()
         val me = repo.insertUser("me@test.com", "me", "x").id.value
         val other = repo.insertUser("other@test.com", "other", "x").id.value
-        val userService = UserService(repo, DeleteRecordingFileStorage())
+        val userService = UserService(repo, DeleteRecordingFileStorage(), testAgreementCatalog)
 
         userService.deleteUser(me)
 
@@ -65,7 +65,7 @@ class UserDeleteServiceTest : StringSpec({
         val userId = repo.insertUser("plain@test.com", "tester", "x").id.value
         val storage = DeleteRecordingFileStorage()
 
-        UserService(repo, storage).deleteUser(userId)
+        UserService(repo, storage, testAgreementCatalog).deleteUser(userId)
 
         repo.findUserById(userId) shouldBe null
         storage.deletedKeys.shouldBeEmpty()
@@ -76,13 +76,13 @@ class UserDeleteServiceTest : StringSpec({
         val userId = repo.insertUser("flaky@test.com", "tester", "x").id.value
         repo.updateAvatarImageKey(userId, "avatars/flaky.png")
 
-        UserService(repo, DeleteRecordingFileStorage(failDelete = true)).deleteUser(userId)
+        UserService(repo, DeleteRecordingFileStorage(failDelete = true), testAgreementCatalog).deleteUser(userId)
 
         repo.findUserById(userId) shouldBe null
     }
 
     "deleteUser: 없는 유저면 UserNotFoundException" {
-        val userService = UserService(InMemoryUserRepo(), DeleteRecordingFileStorage())
+        val userService = UserService(InMemoryUserRepo(), DeleteRecordingFileStorage(), testAgreementCatalog)
 
         shouldThrow<UserNotFoundException> { userService.deleteUser(999) }
     }

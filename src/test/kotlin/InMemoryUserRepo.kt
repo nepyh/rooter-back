@@ -2,6 +2,9 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.user.UserRepo
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
+import com.github.nepyh.rooter.module.user.model.AgreementCode
+import com.github.nepyh.rooter.module.user.model.AgreementRecord
+import com.github.nepyh.rooter.module.user.model.AgreementState
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
@@ -59,12 +62,22 @@ class InMemoryUserRepo : UserRepo {
         val label: String?,
     )
 
+    private data class StoredAgreement(
+        val userId: Int,
+        val code: String,
+        val version: String,
+        val required: Boolean,
+        val agreed: Boolean,
+        val createdAt: OffsetDateTime,
+    )
+
     private data class StoredTask(val userId: Int, val planDate: LocalDate, val status: PlanTaskStatus)
 
     private val users = LinkedHashMap<Int, StoredUser>()
     private val profiles = mutableListOf<StoredProfile>()
     private val unavailableTimes = mutableListOf<StoredUnavailableTime>()
     private val tasks = mutableListOf<StoredTask>()
+    private val agreements = mutableListOf<StoredAgreement>()
     private var nextUserId = 1
     private var nextProfileId = 1
     private var nextUnavailableTimeId = 1
@@ -94,6 +107,48 @@ class InMemoryUserRepo : UserRepo {
         users[stored.id] = stored
         return stored.toRow()
     }
+
+    override fun insertUserWithAgreements(
+        email: String,
+        username: String,
+        password: String,
+        agreements: List<AgreementRecord>
+    ): UserRow {
+        val user = insertUser(email = email, username = username, password = password)
+        insertAgreements(user.id.value, agreements)
+        return user
+    }
+
+    override fun insertAgreements(userId: Int, agreements: List<AgreementRecord>) {
+        users[userId] ?: throw UserNotFoundException()
+        agreements.forEach { record ->
+            this.agreements += StoredAgreement(
+                userId = userId,
+                code = record.code.name,
+                version = record.version,
+                required = record.required,
+                agreed = record.agreed,
+                createdAt = OffsetDateTime.now(),
+            )
+        }
+    }
+
+    override fun findLatestAgreements(userId: Int): Map<AgreementCode, AgreementState> =
+        agreements.filter { it.userId == userId }
+            .reversed()
+            .mapNotNull { stored ->
+                AgreementCode.fromCode(stored.code)?.let { code ->
+                    code to AgreementState(
+                        code = code,
+                        version = stored.version,
+                        required = stored.required,
+                        agreed = stored.agreed,
+                        createdAt = stored.createdAt.toString(),
+                    )
+                }
+            }
+            .distinctBy { (code, _) -> code }
+            .toMap()
 
     override fun findUserByEmail(email: String): UserRow? =
         users.values.firstOrNull { it.email == email }?.toRow()

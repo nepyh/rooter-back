@@ -52,6 +52,7 @@ import com.github.nepyh.rooter.module.review.exception.ReviewQuestionNotFoundExc
 import com.github.nepyh.rooter.module.review.exception.ReviewValidationException
 import com.github.nepyh.rooter.module.user.UserModule
 import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundException
+import com.github.nepyh.rooter.module.user.exception.AgreementValidationException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import io.ktor.http.HttpStatusCode
@@ -125,6 +126,10 @@ fun Application.configureErrorResponses() {
             call.respondError(HttpStatusCode.NotFound, "UNAVAILABLE_TIME_NOT_FOUND", cause.message)
         }
         exception<UserValidationException> { call, cause ->
+            ErrorMonitoring.capture(cause, ErrorSource.HTTP, cause.status.value)
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<AgreementValidationException> { call, cause ->
             ErrorMonitoring.capture(cause, ErrorSource.HTTP, cause.status.value)
             call.respondError(cause.status, cause.code, cause.message)
         }

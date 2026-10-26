@@ -32,13 +32,13 @@ class UserSleepTimeServiceTest : StringSpec({
         val repo = InMemoryUserRepo()
         val userId = seedUser(repo, "sleep-default@test.com")
 
-        UserService(repo, noopFileStorage).getSleepTime(userId) shouldBe SleepTimeResponse("23:00", "06:30", isDefault = true)
+        UserService(repo, noopFileStorage, testAgreementCatalog).getSleepTime(userId) shouldBe SleepTimeResponse("23:00", "06:30", isDefault = true)
     }
 
     "updateSleepTime: 저장하면 같은 값을 돌려주고, 조회해도 저장한 값이 나온다 (자정 넘어 자는 경우 포함)" {
         val repo = InMemoryUserRepo()
         val userId = seedUser(repo, "sleep-save@test.com")
-        val service = UserService(repo, noopFileStorage)
+        val service = UserService(repo, noopFileStorage, testAgreementCatalog)
 
         service.updateSleepTime(userId, SleepTimeRequest("23:30", "07:00")) shouldBe SleepTimeResponse("23:30", "07:00", isDefault = false)
         service.updateSleepTime(userId, SleepTimeRequest("01:00", "07:30")) shouldBe SleepTimeResponse("01:00", "07:30", isDefault = false)
@@ -48,7 +48,7 @@ class UserSleepTimeServiceTest : StringSpec({
     "updateSleepTime: HH:mm 이 아니면 INVALID_TIME_FORMAT 이고 저장하지 않는다" {
         val repo = InMemoryUserRepo()
         val userId = seedUser(repo, "sleep-format@test.com")
-        val service = UserService(repo, noopFileStorage)
+        val service = UserService(repo, noopFileStorage, testAgreementCatalog)
 
         listOf("7:00", "24:00", "23:00:00", "abc", "").forEach { bad ->
             shouldThrow<UserValidationException.WrongTimeFormatException> {
@@ -63,12 +63,12 @@ class UserSleepTimeServiceTest : StringSpec({
         val userId = seedUser(repo, "sleep-same@test.com")
 
         shouldThrow<UserValidationException.WrongSleepTimeException> {
-            UserService(repo, noopFileStorage).updateSleepTime(userId, SleepTimeRequest("07:00", "07:00"))
+            UserService(repo, noopFileStorage, testAgreementCatalog).updateSleepTime(userId, SleepTimeRequest("07:00", "07:00"))
         }.code shouldBe "INVALID_SLEEP_TIME"
     }
 
     "getSleepTime·updateSleepTime: 존재하지 않는 유저면 UserNotFoundException" {
-        val service = UserService(InMemoryUserRepo(), noopFileStorage)
+        val service = UserService(InMemoryUserRepo(), noopFileStorage, testAgreementCatalog)
 
         shouldThrow<UserNotFoundException> { service.getSleepTime(999) }
         shouldThrow<UserNotFoundException> { service.updateSleepTime(999, SleepTimeRequest("23:00", "07:00")) }
