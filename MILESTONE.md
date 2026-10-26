@@ -42,7 +42,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 7/10 | doing |
-| M5 | 사용자 기능 | 7/10 | doing |
+| M5 | 사용자 기능 | 7/11 | doing |
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
 | M8 | AI 계획 생성·스케줄링 | 10/16 | doing |
@@ -145,6 +145,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-046 로그인 응답에 userId 추가 (토큰 디코드 의존 제거) — PR #180 (09-28)
 - [x] done RB-047 아바타 다운로드 링크(avatarUrl) 응답 — PR #151 (09-26)
 - [ ] todo RB-048 내 정보 응답에 학교 이름 (프론트 요청 B-17) — 지금은 `schoolId` 만 나감. NICE 조회로 DB 변경 없이 가능
+- [ ] doing RB-155 약관·개인정보 동의 이력 (#287, 앱스토어 제출용) — 가입 시 동의를 버전·시각까지 남기고 약관이 바뀌면 재동의를 받는다. 조항은 `code`+`version` 쌍으로 식별하고 DB 에는 문자열로만 저장(카탈로그 테이블·FK 없음) — 조항 추가가 DDL·배포 블로커가 되지 않게. `GET /agreements`(인증 없음, code·required·title·version·url), `POST /users` 의 `agreements` 배열(선택 필드 — 구버전 앱 400 방지, 필수 전부 agreed=true·현재 버전 일치여야 하고 유저 생성과 같은 트랜잭션에서 저장), `POST/GET /users/{id}/agreements`(재동의·철회 append, 본인만), 로그인·내 정보 응답의 `pendingAgreements`(필수 중 행 없음·거부·버전 불일치). `required` 는 동의 시점 스냅샷이고 이력은 append-only. 문서 본문은 `nepyh/rooter-legal` 의 버전별 고정 URL 이 정본이고 conf 의 `agreements` 가 version·url 을 들고 있다(code 가 enum 과 어긋나면 기동 실패) · DB 변경 있음 · `./gradlew test` 360건 0 실패(3 skipped, 신규 15건 `UserAgreementServiceTest`) · **DDL 선행: rooter-ddl 에 `user_agreements` 추가 → 운영 DB 적용 → 그다음 머지** · 실패 code: UNKNOWN_AGREEMENT_CODE / DUPLICATED_AGREEMENT_CODE / AGREEMENT_VERSION_MISMATCH / REQUIRED_AGREEMENT_MISSING / EMPTY_AGREEMENTS
 - [ ] doing RB-139 회원 탈퇴 `DELETE /users/{id}` (앱스토어 제출 필수) — 본인만, `users` 행 삭제로 하위 기록은 DDL cascade(rooter-ddl 스키마에서 users 에서 닿는 FK 25개 전부 CASCADE·막는 FK 0 확인), 아바타 S3 오브젝트 삭제(실패해도 탈퇴 성공), 이후 토큰은 유저가 없어 401 · `./gradlew test` 240건 0 실패 · DDL 변경 없음 · 남은 것: 애플 로그인 토큰 철회(`.p8` 키 필요)·약관 동의 기록
 
 ## M6. 파일 저장·S3
