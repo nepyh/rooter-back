@@ -67,7 +67,7 @@ class UserAvatarServiceTest : StringSpec({
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("avatar-ok@test.com", "tester", "x").id.value
         val storage = RecordingFileStorage()
-        val userService = UserService(repo, storage)
+        val userService = UserService(repo, storage, testAgreementCatalog)
         val bytes = "fake-png-bytes".toByteArray()
 
         val response = userService.updateAvatar(userId, fileItem("photo.png", bytes))
@@ -83,7 +83,7 @@ class UserAvatarServiceTest : StringSpec({
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("avatar-replace@test.com", "tester", "x", avatarImageKey = "avatars/old.png").id.value
         val storage = RecordingFileStorage()
-        val userService = UserService(repo, storage)
+        val userService = UserService(repo, storage, testAgreementCatalog)
 
         userService.updateAvatar(userId, fileItem("photo.png", "fake-png-bytes".toByteArray()))
 
@@ -95,7 +95,7 @@ class UserAvatarServiceTest : StringSpec({
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("avatar-first@test.com", "tester", "x").id.value
         val storage = RecordingFileStorage()
-        val userService = UserService(repo, storage)
+        val userService = UserService(repo, storage, testAgreementCatalog)
 
         userService.updateAvatar(userId, fileItem("photo.png", "fake-png-bytes".toByteArray()))
 
@@ -105,7 +105,7 @@ class UserAvatarServiceTest : StringSpec({
     "updateAvatar: 허용되지 않는 확장자(gif)면 UnsupportedAvatarFileTypeException" {
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("avatar-badtype@test.com", "tester", "x").id.value
-        val userService = UserService(repo, RecordingFileStorage())
+        val userService = UserService(repo, RecordingFileStorage(), testAgreementCatalog)
 
         shouldThrow<UserValidationException.UnsupportedAvatarFileTypeException> {
             userService.updateAvatar(userId, fileItem("photo.gif", "aaa".toByteArray()))
@@ -115,7 +115,7 @@ class UserAvatarServiceTest : StringSpec({
     "updateAvatar: 확장자가 없으면 UnsupportedAvatarFileTypeException" {
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("avatar-noext@test.com", "tester", "x").id.value
-        val userService = UserService(repo, RecordingFileStorage())
+        val userService = UserService(repo, RecordingFileStorage(), testAgreementCatalog)
 
         shouldThrow<UserValidationException.UnsupportedAvatarFileTypeException> {
             userService.updateAvatar(userId, fileItem("photo", "aaa".toByteArray()))
@@ -126,7 +126,7 @@ class UserAvatarServiceTest : StringSpec({
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("avatar-toolarge@test.com", "tester", "x").id.value
         val storage = RecordingFileStorage()
-        val userService = UserService(repo, storage)
+        val userService = UserService(repo, storage, testAgreementCatalog)
         val oversized = ByteArray(5 * 1024 * 1024 + 1)
 
         shouldThrow<UserValidationException.AvatarFileTooLargeException> {
@@ -139,7 +139,7 @@ class UserAvatarServiceTest : StringSpec({
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("avatar-exactsize@test.com", "tester", "x").id.value
         val storage = RecordingFileStorage()
-        val userService = UserService(repo, storage)
+        val userService = UserService(repo, storage, testAgreementCatalog)
         val exactSize = ByteArray(5 * 1024 * 1024)
 
         userService.updateAvatar(userId, fileItem("photo.png", exactSize))
@@ -151,7 +151,7 @@ class UserAvatarServiceTest : StringSpec({
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("info@test.com", "tester", "x", avatarImageKey = "avatars/old.png").id.value
         repo.insertStudentProfile(userId, schoolId = "C107181084", grade = 2, classNumber = 3)
-        val userService = UserService(repo, RecordingFileStorage())
+        val userService = UserService(repo, RecordingFileStorage(), testAgreementCatalog)
 
         val response = userService.getUserInfo(userId)
 
@@ -162,7 +162,7 @@ class UserAvatarServiceTest : StringSpec({
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("info-noavatar@test.com", "tester", "x").id.value
         repo.insertStudentProfile(userId, schoolId = "C107181084", grade = 2, classNumber = 3)
-        val userService = UserService(repo, RecordingFileStorage())
+        val userService = UserService(repo, RecordingFileStorage(), testAgreementCatalog)
 
         userService.getUserInfo(userId).avatarUrl shouldBe null
     }

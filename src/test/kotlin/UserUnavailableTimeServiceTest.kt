@@ -30,7 +30,7 @@ class UserUnavailableTimeServiceTest : StringSpec({
 
     fun seedUser(repo: InMemoryUserRepo, email: String): Int = repo.insertUser(email, "tester", "x").id.value
 
-    fun userServiceOf(repo: InMemoryUserRepo) = UserService(repo, noopFileStorage)
+    fun userServiceOf(repo: InMemoryUserRepo) = UserService(repo, noopFileStorage, testAgreementCatalog)
 
     "deleteUnavailableTime: 존재하지 않는 유저면 UserNotFoundException" {
         val userService = userServiceOf(InMemoryUserRepo())

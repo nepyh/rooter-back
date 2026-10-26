@@ -4,15 +4,21 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
+import com.github.nepyh.rooter.module.user.model.AgreementCode
+import com.github.nepyh.rooter.module.user.model.AgreementRecord
+import com.github.nepyh.rooter.module.user.model.AgreementState
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
 import com.github.nepyh.rooter.module.user.model.UnavailableKind
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeTable
+import com.github.nepyh.rooter.module.user.model.UserAgreementRow
+import com.github.nepyh.rooter.module.user.model.UserAgreementTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
@@ -43,6 +49,62 @@ class ExposedUserRepo : UserRepo {
                 this.bio = bio
                 this.createdAt = OffsetDateTime.now()
             }
+        }
+    }
+
+    override fun insertUserWithAgreements(
+        email: String,
+        username: String,
+        password: String,
+        agreements: List<AgreementRecord>
+    ): UserRow {
+        return transaction {
+            val user = UserRow.new {
+                this.email = email
+                this.username = username
+                this.password = password
+                this.createdAt = OffsetDateTime.now()
+            }
+            agreements.forEach { insertAgreementRow(user.id.value, it) }
+            user
+        }
+    }
+
+    override fun insertAgreements(userId: Int, agreements: List<AgreementRecord>) {
+        transaction {
+            agreements.forEach { insertAgreementRow(userId, it) }
+        }
+    }
+
+    override fun findLatestAgreements(userId: Int): Map<AgreementCode, AgreementState> {
+        return transaction {
+            UserAgreementRow.find { UserAgreementTable.userId eq userId }
+                .orderBy(UserAgreementTable.createdAt to SortOrder.DESC, UserAgreementTable.id to SortOrder.DESC)
+                .toList()
+                .mapNotNull { row ->
+                    AgreementCode.fromCode(row.code)?.let { code ->
+                        code to AgreementState(
+                            code = code,
+                            version = row.version,
+                            required = row.isRequired,
+                            agreed = row.agreed,
+                            createdAt = row.createdAt.toString()
+                        )
+                    }
+                }
+                .distinctBy { (code, _) -> code }
+                .toMap()
+        }
+    }
+
+    private fun insertAgreementRow(userId: Int, record: AgreementRecord) {
+        UserAgreementRow.new {
+            this.user = UserRow[userId]
+            this.code = record.code.name
+            this.version = record.version
+            this.isRequired = record.required
+            this.agreed = record.agreed
+            this.createdAt = OffsetDateTime.now()
         }
     }
 

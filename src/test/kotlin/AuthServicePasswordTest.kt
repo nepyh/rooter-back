@@ -69,7 +69,7 @@ class AuthServicePasswordTest : StringSpec({
     val userRepo = ExposedUserRepo()
     val authService = AuthService(
         userRepo,
-        UserService(userRepo, noopFileStorage),
+        UserService(userRepo, noopFileStorage, testAgreementCatalog),
         jwtSecret = "test-secret",
         jwtIssuer = "rooter",
         googleClientId = "",

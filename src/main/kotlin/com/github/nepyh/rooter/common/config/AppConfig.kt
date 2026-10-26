@@ -44,7 +44,11 @@ data class AppConfig(
     // 오류 수집은 DSN 을 설정한 환경에서만 활성화한다.
     val sentryDsn: String = "",
     val sentryEnvironment: String = "development",
-    val sentryRelease: String = ""
+    val sentryRelease: String = "",
+
+    // 약관·개인정보 동의 항목. 시크릿이 아니라 env 배선 없이 conf 에 값을 직접 적는다.
+    // 기본값은 테스트용이다 — 운영 경로는 fromApplicationConfig 가 configList 로 반드시 채운다(설정이 없으면 기동 실패)
+    val agreements: List<AgreementConfigEntry> = emptyList()
 ) {
     companion object {
         fun fromApplicationConfig(config: ApplicationConfig): AppConfig {
@@ -98,8 +102,26 @@ data class AppConfig(
                 sentryDsn = config.propertyOrNull("sentry.dsn")?.getString().orEmpty(),
                 sentryEnvironment = config.propertyOrNull("sentry.environment")?.getString()
                     ?.takeIf { it.isNotBlank() } ?: envMode.name.lowercase(),
-                sentryRelease = config.propertyOrNull("sentry.release")?.getString().orEmpty()
+                sentryRelease = config.propertyOrNull("sentry.release")?.getString().orEmpty(),
+
+                agreements = config.configList("agreements").map { item ->
+                    AgreementConfigEntry(
+                        code = item.property("code").getString(),
+                        title = item.property("title").getString(),
+                        version = item.property("version").getString(),
+                        url = item.property("url").getString()
+                    )
+                }
             )
         }
     }
 }
+
+
+/** conf 의 `agreements` 한 줄. code → domain enum 매핑은 user module 이 한다(common 은 module 을 모른다). */
+data class AgreementConfigEntry(
+    val code: String,
+    val title: String,
+    val version: String,
+    val url: String
+)

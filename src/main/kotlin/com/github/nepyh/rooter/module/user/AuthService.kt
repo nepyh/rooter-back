@@ -133,7 +133,9 @@ class AuthService(
             userId = user.id.value,
             email = user.email,
             username = user.username,
-            token = token
+            token = token,
+            // 앱이 로그인 직후 동의 화면을 띄울지 여기서 판단한다 (기존 회원·약관 개정·소셜 첫 로그인 모두 이 경로)
+            pendingAgreements = userService.pendingAgreements(user.id.value)
         )
     }
 }

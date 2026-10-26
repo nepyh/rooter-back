@@ -5,6 +5,11 @@ import com.github.nepyh.rooter.module.planboard.UserRoutine
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.storage.FileStorage
 import com.github.nepyh.rooter.module.storage.toUploadableFile
+import com.github.nepyh.rooter.module.user.dto.AgreementCatalogResponse
+import com.github.nepyh.rooter.module.user.dto.AgreementDecision
+import com.github.nepyh.rooter.module.user.dto.AgreementDocumentResponse
+import com.github.nepyh.rooter.module.user.dto.AgreementsUpdateRequest
+import com.github.nepyh.rooter.module.user.dto.AgreementsUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.CommuteTimeRequest
 import com.github.nepyh.rooter.module.user.dto.CommuteTimeResponse
@@ -21,10 +26,16 @@ import com.github.nepyh.rooter.module.user.dto.UpdateProfileRequest
 import com.github.nepyh.rooter.module.user.dto.UserInfoResponse
 import com.github.nepyh.rooter.module.user.dto.UserProfileUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
+import com.github.nepyh.rooter.module.user.dto.UserAgreementResponse
+import com.github.nepyh.rooter.module.user.dto.UserAgreementsResponse
 import com.github.nepyh.rooter.module.user.dto.UserRegisterResponse
+import com.github.nepyh.rooter.module.user.exception.AgreementValidationException
 import com.github.nepyh.rooter.module.user.exception.UnavailableTimeNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
+import com.github.nepyh.rooter.module.user.model.AgreementCatalog
+import com.github.nepyh.rooter.module.user.model.AgreementCode
+import com.github.nepyh.rooter.module.user.model.AgreementRecord
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.UnavailableTimeRow
 import io.ktor.http.content.PartData
@@ -53,7 +64,8 @@ private val HOUR_MINUTE_FORMAT = DateTimeFormatter.ofPattern("HH:mm").withResolv
 
 class UserService(
     private val userRepo: UserRepo,
-    private val fileStorage: FileStorage
+    private val fileStorage: FileStorage,
+    private val agreements: AgreementCatalog
 ) {
     private val logger = LoggerFactory.getLogger(UserService::class.java)
 
@@ -88,11 +100,17 @@ class UserService(
             BCrypt.gensalt()
         )
 
-        // DB 저장
-        userRepo.insertUser(
+        // 구버전 앱은 agreements 를 안 보낸다 — 그때도 가입은 되게 두고, 필수 미동의는 pendingAgreements 로 드러난다
+        val agreementRecords = request.agreements
+            ?.let { resolveDecisions(it, requireAllRequired = true) }
+            .orEmpty()
+
+        // DB 저장 (유저 + 동의 이력을 한 트랜잭션으로)
+        userRepo.insertUserWithAgreements(
             email = request.email,
             username = request.username,
-            password = hashedPassword
+            password = hashedPassword,
+            agreements = agreementRecords
         )
 
         return UserRegisterResponse(
@@ -114,7 +132,8 @@ class UserService(
             classNumber = profile?.classNumber,
             createdAt = user.createdAt.toString(),
             avatarUrl = user.avatarImageKey?.let { fileStorage.getUrl(it) },
-            bio = user.bio
+            bio = user.bio,
+            pendingAgreements = pendingAgreements(id)
         )
     }
 
@@ -164,6 +183,111 @@ class UserService(
             .toList()
 
         return StreakResponse(days = days)
+    }
+
+    /** 가입 화면이 그릴 현재 조항 목록. 문서 본문은 url 이 가리키는 정적 페이지가 정본이다. */
+    fun getAgreementCatalog(): AgreementCatalogResponse = AgreementCatalogResponse(
+        agreements = agreements.all().map { document ->
+            AgreementDocumentResponse(
+                code = document.code.name,
+                required = document.code.required,
+                title = document.title,
+                version = document.version,
+                url = document.url
+            )
+        }
+    )
+
+    /** code 별 최근 동의 1건. 한 번도 동의하지 않은 code 는 응답에서 빠진다. */
+    fun getAgreements(userId: Int): UserAgreementsResponse {
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+        val latest = userRepo.findLatestAgreements(userId)
+
+        return UserAgreementsResponse(
+            agreements = agreements.all().mapNotNull { document ->
+                latest[document.code]?.let { row ->
+                    UserAgreementResponse(
+                        code = document.code.name,
+                        required = document.code.required,
+                        version = row.version,
+                        agreed = row.agreed,
+                        createdAt = row.createdAt.toString()
+                    )
+                }
+            }
+        )
+    }
+
+    /**
+     * 필수 항목 중 아직 유효한 동의가 없는 code 목록.
+     * 행이 없거나(한 번도 안 물어봄), 최신 행이 거부이거나, 버전이 현재와 다르면 미동의다.
+     */
+    fun pendingAgreements(userId: Int): List<String> {
+        val latest = userRepo.findLatestAgreements(userId)
+
+        return agreements.requiredCodes()
+            .filter { code ->
+                val row = latest[code]
+                row == null || !row.agreed || row.version != agreements.current(code).version
+            }
+            .map { it.name }
+    }
+
+    /** 재동의·철회. 보낸 항목만 검증해 새 행으로 append 하고, 남은 필수 항목을 돌려준다. */
+    fun updateAgreements(userId: Int, request: AgreementsUpdateRequest): AgreementsUpdateResponse {
+        userRepo.findUserById(userId) ?: throw UserNotFoundException()
+
+        val records = resolveDecisions(request.agreements, requireAllRequired = false)
+        userRepo.insertAgreements(userId, records)
+
+        return AgreementsUpdateResponse(pendingAgreements = pendingAgreements(userId))
+    }
+
+    /**
+     * 요청의 조항 결정을 검증해 저장용 레코드로 바꾼다.
+     * 가입은 [requireAllRequired] 로 필수 항목이 전부 agreed=true 인지까지 본다.
+     * 재동의는 일부 항목만 보낼 수 있지만, 필수 항목을 agreed=false 로 보내는 것은 어느 쪽이든 거부한다.
+     */
+    private fun resolveDecisions(
+        decisions: List<AgreementDecision>,
+        requireAllRequired: Boolean
+    ): List<AgreementRecord> {
+        if (decisions.isEmpty()) throw AgreementValidationException.EmptyAgreementsException()
+
+        val seen = mutableSetOf<AgreementCode>()
+        val records = decisions.map { decision ->
+            val code = AgreementCode.fromCode(decision.code)
+                ?: throw AgreementValidationException.UnknownCodeException(decision.code)
+            if (!seen.add(code)) {
+                throw AgreementValidationException.DuplicatedCodeException(decision.code)
+            }
+
+            val current = agreements.current(code)
+            if (current.version != decision.version) {
+                throw AgreementValidationException.VersionMismatchException(
+                    decision.code, current.version, decision.version
+                )
+            }
+            if (code.required && !decision.agreed) {
+                throw AgreementValidationException.RequiredMissingException(listOf(decision.code))
+            }
+
+            AgreementRecord(
+                code = code,
+                version = current.version,
+                required = code.required,
+                agreed = decision.agreed
+            )
+        }
+
+        if (requireAllRequired) {
+            val missing = agreements.requiredCodes().filter { code -> records.none { it.code == code } }
+            if (missing.isNotEmpty()) {
+                throw AgreementValidationException.RequiredMissingException(missing.map { it.name })
+            }
+        }
+
+        return records
     }
 
     fun getUnavailableTimes(id: Int): List<UnavailableTimeResponse> {

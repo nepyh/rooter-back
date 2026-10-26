@@ -62,7 +62,7 @@ class UserInfoServiceTest : StringSpec({
         override suspend fun getUrl(fileKey: String): String? = error("사용되지 않아야 함")
         override suspend fun delete(fileKey: String) = error("사용되지 않아야 함")
     }
-    val userService = UserService(ExposedUserRepo(), noopFileStorage)
+    val userService = UserService(ExposedUserRepo(), noopFileStorage, testAgreementCatalog)
 
     fun seedUser(email: String): Int = transaction(db) {
         UserRow.new {
