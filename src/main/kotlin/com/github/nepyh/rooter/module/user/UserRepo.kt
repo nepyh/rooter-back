@@ -1,5 +1,8 @@
 package com.github.nepyh.rooter.module.user
 
+import com.github.nepyh.rooter.module.user.model.AgreementCode
+import com.github.nepyh.rooter.module.user.model.AgreementRecord
+import com.github.nepyh.rooter.module.user.model.AgreementState
 import com.github.nepyh.rooter.module.user.model.DayOfWeek
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.UnavailableKind
@@ -19,6 +22,22 @@ interface UserRepo {
         avatarImageKey: String? = null,
         bio: String? = null
     ): UserRow
+
+    /**
+     * 유저 생성과 동의 이력 저장을 **한 트랜잭션**으로 처리한다.
+     * 가입만 되고 동의가 빠지는 상태를 만들지 않기 위해서다.
+     */
+    fun insertUserWithAgreements(
+        email: String,
+        username: String,
+        password: String,
+        agreements: List<AgreementRecord>
+    ): UserRow
+
+    fun insertAgreements(userId: Int, agreements: List<AgreementRecord>)
+
+    /** code 별 가장 최근 1건. append-only 라 "최신 행" 이 곧 현재 유효한 동의다. */
+    fun findLatestAgreements(userId: Int): Map<AgreementCode, AgreementState>
 
     fun findUserByEmail(email: String): UserRow?
 
