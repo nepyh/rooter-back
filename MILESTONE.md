@@ -45,7 +45,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M5 | 사용자 기능 | 7/12 | doing |
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/4 | doing |
-| M8 | AI 계획 생성·스케줄링 | 10/16 | doing |
+| M8 | AI 계획 생성·스케줄링 | 10/17 | doing |
 | M9 | 퀴즈 고도화 | 14/18 | doing |
 | M10 | 챗봇 재조정 | 5/6 | doing |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
@@ -188,6 +188,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-153 바쁜 시간 이름 표시 + 등교일 식사는 저녁만 (RB-151 후속) — 앱에서 귀가·식사 블록이 이름 없이 빈 일정으로 보이던 것. `GET /busy-times` 의 `busyTimes` 에 `label`(수면·학교·하교 후 귀가·아침/점심/저녁·학원/개인 일정, 등록한 이름 우선, 할일은 할일 이름) 추가, 등교일엔 학교 시간(00:00~하교) 안에 다 들어가는 아침·점심을 빼서 평일엔 저녁만·쉬는 날엔 세 끼(이른 하교 날 하교 뒤 점심은 남김). 등교일 학교 블록을 08:30(고정)~하교 `SCHOOL` 과 자는 시간을 뺀 00:00~08:30 `SCHOOL_PREP`(등교 준비, 보통 기상~08:30)으로 나눔 — busy-times `type` 에 `SCHOOL_PREP` 추가(프론트 계약 변경). 막는 시간 합은 그대로라 계획 배치 결과 변화 없음 · DB 변경 없음 · `./gradlew test` 345건 0 실패(3 skipped, 신규 4건 · busy-times 기대값에 label·SCHOOL_PREP 반영) — 이슈 #315, PR #316 (10-24) (`225b317`) · 운영 배포 성공 · 프론트는 `label` 표시·`SCHOOL_PREP` 처리 필요
 - [ ] doing RB-154 바쁜 시간 식사 기본 이름을 아침·점심·저녁 → 아침 식사·점심 식사·저녁 식사 (RB-153 후속) — 등록한 이름이 있으면 그대로. 막는 시간·배치 변화 없음 · DB 변경 없음 · `./gradlew test` 345건 0 실패(3 skipped) — 이슈 #320, PR #321 open (`430b027`) · 앱 표시는 rooter-front #218(`label` 사용·새 type 처리) 필요
 - [ ] doing RB-151 계획에 하교 후 귀가 시간·아침·점심·저녁 식사 시간 반영 (#311) — 6교시면 15:10 하교와 동시에 할일이 붙고 저녁도 안 막던 것. 등교일 하교 뒤 귀가(`users.commute_minutes`, 기본 40분) `COMMUTE`, 식사는 불가능 시간 `kind`(BREAKFAST·LUNCH·DINNER, 학원 ACADEMY·기타 CUSTOM)·`label` 로 등록, 그 요일에 없으면 기본값(아침 기상 후 30분·점심 12:00~13:00·저녁 18:00~19:00) `MEAL`. 스케줄러 입력을 `UserRoutine` 하나로 통일(계획 생성·바쁜 시간·챗봇·복습 배치, 할일 퀴즈 15분 밀기는 등록한 시간만). `GET`·`PUT /users/{id}/commute-time` 추가, busy-times `type` 에 COMMUTE·MEAL 추가(프론트 계약 변경) — 이슈 #311, PR #312 open (`752157a`) · `./gradlew test` 327건 0 실패 · 새 schema 로컬 DB 에 앱 띄워 API 확인 · **DDL 선행: rooter-ddl #38 / PR #39 머지 → 운영 DB 적용 확인 후 머지** · 분산 배치·프롬프트 보강·설문 18:30·19:30 상수·불가능 시간 수정 API 는 다음 PR
+- [ ] doing RB-158 스케줄러 `findDue` 가 매분 퀴즈 기록 전체를 읽고 끝난 재조정도 계속 청구하던 것 (#319) — 1차 후보의 시작 여부를 attempt 1 전체(108,000행·15.4ms)에서 확인하던 것을 오늘 끝난 할일 id 조회(780행·0.7ms)로, 재시도는 attempt 전체를 읽고 후보마다 `PlanTaskRow` 를 따로 조회하던 것(140,400행·17.3ms + N+1)을 오늘·어제 할일 id 조회(1,560행·1.3ms)로 바꿈. 엔진이 claim 전에 `job_runs` 의 `(job_type, run_key)` 를 한 번에 조회해 이미 기록된 작업을 걸러내 보드당 하루 약 1,440건 헛 INSERT 제거(중복 방지 판정은 그대로 claim 유니크 키). 퀴즈 기록을 10배(1,404,000행)로 늘려도 재시도 조회가 178.6→3.7ms 로만 늘어남. DDL 변경 없음 · 이틀보다 오래된 불합격 attempt 는 재시도를 만들지 않음(정책) · `./gradlew test` 369건 0 실패(신규 7건: `SchedulerEngineTest` 3·`TaskQuizServiceTest` 4) — 이슈 #319, PR #327 open (`7183601` `0c22030` `68faef0`)
 
 ## M9. 퀴즈 고도화
 
