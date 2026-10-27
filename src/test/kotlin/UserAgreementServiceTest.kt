@@ -210,6 +210,37 @@ class UserAgreementServiceTest : StringSpec({
         rowCount(userId) shouldBe 3L
     }
 
+    "철회: 필수 항목도 agreed=false 로 철회할 수 있고, 철회한 항목은 pending 에 다시 나온다" {
+        val userService = service()
+        userService.registerUser(registerRequest("withdraw@test.com", listOf(agreed("TERMS"), agreed("PRIVACY"))))
+        val userId = userIdOf("withdraw@test.com")
+
+        val response = userService.updateAgreements(
+            userId,
+            AgreementsUpdateRequest(listOf(AgreementDecision("PRIVACY", TEST_AGREEMENT_VERSION, false)))
+        )
+
+        response.pendingAgreements shouldContainExactly listOf("PRIVACY")
+        userService.pendingAgreements(userId) shouldContainExactly listOf("PRIVACY")
+        rowCount(userId) shouldBe 3L
+        userService.getAgreements(userId).agreements.single { it.code == "PRIVACY" }.agreed shouldBe false
+    }
+
+    "철회 후 다시 동의하면 pending 이 비고, 철회 행은 이력에 남는다" {
+        val userService = service()
+        userService.registerUser(registerRequest("rejoin@test.com", listOf(agreed("TERMS"), agreed("PRIVACY"))))
+        val userId = userIdOf("rejoin@test.com")
+        userService.updateAgreements(
+            userId,
+            AgreementsUpdateRequest(listOf(AgreementDecision("TERMS", TEST_AGREEMENT_VERSION, false)))
+        )
+
+        val response = userService.updateAgreements(userId, AgreementsUpdateRequest(listOf(agreed("TERMS"))))
+
+        response.pendingAgreements.shouldBeEmpty()
+        rowCount(userId) shouldBe 4L
+    }
+
     "pendingAgreements: conf 버전을 올리면 기존 동의자가 다시 pending 이 된다" {
         val oldService = service(catalog("2026-11-01"))
         oldService.registerUser(registerRequest("bump@test.com", listOf(agreed("TERMS"), agreed("PRIVACY"))))
