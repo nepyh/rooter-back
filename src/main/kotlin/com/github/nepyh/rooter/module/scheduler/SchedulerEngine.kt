@@ -18,6 +18,9 @@ import java.time.OffsetDateTime
  * 매 틱마다 등록된 [SchedulerJob] 들의 파생 규칙을 평가하고,
  * job_runs 에 claim (INSERT ... ON CONFLICT DO NOTHING) 한 뒤 실행한다.
  * 스케줄 상태를 메모리에 보관하지 않으므로 재시작 시 휘발되는 것이 없다.
+ *
+ * 파생 결과에는 이미 실행을 마친 작업도 계속 섞이므로, claim 전에 job_runs 기록을 한 번에 조회해 걸러낸다
+ * ([JobRunRepo.filterUnclaimed]). 걸러내지 않으면 끝난 작업마다 매분 헛 INSERT 가 나간다.
  */
 class SchedulerEngine(
     private val jobs: List<SchedulerJob>,
@@ -54,7 +57,8 @@ class SchedulerEngine(
                 logger.error("파생 규칙 평가 실패: jobType={}", job.jobType, e)
                 emptyList()
             }
-            dueJobs.forEach { due ->
+            // 매 틱 다시 파생되는 후보 중 job_runs 에 이미 기록된 runKey 는 claim(=INSERT) 까지 보내지 않는다
+            jobRunRepo.filterUnclaimed(job.jobType, dueJobs).forEach { due ->
                 val claimed = jobRunRepo.claim(job.jobType, due)
                 if (!claimed) return@forEach
 

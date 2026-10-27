@@ -5,11 +5,30 @@ import com.github.nepyh.rooter.module.scheduler.model.JobRunTable
 import com.github.nepyh.rooter.module.scheduler.model.JobStatus
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
+import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.OffsetDateTime
 
 class JobRunRepo {
+
+    /**
+     * 후보 중 job_runs 에 이미 기록된(실행 중·완료·실패) runKey 를 걸러낸다.
+     * 파생 결과는 매 틱 다시 나오므로, 이 걸러내기가 없으면 끝난 작업도 매번 claim(INSERT) 까지 간다.
+     * 중복 실행을 실제로 막는 것은 여전히 [claim] 의 유니크 키이고, 이 조회는 헛 INSERT 를 줄이는 용도다.
+     */
+    fun filterUnclaimed(jobType: String, dueJobs: List<DueJob>): List<DueJob> {
+        if (dueJobs.isEmpty()) return emptyList()
+
+        val recorded = transaction {
+            JobRunTable.select(JobRunTable.runKey)
+                .where { (JobRunTable.jobType eq jobType) and (JobRunTable.runKey inList dueJobs.map { it.runKey }) }
+                .map { it[JobRunTable.runKey] }
+                .toSet()
+        }
+        return dueJobs.filterNot { it.runKey in recorded }
+    }
 
     /**
      * job_runs 에 작업 지시를 기록하며 claim 한다.
