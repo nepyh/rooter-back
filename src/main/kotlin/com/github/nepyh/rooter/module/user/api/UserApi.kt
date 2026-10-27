@@ -91,7 +91,8 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
             tag("User")
             summary = "약관 재동의·철회"
             description = "약관이 개정돼 pendingAgreements 로 안내된 뒤 앱이 호출한다. 보낸 항목만 검증해 새 행으로 남기고 " +
-                "(이력 append-only) 남은 필수 미동의 code 를 돌려준다. 필수 항목을 agreed=false 로 보내면 400 이다. " +
+                "(이력 append-only) 남은 필수 미동의 code 를 돌려준다. 필수 항목도 agreed=false 로 보내 철회할 수 있고, " +
+                "철회한 필수 항목은 응답과 이후 로그인의 pendingAgreements 에 다시 나온다. " +
                 "본인 동의만 변경 가능."
             parameters {
                 path("id") {
@@ -114,7 +115,7 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 또는 agreements 검증 실패 " +
-                        "(code=UNKNOWN_AGREEMENT_CODE / DUPLICATED_AGREEMENT_CODE / AGREEMENT_VERSION_MISMATCH / REQUIRED_AGREEMENT_MISSING / EMPTY_AGREEMENTS)"
+                        "(code=UNKNOWN_AGREEMENT_CODE / DUPLICATED_AGREEMENT_CODE / AGREEMENT_VERSION_MISMATCH / EMPTY_AGREEMENTS)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

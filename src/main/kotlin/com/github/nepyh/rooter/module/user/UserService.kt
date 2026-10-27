@@ -233,7 +233,10 @@ class UserService(
             .map { it.name }
     }
 
-    /** 재동의·철회. 보낸 항목만 검증해 새 행으로 append 하고, 남은 필수 항목을 돌려준다. */
+    /**
+     * 재동의·철회. 보낸 항목만 검증해 새 행으로 append 하고, 남은 필수 항목을 돌려준다.
+     * 필수 항목 철회(agreed=false)도 저장한다 — 철회 후의 처리(재동의 유도 등)는 앱이 pendingAgreements 를 보고 정한다.
+     */
     fun updateAgreements(userId: Int, request: AgreementsUpdateRequest): AgreementsUpdateResponse {
         userRepo.findUserById(userId) ?: throw UserNotFoundException()
 
@@ -246,7 +249,7 @@ class UserService(
     /**
      * 요청의 조항 결정을 검증해 저장용 레코드로 바꾼다.
      * 가입은 [requireAllRequired] 로 필수 항목이 전부 agreed=true 인지까지 본다.
-     * 재동의는 일부 항목만 보낼 수 있지만, 필수 항목을 agreed=false 로 보내는 것은 어느 쪽이든 거부한다.
+     * 재동의·철회는 일부 항목만 보낼 수 있고, 필수 항목을 agreed=false 로 보내는 철회도 받는다.
      */
     private fun resolveDecisions(
         decisions: List<AgreementDecision>,
@@ -268,7 +271,7 @@ class UserService(
                     decision.code, current.version, decision.version
                 )
             }
-            if (code.required && !decision.agreed) {
+            if (requireAllRequired && code.required && !decision.agreed) {
                 throw AgreementValidationException.RequiredMissingException(listOf(decision.code))
             }
 
