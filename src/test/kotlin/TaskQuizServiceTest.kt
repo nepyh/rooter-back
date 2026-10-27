@@ -123,7 +123,7 @@ class TaskQuizServiceTest : StringSpec({
     var lastUserId = -1 // seedTask 가 만든 유저 id. answerQuestion/submitQuiz 테스트에서 소유자로 씀
 
     /** 사용자가 직접 추가한 태스크 하나를 만든다. withScope 면 플랜보드에 과학 단원 범위를, grade 가 있으면 학생 프로필을 붙인다 */
-    fun seedTask(taskName: String, grade: Int?, withScope: Boolean, minutes: Int = 45): Int = transaction(db) {
+    fun seedTask(taskName: String, grade: Int?, withScope: Boolean, minutes: Int = 45, date: LocalDate = day): Int = transaction(db) {
         // 한 테스트에서 여러 번 불러도 이메일(유니크)이 겹치지 않게 한다
         val user = UserRow.new { email = "tq${UserRow.count()}@test.com"; username = "t"; password = "x"; createdAt = OffsetDateTime.now() }
         lastUserId = user.id.value
@@ -131,7 +131,7 @@ class TaskQuizServiceTest : StringSpec({
             StudentProfileRow.new { this.user = user; schoolId = "B107132131"; this.grade = grade; classNumber = 1 }
         }
         val board = PlanBoardRow.new {
-            this.user = user; title = "보드"; startDate = day; endDate = day; createdAt = OffsetDateTime.now()
+            this.user = user; title = "보드"; startDate = date; endDate = date; createdAt = OffsetDateTime.now()
         }
         if (withScope) {
             val science = SubjectRow.new { name = "과학" }
@@ -141,7 +141,7 @@ class TaskQuizServiceTest : StringSpec({
             val second = ChapterRow.new { this.textbook = textbook; parentId = unit.id.value; chapterName = "지권의 구조"; chapterOrder = 2 }
             PlanSubjectRow.new { planBoard = board; this.textbook = textbook; startChapter = first; endChapter = second }
         }
-        val dailyPlan = DailyPlanRow.new { planBoard = board; planDate = day }
+        val dailyPlan = DailyPlanRow.new { planBoard = board; planDate = date }
         PlanTaskRow.new {
             this.dailyPlan = dailyPlan; this.taskName = taskName
             startTime = LocalTime.of(16, 0); endTime = LocalTime.of(16, 0).plusMinutes(minutes.toLong()); estimatedMinutes = minutes
@@ -813,6 +813,47 @@ class TaskQuizServiceTest : StringSpec({
             .findDue(day.atTime(23, 0).atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime())
 
         due.map { it.runKey } shouldBe listOf("task_quiz_${pendingTask}_1")
+    }
+
+    val zone = ZoneId.of("Asia/Seoul")
+
+    /** 채점 결과(null = 미제출)와 생성 시각을 지정해 attempt 를 넣는다 — 재시도 판정은 createdAt + RETRY_DELAY_MINUTES 기준 */
+    fun seedAttempt(taskId: Int, attemptNumber: Int, passed: Boolean?, createdAt: OffsetDateTime) = transaction(db) {
+        TaskQuizAttemptTable.insert {
+            it[planTaskId] = taskId; it[this.attemptNumber] = attemptNumber; it[totalCount] = 5
+            it[correctCount] = if (passed == null) null else 0; it[this.passed] = passed; it[this.createdAt] = createdAt
+        }
+    }
+
+    fun dueKeys(at: OffsetDateTime) =
+        TaskQuizTriggerJob(TaskQuizService(FakeTaskQuizLlmClient())).findDue(at).map { it.runKey }
+
+    "TaskQuizTriggerJob: 1차 퀴즈를 이미 만든 할일은 다시 후보로 내지 않는다" {
+        val taskId = seedTask("영어 단어 외우기", grade = null, withScope = false)
+        seedAttempt(taskId, 1, passed = null, createdAt = day.atTime(16, 45).atZone(zone).toOffsetDateTime())
+
+        dueKeys(day.atTime(23, 0).atZone(zone).toOffsetDateTime()) shouldBe emptyList()
+    }
+
+    "TaskQuizTriggerJob: 오늘 할일의 불합격 attempt 는 10분 뒤 재시도 후보가 된다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false)
+        seedAttempt(taskId, 1, passed = false, createdAt = day.atTime(16, 45).atZone(zone).toOffsetDateTime())
+
+        dueKeys(day.atTime(17, 0).atZone(zone).toOffsetDateTime()) shouldBe listOf("task_quiz_${taskId}_2")
+    }
+
+    "TaskQuizTriggerJob: 어제 할일의 불합격 attempt 는 자정을 넘겨도 재시도 후보가 된다" {
+        val taskId = seedTask("어제 할일", grade = null, withScope = false, date = day.minusDays(1))
+        seedAttempt(taskId, 1, passed = false, createdAt = day.minusDays(1).atTime(23, 55).atZone(zone).toOffsetDateTime())
+
+        dueKeys(day.atTime(0, 5).atZone(zone).toOffsetDateTime()) shouldBe listOf("task_quiz_${taskId}_2")
+    }
+
+    "TaskQuizTriggerJob: 그저께 이전 할일의 불합격 attempt 는 재시도 후보로 만들지 않는다 (읽는 범위를 오늘·어제로 줄임)" {
+        val taskId = seedTask("그저께 할일", grade = null, withScope = false, date = day.minusDays(2))
+        seedAttempt(taskId, 1, passed = false, createdAt = day.minusDays(2).atTime(16, 45).atZone(zone).toOffsetDateTime())
+
+        dueKeys(day.atTime(23, 0).atZone(zone).toOffsetDateTime()) shouldBe emptyList()
     }
 })
 
