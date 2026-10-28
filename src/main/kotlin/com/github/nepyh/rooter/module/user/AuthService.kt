@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module.user
 
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.github.nepyh.rooter.module.notification.DeviceTokenService
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
 import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
@@ -23,6 +24,7 @@ private const val APPLE_ISSUER = "https://appleid.apple.com"
 class AuthService(
     private val userRepo: UserRepo,
     private val userService: UserService,
+    private val deviceTokenService: DeviceTokenService,
     val jwtSecret: String,
     val jwtIssuer: String,
     private val googleClientId: String,
@@ -106,6 +108,8 @@ class AuthService(
 
     fun logout(userId: Int): UserLogoutResponse {
         userRepo.incrementTokenVersion(userId)
+        // 모든 기기의 JWT 가 무효가 되므로 푸시 토큰도 전부 지운다 — 로그아웃한 폰에 알림이 가지 않게
+        deviceTokenService.removeAll(userId)
         return UserLogoutResponse(message = "Successfully logged out.")
     }
 

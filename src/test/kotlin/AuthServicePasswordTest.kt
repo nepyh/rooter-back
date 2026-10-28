@@ -1,6 +1,7 @@
 import com.auth0.jwt.JWT
 import com.github.nepyh.rooter.module.storage.FileStorage
 import com.github.nepyh.rooter.module.storage.UploadableFile
+import com.github.nepyh.rooter.module.notification.DeviceTokenService
 import com.github.nepyh.rooter.module.user.AuthService
 import com.github.nepyh.rooter.module.user.UserJwtValidator
 import com.github.nepyh.rooter.module.user.ExposedUserRepo
@@ -70,6 +71,7 @@ class AuthServicePasswordTest : StringSpec({
     val authService = AuthService(
         userRepo,
         UserService(userRepo, noopFileStorage, testAgreementCatalog),
+        DeviceTokenService(noPushSender),
         jwtSecret = "test-secret",
         jwtIssuer = "rooter",
         googleClientId = "",
