@@ -25,7 +25,8 @@ private data class FeedbackReplanPayload(val planBoardId: Int, val planDate: Str
  *
  * 설문 제출마다 AI 를 부르지 않고 하루 1회로 모은다 — 조정 산출물은 미래 날짜에 붙으므로 자정까지 늦어도 무해하다.
  * 설문이 0건인 날짜·보드는 후보에서 빠진다(조정 트리거 자체가 없음).
- * claim((job_type, run_key) 유니크) 이 중복을 막으므로, 자정 시각을 놓쳐도 그날 안에 서버가 살아 있으면 실행된다.
+ * 자정 시각을 놓쳐도 그날 안에 서버가 살아 있으면 실행된다 — 매 틱 후보를 다시 내지만, 이미 청구한
+ * (job_type, run_key) 는 엔진이 claim 전에 걸러내므로 보드 하나가 하루 종일 헛 INSERT 를 만들지 않는다.
  */
 class FeedbackReplanJob(
     private val feedbackService: FeedbackService
