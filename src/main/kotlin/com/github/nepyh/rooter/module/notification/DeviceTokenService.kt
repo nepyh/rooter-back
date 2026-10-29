@@ -43,7 +43,7 @@ class DeviceTokenService(private val pushSender: PushSender) {
         return DeviceTokenResponse(token = token, platform = request.platform)
     }
 
-    /** 로그아웃: 모든 기기의 JWT 가 무효가 되므로 그 사용자의 토큰도 전부 지운다. */
+    /** 로그아웃·비밀번호 변경: 모든 기기의 JWT 가 무효가 되므로 그 사용자의 토큰도 전부 지운다. 바깥 트랜잭션이 있으면 그 안에서 돈다. */
     fun removeAll(userId: Int) {
         transaction {
             UserDeviceTokenTable.deleteWhere { UserDeviceTokenTable.userId eq userId }
