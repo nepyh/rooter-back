@@ -14,7 +14,7 @@ import java.util.IdentityHashMap
 
 data class MonitoringConfig(val dsn: String, val environment: String, val release: String)
 
-enum class ErrorSource { HTTP, STARTUP, SCHEDULER }
+enum class ErrorSource { HTTP, STARTUP, SCHEDULER, PUSH }
 
 /** 원문 예외·요청·사용자 정보를 SDK 에 넘기지 않는다. 코드 위치만 오류 분석에 사용한다. */
 object ErrorMonitoring {
