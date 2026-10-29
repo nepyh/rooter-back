@@ -1,3 +1,4 @@
+import com.github.nepyh.rooter.module.notification.push.ExpoPushRequestException
 import com.github.nepyh.rooter.module.notification.push.ExpoPushSender
 import com.github.nepyh.rooter.module.notification.push.PushMessage
 import com.github.nepyh.rooter.module.notification.push.PushResult
@@ -27,8 +28,11 @@ class ExpoPushSenderTest : StringSpec({
     val deviceNotRegistered =
         """{"status":"error","message":"not a registered push token","details":{"error":"DeviceNotRegistered","expoPushToken":"x"}}"""
 
-    fun senderWith(accessToken: String = "", handler: MockRequestHandler) =
-        ExpoPushSender(accessToken = accessToken, httpClient = HttpClient(MockEngine(handler)))
+    fun senderWith(
+        accessToken: String = "",
+        reportFailure: (Throwable) -> Unit = {},
+        handler: MockRequestHandler
+    ) = ExpoPushSender(accessToken = accessToken, httpClient = HttpClient(MockEngine(handler)), reportFailure = reportFailure)
 
     suspend fun MockRequestHandleScope.jsonResponse(body: String, status: HttpStatusCode = HttpStatusCode.OK): HttpResponseData =
         respond(content = body, status = status, headers = headersOf(HttpHeaders.ContentType, "application/json"))
@@ -111,5 +115,24 @@ class ExpoPushSenderTest : StringSpec({
 
         failing.send(tokens(2), PushMessage("제목", "본문")) shouldBe PushResult.EMPTY
         broken.send(tokens(2), PushMessage("제목", "본문")) shouldBe PushResult.EMPTY
+    }
+
+    "요청이 실패한 묶음마다 오류 수집으로 넘기고, 성공·티켓 오류는 넘기지 않는다" {
+        val reported = mutableListOf<Throwable>()
+        var calls = 0
+        val sender = senderWith(reportFailure = { reported += it }) { request ->
+            when (++calls) {
+                1 -> jsonResponse("""{"errors":[]}""", HttpStatusCode.TooManyRequests)
+                2 -> error("connection reset")
+                else -> jsonResponse(tickets(*Array(request.messages().size) { deviceNotRegistered }))
+            }
+        }
+
+        val result = sender.send(tokens(201), PushMessage("제목", "본문"))
+
+        result shouldBe PushResult(sent = 0, invalidTokens = listOf("ExponentPushToken[t201]"))
+        reported.size shouldBe 2
+        (reported[0] as ExpoPushRequestException).status shouldBe HttpStatusCode.TooManyRequests
+        reported[1].message shouldBe "connection reset"
     }
 })
