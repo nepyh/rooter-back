@@ -44,7 +44,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M4 | school·NICE 연동 | 7/10 | doing |
 | M5 | 사용자 기능 | 7/12 | doing |
 | M6 | 파일 저장·S3 | 4/5 | doing |
-| M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/5 | doing |
+| M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 3/6 | doing |
 | M8 | AI 계획 생성·스케줄링 | 10/17 | doing |
 | M9 | 퀴즈 고도화 | 14/18 | doing |
 | M10 | 챗봇 재조정 | 5/6 | doing |
@@ -58,7 +58,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 - **RB-014 planboard 네이밍 통일** — `rooter-ddl` #10 open. DDL `schema.sql` 에 구 표기(`plan_boards`, `plan_board_id`)가 그대로 남아 있어 코드만 바꾸면 배포 시 터진다. **DDL 먼저.**
 - **RB-043 소셜 로그인 실동작** — 구조만 머지된 상태. 운영 태스크 정의에 `GOOGLE_CLIENT_ID` / `APPLE_CLIENT_ID` 없음 (10-04 확인). 클라이언트 ID 미발급.
-- **RB-060 Notification** — 예전 브랜치(`feature/notification-settings`, PR #83 닫힘)는 재사용하지 않고 main 위에 단계별로 새로 만든다 (RB-159~). **DDL 선행: rooter-ddl #42 / PR #43 머지 → 운영 DB 적용 → 그다음 RB-159 머지** (로그아웃·비밀번호 변경이 `user_device_tokens` 를 지우므로 순서가 뒤집히면 둘 다 500).
+- **RB-060 Notification** — 예전 브랜치(`feature/notification-settings`, PR #83 닫힘)는 재사용하지 않고 main 위에 단계별로 새로 만든다 (RB-159 2단계 · RB-160 3단계). **DDL 선행: rooter-ddl #42 / PR #43 머지 → 운영 DB 적용 → 그다음 RB-159 머지** (로그아웃·비밀번호 변경이 `user_device_tokens` 를 지우므로 순서가 뒤집히면 둘 다 500).
 - ~~RB-053 S3 모드 아바타 서빙 경로~~ — **해소** (아래 RB-053 참조)
 
 ## 열린 이슈 정합성
@@ -164,6 +164,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 - [ ] doing RB-060 Notification 서비스 (이슈 #57, 프론트 요청 B-12) — 예전 `feature/notification-settings`(PR #83 닫힘)는 `isCompleted`·UTC 날짜·트랜잭션 없는 설정 API·cascade 없는 FK·자체 60초 루프 등으로 재사용하지 않고 단계별로 새로 만든다: ① DDL `user_device_tokens`·`notification_settings`·`notifications` (rooter-ddl #42 / PR #43 open) ② 기기 토큰 API + Expo 발송기 (RB-159) ③ 알림함·`notify()`·설정 API ④ 할일 시작 전 알림 `TaskReminderJob`(SchedulerJob, run_key `task_reminder_{taskId}_{시작시각}`) ⑤ 프론트 `expo-notifications`·EAS APNs 키·TestFlight 확인
 - [ ] doing RB-159 기기 푸시 토큰 등록 API + Expo 푸시 발송기 (알림 2단계, #328 · PR #329 open) — `POST /notifications/device-tokens`(토큰 기준 upsert, 다른 계정 토큰은 지금 계정으로 이동, 400 `INVALID_PUSH_TOKEN`, platform 오타는 `INVALID_REQUEST_BODY`), 로그아웃(`POST /auth/logout`)·비밀번호 변경(`PUT /users/{id}/password`)이 모든 기기 JWT 를 무효화하므로 그 사용자의 토큰도 전부 삭제(tokenVersion 증가와 한 트랜잭션, 요청·응답 그대로 — 비밀번호를 바꾼 기기는 새 JWT 로 토큰 재등록 필요), `PushSender`·`ExpoPushSender`(100개씩, `DeviceNotRegistered` 토큰 정리, Expo 요청 실패는 예외 없이 실패 집계 + Sentry `error.source=push`), `DeviceTokenService.sendToUser`(트랜잭션 밖 발송), `EXPO_ACCESS_TOKEN` 선택 배선 · `./gradlew test` 0 실패(신규 20건, 리뷰 반영 후 389 통과) · rooter-ddl #43 `schema.sql` 로 만든 로컬 DB 에 jar 를 띄워 등록·재등록·계정 이동·400·401·로그아웃 삭제·Swagger 확인 · 영수증(receipt) 확인은 범위 밖 · **DDL 선행: rooter-ddl PR #43 → 운영 DB 적용 확인 후 머지**
+- [ ] doing RB-160 알림함·알림 설정 API + `notify()` (알림 3단계, #330 · PR #329 위에 쌓음) — `NotificationService.notify(userId, type, title, body, data)`(알림함 저장은 트랜잭션 안, 푸시는 밖 · 설정이 꺼져도 알림함에는 남고 푸시만 생략 · 푸시 data 에 `notificationId` 추가 · 제목·본문은 DDL 길이로 자름), `GET /notifications`(최신순 id 커서, 기본 20·최대 50, 400 `NOTIFICATION_INVALID_PAGE`)·`GET /notifications/unread-count`·`PATCH /notifications/{id}/read`(이미 읽었으면 처음 시각 유지, 남의 알림·없는 알림 404 `NOTIFICATION_NOT_FOUND`, 정수 아님 400 `INVALID_ID`)·`PATCH /notifications/read-all`·`GET`/`PATCH /notifications/settings`(행 없으면 기본값 켜짐·5분, 보낸 필드만 수정, 0~60 밖 400 `INVALID_LEAD_MINUTES`) · `./gradlew test` 402 통과 0 실패(신규 13건) · rooter-ddl #43 `schema.sql` 로 만든 로컬 DB 에 jar 를 띄워 목록·커서·읽음·남의 알림 404·모두 읽음·설정 수정·400·401·Swagger 확인 · **머지 순서: rooter-ddl #43 → 운영 DB 적용 → PR #329 → 이 PR**
 - [x] done RB-061 Quiz 서비스 (이슈 #58) — ai-poc 포팅(RB-020) 이후 M9 로 고도화 완료 · 이슈 #58 마감 대상
 - [x] done RB-062 프로필 잔디 심기(streak) (이슈 #59) — `64a58b0` + `15a3e89`(리네임 후 컴파일 수정) · dev 서버 `GET /users/{id}/streak?start&end` 200 확인 (10-04) · 이슈 #59 마감 대상
 - [x] done RB-063 캘린더 (월별 계획량·날짜별 조회·개인 일정 CRUD) — `531c176` + 일정 수정 API PR #181 (09-28) · dev 서버 `GET /calendar?start&end` 200 확인 (10-04)
@@ -273,7 +274,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | 3 | RB-026 트랜잭션 스타일 통일 | S | 없음 | 41곳 / 8파일, 기계적 치환 |
 | 4 | RB-088 학습 범위 없는 날 퀴즈 (B-08) | M | 디자인 | 범위 없을 때 동작 정의 필요 |
 | 5 | RB-115 태스크 source 필드 (B-13) | M | rooter-ddl | DDL 선행, 로컬 검증 후 운영 DB 먼저 |
-| 6 | RB-060 Notification 3·4단계 (B-12) | L | RB-159 머지 | 알림함·`notify()`·설정 API → `TaskReminderJob`. DDL 은 rooter-ddl #43 에 포함 |
+| 6 | RB-060 Notification 4단계 (B-12) | M | RB-159·RB-160 머지 | 할일 시작 전 알림 `TaskReminderJob` — `notify()`·설정의 `taskReminderLeadMinutes` 사용 |
 | 7 | RB-014 planboard 네이밍 | M | rooter-ddl #10 | DDL 선행 필요 (블로커) |
 | - | 정책 결정 대기 | - | 팀 결정 | RB-077 자정 넘김 · RB-116 JWT 만료 · RB-126 도메인 · RB-127 DB 초기화 |
 | - | RB-152 실제 Sentry 수집 확인 | S | 프로젝트·DSN 설정 | 개발 환경에서 이벤트·release·개인정보 제외 확인 |
