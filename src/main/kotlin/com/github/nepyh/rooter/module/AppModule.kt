@@ -17,6 +17,7 @@ import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.leveltest.LevelTestModule
 import com.github.nepyh.rooter.module.notification.NotificationModule
 import com.github.nepyh.rooter.module.notification.exception.DeviceTokenValidationException
+import com.github.nepyh.rooter.module.notification.exception.NotificationException
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
@@ -221,6 +222,9 @@ fun Application.configureErrorResponses() {
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<DeviceTokenValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<NotificationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<BadRequestException> { call, cause ->

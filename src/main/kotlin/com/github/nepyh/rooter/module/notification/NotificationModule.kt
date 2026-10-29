@@ -10,5 +10,7 @@ import org.koin.dsl.module
 fun NotificationModule(appConfig: AppConfig) = module {
     single<PushSender> { ExpoPushSender(appConfig.expoAccessToken) }
     single { DeviceTokenService(get()) }
-    single(named("notificationApi")) { NotificationApi(get()) }
+    single { NotificationSettingService() }
+    single { NotificationService(get(), get()) }
+    single(named("notificationApi")) { NotificationApi(get(), get(), get()) }
 }
