@@ -16,6 +16,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
@@ -276,6 +277,8 @@ class PlanGenerationService(
                             endTime = task.endTime
                             estimatedMinutes = task.estimatedMinutes
                             this.subjectId = taskSubjectId?.let { EntityID(it, SubjectTable) }
+                            // AI 가 만든 계획의 할일 — 사용자가 지울 수 없다 (#245)
+                            origin = PlanTaskOrigin.AI
                         }
                     }
 

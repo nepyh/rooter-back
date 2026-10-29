@@ -18,6 +18,7 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.userRoutine
@@ -136,7 +137,8 @@ class ChatService(
                         end = PlanTaskScheduler.toMinutes(it.endTime),
                         subjectId = it.subjectId?.value,
                         quizStarted = state != null,
-                        quizFinalized = state == true
+                        quizFinalized = state == true,
+                        aiGenerated = it.origin == PlanTaskOrigin.AI
                     )
                 },
                 otherBoardRanges = otherBoardRanges,
@@ -145,7 +147,8 @@ class ChatService(
                 pendingExisting = pendingTasks.map {
                     ExistingPendingTask(
                         it.id.value, it.taskName,
-                        PlanTaskScheduler.toMinutes(it.startTime), PlanTaskScheduler.toMinutes(it.endTime)
+                        PlanTaskScheduler.toMinutes(it.startTime), PlanTaskScheduler.toMinutes(it.endTime),
+                        aiGenerated = it.origin == PlanTaskOrigin.AI
                     )
                 },
                 completedRanges = completedTasks.map {
@@ -215,7 +218,9 @@ class ChatService(
             } else {
                 emptyList()
             }
-            busyRanges + extraBusy + context.completedRanges
+            // AI 가 만든 할일은 재조정에서 지우지도 옮기지도 않으므로 그 시간대를 막아둔다 (#245)
+            val aiTaskRanges = context.pendingExisting.filter { it.aiGenerated }.map { it.startMinutes to it.endMinutes }
+            busyRanges + extraBusy + context.completedRanges + aiTaskRanges
         } else {
             emptyList()
         }
@@ -250,7 +255,8 @@ class ChatService(
             if (shouldReplan) {
                 // 안 겹치는 태스크는 제자리(id·시각 유지), 겹치는 것만 옮긴다 — rescheduleKeepingUnaffected 참고
                 val rescheduled = rescheduleKeepingUnaffected(
-                    existing = context.pendingExisting,
+                    // AI 가 만든 할일은 지울 수 없어서 재조정 대상에서 뺀다 — 손대지 않고 제자리에 둔다 (#245)
+                    existing = context.pendingExisting.filter { !it.aiGenerated },
                     aiTasks = update!!.tasks.map { it.task_name to it.estimated_minutes },
                     busyRanges = replanBusyRanges,
                     earliestMinute = earliestMinute
@@ -258,14 +264,20 @@ class ChatService(
 
                 val dailyPlan = DailyPlanRow[dailyPlanId]
                 val keptIds = rescheduled.mapNotNull { it.existingId }.toSet()
-                // AI 가 뺐거나 자리가 없어 못 넣은 대기 태스크만 지운다 (완료·실패 태스크는 건드리지 않음)
+                // AI 가 뺐거나 자리가 없어 못 넣은 대기 태스크만 지운다 (완료·실패 태스크는 건드리지 않음).
+                // AI 가 만든 할일은 지울 수 없다 (#245)
                 PlanTaskRow.find {
-                    (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.status eq PlanTaskStatus.PENDING)
+                    (PlanTaskTable.dailyPlanId eq dailyPlanId) and (PlanTaskTable.status eq PlanTaskStatus.PENDING) and
+                        (PlanTaskTable.origin eq PlanTaskOrigin.USER)
                 }
                     .filter { it.id.value !in keptIds }
                     .forEach { it.delete() }
                 rescheduled.forEach { task ->
-                    val row = task.existingId?.let { PlanTaskRow.findById(it) } ?: PlanTaskRow.new { this.dailyPlan = dailyPlan }
+                    // 챗봇이 만든 할일은 사용자가 만든 것으로 본다 — 챗봇 권한 = 유저 권한 (#245)
+                    val row = task.existingId?.let { PlanTaskRow.findById(it) } ?: PlanTaskRow.new {
+                        this.dailyPlan = dailyPlan
+                        origin = PlanTaskOrigin.USER
+                    }
                     row.taskName = task.taskName
                     row.startTime = task.startTime
                     row.endTime = task.endTime
@@ -341,6 +353,8 @@ class ChatService(
                         endTime = minutesToTime(task.end)
                         estimatedMinutes = task.minutes
                         subjectId = task.subjectId?.let { EntityID(it, SubjectTable) }
+                        // 사용자가 챗봇에게 시켜서 생긴 할일 = user 발 일정 (#245)
+                        origin = PlanTaskOrigin.USER
                     }
                 } else if (before[task.id] != task) {
                     PlanTaskRow.findById(task.id)?.apply {

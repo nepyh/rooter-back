@@ -57,4 +57,10 @@ sealed class PlanTaskValidationException(
         "INVALID_TEXTBOOK",
         "존재하지 않는 교과서입니다."
     )
+    /** AI 가 만든 할일은 지울 수 없다 (#245). 직접 추가한 할일만 지울 수 있다 */
+    class AiTaskNotDeletableException : PlanTaskValidationException(
+        HttpStatusCode.BadRequest,
+        "AI_TASK_NOT_DELETABLE",
+        "AI 가 만든 할일은 삭제할 수 없습니다."
+    )
 }

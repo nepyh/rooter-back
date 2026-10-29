@@ -15,6 +15,7 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttemptTable
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceTable
@@ -224,6 +225,8 @@ class FeedbackService(
                 this.startTime = startTime
                 endTime = startTime.plusMinutes(minutes.toLong())
                 estimatedMinutes = minutes
+                // AI 제안으로 붙인 보충 할일 — 사용자가 지울 수 없다 (#245)
+                origin = PlanTaskOrigin.AI
             }
 
             ReplanAdjustmentResponse(
