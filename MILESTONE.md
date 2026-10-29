@@ -58,7 +58,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 - **RB-014 planboard 네이밍 통일** — `rooter-ddl` #10 open. DDL `schema.sql` 에 구 표기(`plan_boards`, `plan_board_id`)가 그대로 남아 있어 코드만 바꾸면 배포 시 터진다. **DDL 먼저.**
 - **RB-043 소셜 로그인 실동작** — 구조만 머지된 상태. 운영 태스크 정의에 `GOOGLE_CLIENT_ID` / `APPLE_CLIENT_ID` 없음 (10-04 확인). 클라이언트 ID 미발급.
-- **RB-060 Notification** — 예전 브랜치(`feature/notification-settings`, PR #83 닫힘)는 재사용하지 않고 main 위에 단계별로 새로 만든다 (RB-159~). **DDL 선행: rooter-ddl #42 / PR #43 머지 → 운영 DB 적용 → 그다음 RB-159 머지** (로그아웃이 `user_device_tokens` 를 지우므로 순서가 뒤집히면 로그아웃 500).
+- **RB-060 Notification** — 예전 브랜치(`feature/notification-settings`, PR #83 닫힘)는 재사용하지 않고 main 위에 단계별로 새로 만든다 (RB-159~). **DDL 선행: rooter-ddl #42 / PR #43 머지 → 운영 DB 적용 → 그다음 RB-159 머지** (로그아웃·비밀번호 변경이 `user_device_tokens` 를 지우므로 순서가 뒤집히면 둘 다 500).
 - ~~RB-053 S3 모드 아바타 서빙 경로~~ — **해소** (아래 RB-053 참조)
 
 ## 열린 이슈 정합성
@@ -163,7 +163,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 ## M7. 이슈 기반 기능 (#57~#59, 캘린더)
 
 - [ ] doing RB-060 Notification 서비스 (이슈 #57, 프론트 요청 B-12) — 예전 `feature/notification-settings`(PR #83 닫힘)는 `isCompleted`·UTC 날짜·트랜잭션 없는 설정 API·cascade 없는 FK·자체 60초 루프 등으로 재사용하지 않고 단계별로 새로 만든다: ① DDL `user_device_tokens`·`notification_settings`·`notifications` (rooter-ddl #42 / PR #43 open) ② 기기 토큰 API + Expo 발송기 (RB-159) ③ 알림함·`notify()`·설정 API ④ 할일 시작 전 알림 `TaskReminderJob`(SchedulerJob, run_key `task_reminder_{taskId}_{시작시각}`) ⑤ 프론트 `expo-notifications`·EAS APNs 키·TestFlight 확인
-- [ ] doing RB-159 기기 푸시 토큰 등록 API + Expo 푸시 발송기 (알림 2단계, #328 · PR #329 open) — `POST /notifications/device-tokens`(토큰 기준 upsert, 다른 계정 토큰은 지금 계정으로 이동, 400 `INVALID_PUSH_TOKEN`, platform 오타는 `INVALID_REQUEST_BODY`), 로그아웃(`POST /auth/logout`)이 모든 기기 JWT 를 무효화하므로 그 사용자의 토큰도 전부 삭제(요청·응답 그대로), `PushSender`·`ExpoPushSender`(100개씩, `DeviceNotRegistered` 토큰 정리, Expo 오류는 예외 없이 실패 집계), `DeviceTokenService.sendToUser`(트랜잭션 밖 발송), `EXPO_ACCESS_TOKEN` 선택 배선 · `./gradlew test` 0 실패(신규 15건) · rooter-ddl #43 `schema.sql` 로 만든 로컬 DB 에 jar 를 띄워 등록·재등록·계정 이동·400·401·로그아웃 삭제·Swagger 확인 · 영수증(receipt) 확인은 범위 밖 · **DDL 선행: rooter-ddl PR #43 → 운영 DB 적용 확인 후 머지**
+- [ ] doing RB-159 기기 푸시 토큰 등록 API + Expo 푸시 발송기 (알림 2단계, #328 · PR #329 open) — `POST /notifications/device-tokens`(토큰 기준 upsert, 다른 계정 토큰은 지금 계정으로 이동, 400 `INVALID_PUSH_TOKEN`, platform 오타는 `INVALID_REQUEST_BODY`), 로그아웃(`POST /auth/logout`)·비밀번호 변경(`PUT /users/{id}/password`)이 모든 기기 JWT 를 무효화하므로 그 사용자의 토큰도 전부 삭제(tokenVersion 증가와 한 트랜잭션, 요청·응답 그대로 — 비밀번호를 바꾼 기기는 새 JWT 로 토큰 재등록 필요), `PushSender`·`ExpoPushSender`(100개씩, `DeviceNotRegistered` 토큰 정리, Expo 요청 실패는 예외 없이 실패 집계 + Sentry `error.source=push`), `DeviceTokenService.sendToUser`(트랜잭션 밖 발송), `EXPO_ACCESS_TOKEN` 선택 배선 · `./gradlew test` 0 실패(신규 20건, 리뷰 반영 후 389 통과) · rooter-ddl #43 `schema.sql` 로 만든 로컬 DB 에 jar 를 띄워 등록·재등록·계정 이동·400·401·로그아웃 삭제·Swagger 확인 · 영수증(receipt) 확인은 범위 밖 · **DDL 선행: rooter-ddl PR #43 → 운영 DB 적용 확인 후 머지**
 - [x] done RB-061 Quiz 서비스 (이슈 #58) — ai-poc 포팅(RB-020) 이후 M9 로 고도화 완료 · 이슈 #58 마감 대상
 - [x] done RB-062 프로필 잔디 심기(streak) (이슈 #59) — `64a58b0` + `15a3e89`(리네임 후 컴파일 수정) · dev 서버 `GET /users/{id}/streak?start&end` 200 확인 (10-04) · 이슈 #59 마감 대상
 - [x] done RB-063 캘린더 (월별 계획량·날짜별 조회·개인 일정 CRUD) — `531c176` + 일정 수정 API PR #181 (09-28) · dev 서버 `GET /calendar?start&end` 200 확인 (10-04)
