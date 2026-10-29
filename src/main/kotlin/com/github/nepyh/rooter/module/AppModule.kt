@@ -15,6 +15,8 @@ import com.github.nepyh.rooter.module.example.ExampleModule
 import com.github.nepyh.rooter.module.feedback.FeedbackModule
 import com.github.nepyh.rooter.module.health.HealthModule
 import com.github.nepyh.rooter.module.leveltest.LevelTestModule
+import com.github.nepyh.rooter.module.notification.NotificationModule
+import com.github.nepyh.rooter.module.notification.exception.DeviceTokenValidationException
 import com.github.nepyh.rooter.module.planboard.PlanBoardModule
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
@@ -94,7 +96,8 @@ fun AppModule(appConfig: AppConfig): Module = module {
         StudyStyleModule(),
         TaskQuizModule(appConfig),
         ReviewModule(),
-        ChatModule(appConfig)
+        ChatModule(appConfig),
+        NotificationModule(appConfig)
     )
 
     single<List<ApiRoute>> { getAll() }
@@ -215,6 +218,9 @@ fun Application.configureErrorResponses() {
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<StudyStyleValidationException> { call, cause ->
+            call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<DeviceTokenValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
         }
         exception<BadRequestException> { call, cause ->

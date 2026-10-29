@@ -46,6 +46,9 @@ data class AppConfig(
     val sentryEnvironment: String = "development",
     val sentryRelease: String = "",
 
+    // Expo 푸시. "Enhanced Security for Push" 를 켰을 때만 필요하고, 비어 있으면 토큰 없이 보낸다
+    val expoAccessToken: String = "",
+
     // 약관·개인정보 동의 항목. 시크릿이 아니라 env 배선 없이 conf 에 값을 직접 적는다.
     // 기본값은 테스트용이다 — 운영 경로는 fromApplicationConfig 가 configList 로 반드시 채운다(설정이 없으면 기동 실패)
     val agreements: List<AgreementConfigEntry> = emptyList()
@@ -103,6 +106,7 @@ data class AppConfig(
                 sentryEnvironment = config.propertyOrNull("sentry.environment")?.getString()
                     ?.takeIf { it.isNotBlank() } ?: envMode.name.lowercase(),
                 sentryRelease = config.propertyOrNull("sentry.release")?.getString().orEmpty(),
+                expoAccessToken = config.propertyOrNull("push.expoAccessToken")?.getString().orEmpty(),
 
                 agreements = config.configList("agreements").map { item ->
                     AgreementConfigEntry(
