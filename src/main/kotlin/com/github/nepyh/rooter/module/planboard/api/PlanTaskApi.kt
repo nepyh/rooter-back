@@ -213,7 +213,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("PlanTask")
             summary = "태스크 삭제"
-            description = "본인 플랜보드 소유 태스크만 가능"
+            description = "본인 플랜보드의 할일 중 직접 추가한 것(챗봇이 만든 할일 포함)만 삭제할 수 있습니다. AI 가 만든 할일(시험 계획 생성·재조정 보충·퀴즈 복습)은 삭제할 수 없고 400 (code=AI_TASK_NOT_DELETABLE) 으로 응답합니다 — 챗봇으로도 지울 수 없고, 시간 변경·재조정만 됩니다"
             parameters {
                 path("taskId") {
                     description = "태스크 ID"
@@ -226,7 +226,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     description = "삭제 성공"
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID)"
+                    description = "유효하지 않은 ID (code=INVALID_ID) / AI 가 만든 할일 (code=AI_TASK_NOT_DELETABLE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

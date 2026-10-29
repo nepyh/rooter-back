@@ -51,6 +51,20 @@ class ChatEditsTest : StringSpec({
             .rejected.single() shouldContain "이미 지난 시간이에요"
     }
 
+    "빼기: AI 가 만든 할일은 챗봇으로도 못 뺀다 (옮기기·줄이기는 된다)" {
+        val aiTask = math.copy(aiGenerated = true)
+
+        val rejected = applyChatEdits(listOf(aiTask, english), listOf(AiChatEdit("delete", "수학 문제 풀기")), weekday)
+        rejected.changed shouldBe false
+        rejected.deletedIds shouldBe emptySet<Int>()
+        rejected.rejected.single() shouldBe "'수학 문제 풀기'은(는) AI 가 만든 할일이라 뺄 수 없어요. 할일을 빼려면 직접 추가한 할일이어야 해요."
+
+        times(applyChatEdits(listOf(aiTask), listOf(AiChatEdit("resize", "수학 문제 풀기", minutes = 30)), weekday).tasks) shouldBe
+            listOf("수학 문제 풀기 17:00~17:30")
+        times(applyChatEdits(listOf(aiTask), listOf(AiChatEdit("move", "수학 문제 풀기", start_time = "21:00")), weekday).tasks) shouldBe
+            listOf("수학 문제 풀기 21:00~22:00")
+    }
+
     "빼기: 퀴즈를 시작하지 않은 할일만 빼고, 퀴즈를 시작한 할일은 거절한다" {
         val result = applyChatEdits(listOf(math, english), listOf(AiChatEdit("delete", "영어 단어")), weekday)
         result.deletedIds shouldBe setOf(11)

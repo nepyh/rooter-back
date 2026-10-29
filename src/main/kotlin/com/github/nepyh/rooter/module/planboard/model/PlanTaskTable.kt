@@ -23,6 +23,8 @@ object PlanTaskTable : IntIdTable("plan_tasks") {
     // null = 과목 미지정: 복습 태스크(QuizService)·재조정 태스크(FeedbackService)·챗봇 미루기로 파생된
     // 할일(ChatService)과 컬럼 추가 전에 만든 행은 채우지 않는다 (이번 범위 밖)
     val subjectId = reference("subject_id", SubjectTable, onDelete = ReferenceOption.SET_NULL).nullable()
+    // 할일 생성 출처 (DDL 의 chk_plan_tasks_origin 과 동일). AI 가 만든 할일은 삭제할 수 없다 (#245)
+    val origin = enumerationByName("origin", 20, PlanTaskOrigin::class).default(PlanTaskOrigin.USER)
 }
 
 class PlanTaskRow(id: EntityID<Int>) : IntEntity(id) {
@@ -38,4 +40,5 @@ class PlanTaskRow(id: EntityID<Int>) : IntEntity(id) {
 
     // id 로만 쓰고 과목명은 서비스가 벌크 조회로 붙인다 (참조 엔티티로 두면 행마다 SELECT 가 나간다)
     var subjectId by PlanTaskTable.subjectId
+    var origin by PlanTaskTable.origin
 }
