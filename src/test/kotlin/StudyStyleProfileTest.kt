@@ -46,7 +46,7 @@ class StudyStyleProfileTest : StringSpec({
     "주말이 변수인 학생에게는 이 구간의 주말 day 번호를 알려준다" {
         val profile = StudyStyleProfile(volatileTime = VolatileTime.WEEKEND)
 
-        profile.planRules(listOf(6, 7)) shouldContain "주말(day 6, 7)은 평일보다 분량을 가볍게"
+        profile.planRules(listOf(6, 7)) shouldContain "주말(day 6, 7)은 날짜별 권장을 평일보다 낮게 줬다."
         profile.planRules(emptyList()) shouldContain "이 구간에는 주말이 없다."
     }
 
@@ -54,5 +54,12 @@ class StudyStyleProfileTest : StringSpec({
         val summary = StudyStyleProfile(bestTime = BestTime.MORNING, distraction = Distraction.PHONE).summary()
 
         summary shouldBe "공부가 잘 되는 시간대: 아침 (등교 전)\n가장 큰 방해 요소: 스마트폰 알림"
+    }
+
+    "평소 공부량이 적으면 첫 며칠 권장을 낮춰 뒀다고 알려주고, 1시간 이상이면 낮추지 않는다" {
+        StudyStyleProfile(dailyStudy = DailyStudyHabit.UNDER_30).planRules(emptyList()) shouldContain
+            "계획 첫 3일의 날짜별 권장을 60·75·90분 이하로 낮춰 뒀다."
+        StudyStyleProfile(dailyStudy = DailyStudyHabit.OVER_60).planRules(emptyList()) shouldContain
+            "처음부터 학년·실력 등급에 맞는 분량으로 잡아도 된다."
     }
 })
