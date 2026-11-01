@@ -91,7 +91,7 @@ class NotificationServiceTest : StringSpec({
     suspend fun NotificationService.remind(userId: Int, title: String = "곧 시작", planTaskId: Int = 12) =
         notify(userId, NotificationType.TASK_REMINDER, title, "수학 공부 5분 전", mapOf("planTaskId" to planTaskId.toString()))
 
-    "notify: 알림함에 저장하고, 모든 기기로 notificationId 를 실은 푸시를 보낸다" {
+    "notify: 알림함에 저장하고, 모든 기기로 notificationId·type 을 실은 푸시를 보낸다" {
         val userId = newUser("a@test.com")
         val sender = RecordingPushSender()
         val (service, devices) = serviceWith(sender)
@@ -106,7 +106,7 @@ class NotificationServiceTest : StringSpec({
         saved.data shouldBe mapOf("planTaskId" to "12")
         saved.read shouldBe false
         sender.sent.single().second shouldBe PushMessage(
-            "곧 시작", "수학 공부 5분 전", mapOf("planTaskId" to "12", "notificationId" to id.toString())
+            "곧 시작", "수학 공부 5분 전", mapOf("planTaskId" to "12", "notificationId" to id.toString(), "type" to "TASK_REMINDER")
         )
     }
 
