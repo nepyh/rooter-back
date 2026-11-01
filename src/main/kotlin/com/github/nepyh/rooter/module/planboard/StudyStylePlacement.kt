@@ -9,6 +9,8 @@ private const val DAY_MINUTES = 24 * 60
 private const val AFTER_SCHOOL_END_MINUTES = 18 * 60 + 30 // "방과 후 ~ 저녁 식사 전" 의 끝 (18:30)
 private const val EVENING_START_MINUTES = 19 * 60 + 30 // "저녁 식사 후 ~ 밤" 의 시작 (19:30)
 private const val SLEEPY_WINDOW_MINUTES = 60 // 졸음이 방해 요소면 잠들기 전 이만큼은 피한다
+private const val VOLATILE_WEEKEND_LIGHTER_MINUTES = 30 // 주말이 변수면 주말 권장을 평일 권장보다 이만큼 낮춘다
+private const val RAMP_RANGE_MINUTES = 15 // 첫 며칠 권장 상한을 낮출 때 하한은 상한보다 이만큼 아래
 
 /**
  * 공부 스타일 설문으로 그날 할일을 몇 시에 둘지 정한다 ([PlanTaskScheduler.placeTasks]).
@@ -46,3 +48,24 @@ private fun beforeBedtime(bedtime: Int, minutes: Int): List<Pair<Int, Int>> =
     } else {
         listOf(0 to bedtime, DAY_MINUTES - (minutes - bedtime) to DAY_MINUTES).filter { (start, end) -> start < end }
     }
+
+/**
+ * 공부 스타일 설문으로 그날 하루 권장 공부량(분)을 조정한다 ([PlanGenerationService] 가 AI 에 날짜별로 알려주는 "권장").
+ * 프롬프트 지시만으로는 AI 가 서버가 준 권장 범위를 따라가 버려서, 분량에 관한 설문은 권장 범위 자체에 반영한다.
+ * - Q4 주말 → 토·일요일 권장을 평일 권장보다 30분 낮춘다 (평소엔 주말 권장이 평일보다 크다)
+ * - Q5 평소 공부량이 적음 → 계획 첫 며칠은 권장 상한을 [com.github.nepyh.rooter.module.studystyle.DailyStudyHabit.rampMinutes] 로 낮춘다
+ *
+ * @param target 그날 기본 권장 (등교일·쉬는 날, 벼락치기 배율까지 반영한 값)
+ * @param weekdayTarget 같은 배율의 평일(등교일) 권장
+ * @param planDay 전체 계획 기준 몇째 날인지 (1부터). 구간을 나눠 생성해도 첫 며칠은 계획 전체의 첫 며칠만이다
+ */
+fun StudyStyleProfile.dailyTargetMinutes(target: IntRange, weekdayTarget: IntRange, planDay: Int, isWeekend: Boolean): IntRange {
+    var adjusted = target
+    if (volatileTime == VolatileTime.WEEKEND && isWeekend) {
+        adjusted = (weekdayTarget.first - VOLATILE_WEEKEND_LIGHTER_MINUTES)..(weekdayTarget.last - VOLATILE_WEEKEND_LIGHTER_MINUTES)
+    }
+    dailyStudy?.rampMinutes?.getOrNull(planDay - 1)?.let { cap ->
+        adjusted = minOf(adjusted.first, cap - RAMP_RANGE_MINUTES)..minOf(adjusted.last, cap)
+    }
+    return adjusted
+}

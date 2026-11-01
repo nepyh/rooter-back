@@ -159,11 +159,18 @@ class PlanGenerationService(
             val todayNote = if (date == today) ", 오늘이라 지금 $nowLabel 이후만" else ""
             // 공부 가능 시간만 주면 AI 가 그걸 기준 삼아 평일에도 5시간 넘게 채운다 → 하루 적정 분량(권장)을 함께 준다.
             // 등교일은 평일 기준, 주말·공휴일·방학은 쉬는 날 기준, 벼락치기는 1.5배. 공부 가능 시간보다 크게 주지는 않는다
+            // 평소 공부량·주말 변수 설문은 이 권장 범위에 반영한다 (dailyTargetMinutes)
             val isSchoolDay = typedUnavailableRanges[date].orEmpty().any { it.type == UnavailableType.SCHOOL }
-            val target = if (isSchoolDay) SCHOOL_DAY_TARGET_MINUTES else NO_SCHOOL_DAY_TARGET_MINUTES
             val factor = if (request.isCramMode) CRAM_TARGET_FACTOR else 1.0
-            val low = minOf((target.first * factor).toInt(), total)
-            val high = minOf((target.last * factor).toInt(), total)
+            fun scaled(range: IntRange) = (range.first * factor).toInt()..(range.last * factor).toInt()
+            val target = planContext.studyStyle.dailyTargetMinutes(
+                target = scaled(if (isSchoolDay) SCHOOL_DAY_TARGET_MINUTES else NO_SCHOOL_DAY_TARGET_MINUTES),
+                weekdayTarget = scaled(SCHOOL_DAY_TARGET_MINUTES),
+                planDay = ChronoUnit.DAYS.between(startDate, date).toInt() + 1,
+                isWeekend = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
+            )
+            val low = minOf(target.first, total)
+            val high = minOf(target.last, total)
             return "- day $dayNumber ($date $weekday$todayNote): 공부 가능 ${total}분, 가장 긴 연속 ${longest}분, 권장 ${low}~${high}분"
         }
         val breakMinutes = (placementByDate.values.firstOrNull() ?: PlacementOptions.DEFAULT).breakMinutes
