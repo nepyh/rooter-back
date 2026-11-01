@@ -2,6 +2,7 @@ package com.github.nepyh.rooter.module.user
 
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.github.nepyh.rooter.module.notification.DeviceTokenService
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
 import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
@@ -10,6 +11,7 @@ import com.github.nepyh.rooter.module.user.dto.UserLogoutResponse
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.model.UserRow
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.mindrot.jbcrypt.BCrypt
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -23,6 +25,7 @@ private const val APPLE_ISSUER = "https://appleid.apple.com"
 class AuthService(
     private val userRepo: UserRepo,
     private val userService: UserService,
+    private val deviceTokenService: DeviceTokenService,
     val jwtSecret: String,
     val jwtIssuer: String,
     private val googleClientId: String,
@@ -82,6 +85,7 @@ class AuthService(
     /**
      * 비밀번호를 바꾸면 tokenVersion 을 올려 기존에 발급된 토큰을 모두 무효화하고,
      * 변경을 요청한 기기가 계속 쓸 수 있도록 새 토큰을 발급해 돌려준다.
+     * 푸시 토큰도 전부 지운다 — 잃어버린 폰에 알림이 가지 않게. 요청한 기기는 새 JWT 로 푸시 토큰을 다시 등록해야 한다.
      */
     fun changePassword(userId: Int, request: ChangePasswordRequest): PasswordUpdateResponse {
         val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
@@ -96,7 +100,10 @@ class AuthService(
         }
 
         val hashedPassword = BCrypt.hashpw(request.newPassword, BCrypt.gensalt())
-        val updatedUser = userRepo.updatePassword(userId, hashedPassword)
+        // 비밀번호·tokenVersion 변경과 푸시 토큰 삭제를 한 트랜잭션으로 — 하나만 반영되는 일이 없게
+        val updatedUser = transaction {
+            userRepo.updatePassword(userId, hashedPassword).also { deviceTokenService.removeAll(userId) }
+        }
 
         return PasswordUpdateResponse(
             message = "비밀번호가 변경되었습니다.",
@@ -105,7 +112,12 @@ class AuthService(
     }
 
     fun logout(userId: Int): UserLogoutResponse {
-        userRepo.incrementTokenVersion(userId)
+        // 모든 기기의 JWT 가 무효가 되므로 푸시 토큰도 전부 지운다 — 로그아웃한 폰에 알림이 가지 않게.
+        // 한 트랜잭션으로 묶어, 토큰 삭제가 실패하면 로그아웃도 되돌린다 (JWT 만 풀리고 푸시는 계속 가는 상태 방지)
+        transaction {
+            userRepo.incrementTokenVersion(userId)
+            deviceTokenService.removeAll(userId)
+        }
         return UserLogoutResponse(message = "Successfully logged out.")
     }
 

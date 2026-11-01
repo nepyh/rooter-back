@@ -1,6 +1,10 @@
 import com.auth0.jwt.JWT
 import com.github.nepyh.rooter.module.storage.FileStorage
 import com.github.nepyh.rooter.module.storage.UploadableFile
+import com.github.nepyh.rooter.module.notification.DeviceTokenService
+import com.github.nepyh.rooter.module.notification.dto.DeviceTokenRegisterRequest
+import com.github.nepyh.rooter.module.notification.model.DevicePlatform
+import com.github.nepyh.rooter.module.notification.model.UserDeviceTokenTable
 import com.github.nepyh.rooter.module.user.AuthService
 import com.github.nepyh.rooter.module.user.UserJwtValidator
 import com.github.nepyh.rooter.module.user.ExposedUserRepo
@@ -12,12 +16,16 @@ import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.ktor.server.auth.jwt.JWTCredential
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.mindrot.jbcrypt.BCrypt
 import java.sql.DriverManager
@@ -45,13 +53,15 @@ class AuthServicePasswordTest : StringSpec({
 
     beforeSpec {
         transaction(db) {
+            exec("DROP TABLE IF EXISTS user_device_tokens CASCADE")
             exec("DROP TABLE IF EXISTS users CASCADE")
-            SchemaUtils.create(UserTable)
+            SchemaUtils.create(UserTable, UserDeviceTokenTable)
         }
     }
 
     beforeEach {
         transaction(db) {
+            UserDeviceTokenTable.deleteAll()
             UserTable.deleteAll()
         }
     }
@@ -67,9 +77,11 @@ class AuthServicePasswordTest : StringSpec({
         override suspend fun delete(fileKey: String) = error("사용되지 않아야 함")
     }
     val userRepo = ExposedUserRepo()
+    val deviceTokenService = DeviceTokenService(noPushSender)
     val authService = AuthService(
         userRepo,
         UserService(userRepo, noopFileStorage, testAgreementCatalog),
+        deviceTokenService,
         jwtSecret = "test-secret",
         jwtIssuer = "rooter",
         googleClientId = "",
@@ -86,6 +98,27 @@ class AuthServicePasswordTest : StringSpec({
             password = BCrypt.hashpw(rawPassword, BCrypt.gensalt())
             createdAt = OffsetDateTime.now()
         }.id.value
+    }
+
+    fun pushTokensOf(userId: Int): List<String> = transaction(db) {
+        UserDeviceTokenTable.selectAll()
+            .where { UserDeviceTokenTable.userId eq userId }
+            .map { it[UserDeviceTokenTable.token] }
+    }
+
+    fun registerPushToken(userId: Int, token: String) =
+        deviceTokenService.register(userId, DeviceTokenRegisterRequest(token, DevicePlatform.IOS))
+
+    fun tokenVersionOf(userId: Int) = transaction(db) { UserRow.findById(userId)!!.tokenVersion }
+
+    // 운영 DB 에 user_device_tokens 가 없거나 삭제가 실패하는 상황을 테이블 이름을 잠시 바꿔 재현한다
+    fun <T> withoutDeviceTokenTable(block: () -> T): T {
+        transaction(db) { exec("ALTER TABLE user_device_tokens RENAME TO user_device_tokens_off") }
+        try {
+            return block()
+        } finally {
+            transaction(db) { exec("ALTER TABLE user_device_tokens_off RENAME TO user_device_tokens") }
+        }
     }
 
     "changePassword: 비밀번호를 바꾸면 기존 토큰은 무효화되고, 응답의 새 토큰은 통과한다" {
@@ -128,6 +161,56 @@ class AuthServicePasswordTest : StringSpec({
             authService.changePassword(userId, ChangePasswordRequest("Passw0rd!", "short"))
         }
         transaction(db) { UserRow.findById(userId)!!.tokenVersion } shouldBe 0
+    }
+
+    "changePassword: 그 사용자의 푸시 토큰은 전부 지우고, 다른 사용자 토큰은 남긴다" {
+        val userId = seedUser("pw5@test.com", "Passw0rd!")
+        val other = seedUser("other@test.com", "Passw0rd!")
+        registerPushToken(userId, "ExponentPushToken[lost-phone]")
+        registerPushToken(userId, "ExponentPushToken[my-tablet]")
+        registerPushToken(other, "ExponentPushToken[other]")
+
+        authService.changePassword(userId, ChangePasswordRequest("Passw0rd!", "NewPassw0rd!"))
+
+        pushTokensOf(userId).shouldBeEmpty()
+        pushTokensOf(other) shouldContainExactly listOf("ExponentPushToken[other]")
+    }
+
+    "changePassword: 현재 비밀번호가 틀려 실패하면 푸시 토큰은 그대로다" {
+        val userId = seedUser("pw6@test.com", "Passw0rd!")
+        registerPushToken(userId, "ExponentPushToken[phone]")
+
+        shouldThrow<UserValidationException.WrongCurrentPasswordException> {
+            authService.changePassword(userId, ChangePasswordRequest("wrong-pass1", "NewPassw0rd!"))
+        }
+        pushTokensOf(userId) shouldContainExactly listOf("ExponentPushToken[phone]")
+    }
+
+    "changePassword: 푸시 토큰 삭제가 실패하면 비밀번호·tokenVersion 변경도 되돌린다" {
+        val userId = seedUser("pw7@test.com", "Passw0rd!")
+        val oldToken = authService.login(UserLoginRequest("pw7@test.com", "Passw0rd!")).token
+
+        withoutDeviceTokenTable {
+            shouldThrow<Exception> {
+                authService.changePassword(userId, ChangePasswordRequest("Passw0rd!", "NewPassw0rd!"))
+            }
+        }
+
+        tokenVersionOf(userId) shouldBe 0
+        isValid(oldToken) shouldBe true
+        authService.login(UserLoginRequest("pw7@test.com", "Passw0rd!")).token.shouldNotBeNull()
+    }
+
+    "logout: 푸시 토큰 삭제가 실패하면 tokenVersion 도 그대로다 (JWT 만 풀리는 상태 방지)" {
+        val userId = seedUser("pw8@test.com", "Passw0rd!")
+        val token = authService.login(UserLoginRequest("pw8@test.com", "Passw0rd!")).token
+
+        withoutDeviceTokenTable {
+            shouldThrow<Exception> { authService.logout(userId) }
+        }
+
+        tokenVersionOf(userId) shouldBe 0
+        isValid(token) shouldBe true
     }
 })
 

@@ -121,7 +121,8 @@ fun AuthApi(authService: AuthService) = ApiRoute("auth") {
         }.describe {
             tag("Auth")
             summary = "로그아웃"
-            description = "Authorization: Bearer 헤더로 전달된 JWT 가 유효해야 호출 가능. 로그아웃 시 해당 유저의 토큰 버전을 올려 그 시점 이전에 발급된 모든 토큰을 무효화함"
+            description = "Authorization: Bearer 헤더로 전달된 JWT 가 유효해야 호출 가능. 로그아웃 시 해당 유저의 토큰 버전을 올려 그 시점 이전에 발급된 모든 토큰을 무효화함. " +
+                "모든 기기가 로그아웃되므로 등록된 푸시 토큰(POST /notifications/device-tokens)도 전부 지워 더는 알림이 가지 않음"
             responses {
                 HttpStatusCode.OK {
                     description = "로그아웃 성공"

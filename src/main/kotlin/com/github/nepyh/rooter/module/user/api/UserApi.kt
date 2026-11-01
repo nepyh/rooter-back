@@ -396,7 +396,8 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
         }.describe {
             tag("User")
             summary = "비밀번호 변경"
-            description = "현재 비밀번호 확인 후 새 비밀번호로 변경. 본인 정보만 변경 가능. 변경하면 기존에 발급된 토큰은 모두 무효화되고(다른 기기 로그아웃), 응답의 token 으로 교체해서 써야 함"
+            description = "현재 비밀번호 확인 후 새 비밀번호로 변경. 본인 정보만 변경 가능. 변경하면 기존에 발급된 토큰은 모두 무효화되고(다른 기기 로그아웃), 응답의 token 으로 교체해서 써야 함. " +
+                "등록된 푸시 토큰도 전부 지워지므로(잃어버린 기기에 알림이 가지 않게), 앱은 새 token 을 저장한 직후 POST /notifications/device-tokens 로 이 기기의 푸시 토큰을 다시 등록해야 함"
             parameters {
                 path("id") {
                     description = "유저 ID"

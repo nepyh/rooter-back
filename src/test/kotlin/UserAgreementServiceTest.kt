@@ -1,5 +1,6 @@
 import com.github.nepyh.rooter.module.storage.FileStorage
 import com.github.nepyh.rooter.module.storage.UploadableFile
+import com.github.nepyh.rooter.module.notification.DeviceTokenService
 import com.github.nepyh.rooter.module.user.AuthService
 import com.github.nepyh.rooter.module.user.ExposedUserRepo
 import com.github.nepyh.rooter.module.user.UserService
@@ -267,7 +268,7 @@ class UserAgreementServiceTest : StringSpec({
     "로그인 응답에 pendingAgreements 가 실린다" {
         val userService = service()
         userService.registerUser(registerRequest("login@test.com", null))
-        val authService = AuthService(ExposedUserRepo(), userService, "test-secret", "test-issuer", "", "")
+        val authService = AuthService(ExposedUserRepo(), userService, DeviceTokenService(noPushSender), "test-secret", "test-issuer", "", "")
 
         val response = authService.login(UserLoginRequest("login@test.com", "abcd1234"))
 

@@ -24,6 +24,9 @@ services:
       - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
       - SENTRY_RELEASE=${SENTRY_RELEASE:-}
 
+      # Expo 푸시 액세스 토큰 — Enhanced Security for Push 를 켰을 때만 필요, 비어 있으면 토큰 없이 발송
+      - EXPO_ACCESS_TOKEN=${EXPO_ACCESS_TOKEN:-}
+
       # LLM(퀴즈·계획 생성) — prod.conf 가 필수 치환으로 참조해서, 값이 아예 없으면
       # 컨테이너가 기동하지 않음. 빈 값이어도 치환은 성공하므로 ${VAR} 형태로 항상 넘긴다
       - LLM_BASE_URL=${LLM_BASE_URL}

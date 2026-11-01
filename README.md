@@ -221,6 +221,7 @@ AWS_PROFILE=rooter-s3-dev ./gradlew run --args="-config=dev-s3.conf"
 - **DDL·데이터 SQL 은 운영에 바로 나가므로 로컬에서 먼저 검증**합니다 — 로컬 Postgres 에 `rooter-ddl` 의 `schema.sql` 과 운영과 같은 마스터 데이터(교과서·단원)를 넣고 실행해 본 뒤, 운영 DB 에는 **코드 머지 전에** 적용합니다.
 
 1. ECS **태스크 정의**에 `AWS_REGION` / `AWS_BUCKET` / `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 환경변수를 넣습니다 (`prod.conf` 의 치환값 — LLM 3종이 없으면 컨테이너가 기동하지 않음)
+   - 선택: `EXPO_ACCESS_TOKEN` — Expo 대시보드에서 "Enhanced Security for Push" 를 켰을 때만 넣습니다. 없으면 토큰 없이 푸시를 보냅니다 (켜 놓고 빠뜨리면 기동은 되지만 푸시가 전부 거절됨)
 2. **태스크 역할(task role)** 에 버킷 접근 권한을 부여합니다
    - `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` → `arn:aws:s3:::<버킷>/*`
    - `s3:ListBucket` → `arn:aws:s3:::<버킷>`

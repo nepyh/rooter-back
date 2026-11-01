@@ -33,6 +33,7 @@ fun UserModule(appConfig: AppConfig) = module {
         AuthService(
             get(),
             get(),
+            get(),
             appConfig.jwtSecret,
             appConfig.jwtIssuer,
             appConfig.googleClientId,
