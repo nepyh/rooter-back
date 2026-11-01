@@ -37,11 +37,13 @@ internal data class EditableTask(
  * @param blocked 할일을 둘 수 없는 시간(분) — 수면·등교·사용자 불가능 시간·이미 완료한 할일·다른 플랜보드의 할일
  * @param earliestMinute 오늘이면 지금 이후만 (10분 단위 올림), 다른 날이면 0
  * @param subjectIdsByName 플랜보드 과목명 → 과목 id (추가하는 할일에 과목을 붙일 때)
+ * @param dayLabel 답변에서 그날을 부르는 말. 대화한 날은 "오늘", 다른 날은 "11월 5일(목)" (#337)
  */
 internal class EditDay(
     val blocked: List<Pair<Int, Int>>,
     val earliestMinute: Int,
-    val subjectIdsByName: Map<String, Int>
+    val subjectIdsByName: Map<String, Int>,
+    val dayLabel: String = "오늘"
 )
 
 internal data class EditResult(
@@ -62,7 +64,7 @@ internal fun applyChatEdits(initial: List<EditableTask>, edits: List<AiChatEdit>
     for (edit in edits) {
         when (edit.type.trim().lowercase()) {
             "resize" -> {
-                val index = findTask(tasks, edit.task_name) ?: run { rejected += notFound(edit.task_name); null } ?: continue
+                val index = findTask(tasks, edit.task_name) ?: run { rejected += notFound(edit.task_name, day); null } ?: continue
                 val task = tasks[index]
                 val minutes = edit.minutes
                 when {
@@ -84,7 +86,7 @@ internal fun applyChatEdits(initial: List<EditableTask>, edits: List<AiChatEdit>
             }
 
             "move" -> {
-                val index = findTask(tasks, edit.task_name) ?: run { rejected += notFound(edit.task_name); null } ?: continue
+                val index = findTask(tasks, edit.task_name) ?: run { rejected += notFound(edit.task_name, day); null } ?: continue
                 val task = tasks[index]
                 val start = parseMinutes(edit.start_time)
                 when {
@@ -104,7 +106,7 @@ internal fun applyChatEdits(initial: List<EditableTask>, edits: List<AiChatEdit>
             }
 
             "delete" -> {
-                val index = findTask(tasks, edit.task_name) ?: run { rejected += notFound(edit.task_name); null } ?: continue
+                val index = findTask(tasks, edit.task_name) ?: run { rejected += notFound(edit.task_name, day); null } ?: continue
                 val task = tasks[index]
                 if (task.aiGenerated) {
                     rejected += "'${task.name}'은(는) AI 가 만든 할일이라 뺄 수 없어요. 할일을 빼려면 직접 추가한 할일이어야 해요."
@@ -113,7 +115,7 @@ internal fun applyChatEdits(initial: List<EditableTask>, edits: List<AiChatEdit>
                 } else {
                     tasks.removeAt(index)
                     task.id?.let { deletedIds += it }
-                    applied += "'${task.name}'을(를) 오늘 계획에서 뺐어요."
+                    applied += "'${task.name}'을(를) ${day.dayLabel} 계획에서 뺐어요."
                 }
             }
 
@@ -150,7 +152,7 @@ internal fun applyChatEdits(initial: List<EditableTask>, edits: List<AiChatEdit>
                     }
                     val slot = PlanTaskScheduler.freeIntervalsFromBusyRanges(busy).firstOrNull { (s, e) -> e - s >= minutes }
                     if (slot == null) {
-                        rejected += "오늘은 '$name'(${minutes}분)이 들어갈 빈 시간이 없어요."
+                        rejected += "${day.dayLabel}은 '$name'(${minutes}분)이 들어갈 빈 시간이 없어요."
                     } else {
                         val end = slot.first + minutes
                         tasks += EditableTask(null, name, slot.first, end, subjectId)
@@ -191,11 +193,11 @@ private fun freeHint(tasks: List<EditableTask>, day: EditDay): String {
     val free = PlanTaskScheduler.freeIntervalsFromBusyRanges(day.blocked + (0 to day.earliestMinute) + tasks.map { it.start to it.end })
         .filter { (s, e) -> e - s >= 10 }
         .take(3)
-    return if (free.isEmpty()) " 오늘은 남은 빈 시간이 없어요." else " 오늘 빈 시간: ${free.joinToString(", ") { (s, e) -> "${hhmm(s)}~${hhmm(e)}" }}"
+    return if (free.isEmpty()) " ${day.dayLabel}은 남은 빈 시간이 없어요." else " ${day.dayLabel} 빈 시간: ${free.joinToString(", ") { (s, e) -> "${hhmm(s)}~${hhmm(e)}" }}"
 }
 
-private fun notFound(name: String?): String =
-    if (name.isNullOrBlank()) "어떤 할일을 바꿀지 알려 주세요." else "'${name.trim()}' 할일을 오늘 계획에서 찾지 못했어요."
+private fun notFound(name: String?, day: EditDay): String =
+    if (name.isNullOrBlank()) "어떤 할일을 바꿀지 알려 주세요." else "'${name.trim()}' 할일을 ${day.dayLabel} 계획에서 찾지 못했어요."
 
 private fun finalizedReply(name: String): String = "'$name'은(는) 퀴즈로 결과가 확정된 할일이라 바꿀 수 없어요."
 
