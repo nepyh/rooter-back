@@ -6,9 +6,17 @@ import com.github.nepyh.rooter.module.scheduler.model.JobRunTable
 import com.github.nepyh.rooter.module.scheduler.model.JobStatus
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import java.sql.DriverManager
 import java.sql.SQLException
+import java.time.Duration
 import java.time.OffsetDateTime
+import java.util.concurrent.atomic.AtomicInteger
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
@@ -87,6 +95,41 @@ class SchedulerEngineTest : StringSpec({
 
         executed shouldBe listOf("same_key")
         transaction(db) { JobRunTable.selectAll().count() } shouldBe 1L
+    }
+
+    "잡마다 따로 돈다: 한 잡의 실행이 끝나지 않아도 다른 잡은 매 틱 실행된다" {
+        val stuck = CompletableDeferred<Unit>()
+        val slowStarted = CompletableDeferred<Unit>()
+        val slowJob = object : SchedulerJob {
+            override val jobType = "slow_job"
+            override fun findDue(now: OffsetDateTime) = listOf(DueJob("slow_key", now))
+            override suspend fun execute(due: DueJob) {
+                slowStarted.complete(Unit)
+                stuck.await() // LLM 호출처럼 오래 걸리는 실행
+            }
+        }
+        val fastRuns = AtomicInteger()
+        val tick = AtomicInteger()
+        val fastJob = object : SchedulerJob {
+            override val jobType = "fast_job"
+            override fun findDue(now: OffsetDateTime) = listOf(DueJob("fast_${tick.getAndIncrement()}", now))
+            override suspend fun execute(due: DueJob) {
+                fastRuns.incrementAndGet()
+            }
+        }
+        val scope = CoroutineScope(SupervisorJob())
+
+        try {
+            // 느린 잡을 먼저 등록한다 — 예전처럼 한 루프에서 차례로 돌았다면 빠른 잡은 한 번도 돌지 못한다
+            SchedulerEngine(listOf(slowJob, fastJob), JobRunRepo(), Duration.ofMillis(50)).start(scope)
+            withTimeout(5_000) {
+                slowStarted.await()
+                while (fastRuns.get() < 3) delay(20)
+            }
+        } finally {
+            stuck.complete(Unit)
+            scope.cancel()
+        }
     }
 })
 
