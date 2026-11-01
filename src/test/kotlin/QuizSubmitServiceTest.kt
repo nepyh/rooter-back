@@ -7,6 +7,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
@@ -168,6 +169,8 @@ class QuizSubmitServiceTest : StringSpec({
         )
         result.insertedReviewTasks.map { it.taskName } shouldBe listOf("복습: 소인수분해 다시 풀기", "복습: 정수 계산 연습")
         transaction(db) { PlanTaskRow.all().count { it.taskName.startsWith("복습:") } } shouldBe 2
+        // 복습 할일도 AI 가 만든 것이라 사용자가 지울 수 없다 (#245)
+        transaction(db) { PlanTaskRow.all().filter { it.taskName.startsWith("복습:") }.map { it.origin }.toSet() } shouldBe setOf(PlanTaskOrigin.AI)
     }
 
     "퀴즈 날이 플랜보드 마지막 날이면 그날의 남은 빈 시간에 넣고, 자정을 넘기지 않는다" {

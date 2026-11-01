@@ -5,8 +5,17 @@ import java.time.LocalTime
 
 private const val DAY_MINUTES = 24 * 60
 
-/** 재조정 전 그날의 미완료 태스크 (시각은 0시부터의 분) */
-data class ExistingPendingTask(val id: Int, val taskName: String, val startMinutes: Int, val endMinutes: Int)
+/**
+ * 재조정 전 그날의 미완료 태스크 (시각은 0시부터의 분)
+ * @param aiGenerated AI 가 만든 할일 — 지울 수 없어서 재조정 대상에서 뺀다 (#245)
+ */
+data class ExistingPendingTask(
+    val id: Int,
+    val taskName: String,
+    val startMinutes: Int,
+    val endMinutes: Int,
+    val aiGenerated: Boolean = false
+)
 
 /** 재조정 결과. existingId 가 있으면 그 태스크를 제자리 수정, 없으면 새로 만든다 */
 data class RescheduledTask(

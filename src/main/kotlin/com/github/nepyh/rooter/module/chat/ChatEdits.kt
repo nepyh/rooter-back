@@ -26,7 +26,8 @@ internal data class EditableTask(
     val end: Int,
     val subjectId: Int? = null,
     val quizStarted: Boolean = false, // 태스크 퀴즈 차수가 하나라도 있음 → 지우면 퀴즈 기록이 사라져서 삭제 불가
-    val quizFinalized: Boolean = false // 퀴즈로 결과가 확정됨 → 시간 변경도 불가 (PATCH 와 같은 규칙)
+    val quizFinalized: Boolean = false, // 퀴즈로 결과가 확정됨 → 시간 변경도 불가 (PATCH 와 같은 규칙)
+    val aiGenerated: Boolean = false // AI 가 만든 할일 → 챗봇으로도 삭제 불가, 시간 변경은 가능 (#245)
 ) {
     val minutes get() = end - start
 }
@@ -105,7 +106,9 @@ internal fun applyChatEdits(initial: List<EditableTask>, edits: List<AiChatEdit>
             "delete" -> {
                 val index = findTask(tasks, edit.task_name) ?: run { rejected += notFound(edit.task_name); null } ?: continue
                 val task = tasks[index]
-                if (task.quizStarted || task.quizFinalized) {
+                if (task.aiGenerated) {
+                    rejected += "'${task.name}'은(는) AI 가 만든 할일이라 뺄 수 없어요. 할일을 빼려면 직접 추가한 할일이어야 해요."
+                } else if (task.quizStarted || task.quizFinalized) {
                     rejected += "'${task.name}'은(는) 이미 퀴즈를 시작한 할일이라 뺄 수 없어요."
                 } else {
                     tasks.removeAt(index)

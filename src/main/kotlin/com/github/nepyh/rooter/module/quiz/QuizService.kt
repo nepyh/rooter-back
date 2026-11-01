@@ -19,6 +19,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.quiz.dto.InsertedReviewTaskResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizAnswerSubmission
@@ -375,6 +376,8 @@ class QuizService(
                     startTime = task.startTime
                     endTime = task.endTime
                     estimatedMinutes = task.estimatedMinutes
+                    // 퀴즈 결과로 만든 복습 할일 — 사용자가 지울 수 없다 (#245)
+                    origin = PlanTaskOrigin.AI
                 }
                 InsertedReviewTaskResponse(
                     dailyPlanId = dailyPlan.id.value,

@@ -41,6 +41,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
@@ -982,6 +983,51 @@ class PlanBoardServiceTest : StringSpec({
         planTaskService.deleteTask(userId, taskId)
 
         transaction(db) { PlanTaskRow.findById(taskId) shouldBe null }
+    }
+
+    "deleteTask: AI 가 만든 할일은 AiTaskNotDeletableException 이고 지워지지 않는다" {
+        val userId = seedUser("task-delete-ai@test.com")
+        val boardId = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+        val taskId = transaction(db) {
+            val task = PlanTaskRow.find { PlanTaskTable.taskName eq "수학 2단원" }.first()
+            task.origin = PlanTaskOrigin.AI
+            task.id.value
+        }
+
+        shouldThrow<PlanTaskValidationException.AiTaskNotDeletableException> {
+            planTaskService.deleteTask(userId, taskId)
+        }
+
+        transaction(db) { PlanTaskRow.findById(taskId)?.origin shouldBe PlanTaskOrigin.AI }
+    }
+
+    "createTask: 직접 추가한 할일의 origin 은 USER" {
+        val userId = seedUser("task-source-user@test.com")
+        val boardId = seedBoard(userId)
+
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardId))
+
+        transaction(db) { PlanTaskRow.find { PlanTaskTable.taskName eq "수학 2단원" }.first().origin shouldBe PlanTaskOrigin.USER }
+    }
+
+    "plan-generation: 생성된 할일의 origin 은 AI" {
+        val userId = seedUser("gen-source@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient(tasks = listOf(GeneratedPlanTask("수학 개념", 60)))
+
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(
+                title = "출처 확인",
+                subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)),
+                startDate = "2026-07-01",
+                daysRemaining = 1
+            )
+        )
+
+        transaction(db) { PlanTaskRow.all().map { it.origin }.toSet() shouldBe setOf(PlanTaskOrigin.AI) }
     }
 
     "deleteTask: 본인 소유가 아니면 PlanTaskNotFoundException" {

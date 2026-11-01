@@ -14,6 +14,7 @@ import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
@@ -178,6 +179,8 @@ class PlanTaskService {
             this.endTime = endTime
             estimatedMinutes = request.estimatedMinutes
             this.subjectId = textbookSubjectId?.let { EntityID(it, SubjectTable) }
+            // 이 API 로 만든 할일만 사용자가 지울 수 있다 (#245)
+            origin = PlanTaskOrigin.USER
         }
     }
 
@@ -254,13 +257,22 @@ class PlanTaskService {
         task.toResponse(planBoardIdOf(task), isManualPlanBoard(task.dailyPlan.planBoard.examDate), subjectNameOf(task))
     }
 
-    /** 태스크 삭제 (본인 플랜보드 소유권 확인) */
+    /**
+     * 태스크 삭제 (본인 플랜보드 소유권 확인)
+     *
+     * 직접 추가한 할일(origin = USER)만 지울 수 있다. AI 가 만든 할일은 AI_TASK_NOT_DELETABLE (#245) —
+     * 지우려면 챗봇으로 그날 계획을 고친다. 다른 사람 할일은 있는지조차 알려주지 않는다 (404)
+     */
     fun deleteTask(userId: Int, taskId: Int) = transaction {
         val task = PlanTaskRow.findById(taskId)
             ?: throw PlanTaskNotFoundException()
 
         if (task.dailyPlan.planBoard.user.id.value != userId) {
             throw PlanTaskNotFoundException()
+        }
+
+        if (task.origin != PlanTaskOrigin.USER) {
+            throw PlanTaskValidationException.AiTaskNotDeletableException()
         }
 
         task.delete()

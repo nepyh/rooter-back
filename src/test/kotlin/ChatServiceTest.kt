@@ -21,6 +21,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
@@ -146,7 +147,7 @@ class ChatServiceTest : StringSpec({
 
     fun seedTask(
         dailyPlanId: Int, name: String, start: LocalTime, end: LocalTime, completed: Boolean,
-        postponedFrom: LocalDate? = null, failed: Boolean = false
+        postponedFrom: LocalDate? = null, failed: Boolean = false, origin: PlanTaskOrigin = PlanTaskOrigin.USER
     ): Int = transaction(db) {
         PlanTaskRow.new {
             postponedFromDate = postponedFrom
@@ -154,6 +155,7 @@ class ChatServiceTest : StringSpec({
             taskName = name
             startTime = start
             endTime = end
+            this.origin = origin
             estimatedMinutes = (end.toSecondOfDay() - start.toSecondOfDay()) / 60
             status = when {
                 failed -> PlanTaskStatus.FAILED
@@ -224,6 +226,34 @@ class ChatServiceTest : StringSpec({
             "실패한 태스크" to PlanTaskStatus.FAILED,
             "남은 태스크" to PlanTaskStatus.PENDING
         )
+    }
+
+    "채팅으로 계획을 다시 짜도 AI 가 만든 할일은 지우지 않고, 그 시간대를 피해 새 할일을 배치한다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        // 귀가(16:30~17:10)·저녁(18:00~19:00) 뒤에 둔다
+        val aiId = seedTask(dailyPlanId, "AI 복습", LocalTime.of(20, 10), LocalTime.of(21, 0), completed = false, origin = PlanTaskOrigin.AI)
+        val mineId = seedTask(dailyPlanId, "내가 추가한 할일", LocalTime.of(21, 10), LocalTime.of(22, 0), completed = false)
+
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "계획을 다시 짰어요",
+                plan_changed = true,
+                plan_update = AiChatPlanUpdate(tasks = listOf(AiChatTask("새 할일", 30)))
+            )
+        )
+        ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "계획 다시 짜줘")
+
+        transaction(db) {
+            // AI 가 만든 할일은 지울 수 없어 시각 그대로 남는다
+            val ai = PlanTaskRow.findById(aiId)!!
+            ai.startTime shouldBe LocalTime.of(20, 10)
+            ai.origin shouldBe PlanTaskOrigin.AI
+            // 사용자가 만든 할일은 AI 목록에서 빠졌으므로 지워진다
+            PlanTaskRow.findById(mineId) shouldBe null
+            // 새 할일은 AI 할일 시간대와 겹치지 않는다
+            val created = PlanTaskRow.all().single { it.taskName == "새 할일" }
+            (created.startTime < ai.endTime && ai.startTime < created.endTime) shouldBe false
+        }
     }
 
     "AI 에 보내는 현재 태스크에 시작·끝 시각이 들어간다 (새 일정과 겹치는지 판단용)" {
@@ -425,6 +455,8 @@ class ChatServiceTest : StringSpec({
             "과학 2단원 전기와 자기 개념 정리 20:00~20:40 40 과학"
         )
         response.updatedTasks!!.last().subjectId shouldBe scienceId
+        // 챗봇이 만든 할일 = user 발 일정이라 나중에 지울 수 있다 (#245)
+        transaction(db) { PlanTaskRow.all().single { it.taskName.startsWith("과학 2단원") }.origin } shouldBe PlanTaskOrigin.USER
         response.reply shouldBe "'수학 문제 풀기'을(를) 30분(17:00~17:30)으로 줄였어요. '영어 단어'을(를) 오늘 계획에서 뺐어요. " +
             "'과학 2단원 전기와 자기 개념 정리'을(를) 20:00~20:40에 추가했어요."
         // AI 가 학습 범위를 보고 할일 이름을 짓도록 플랜보드 과목·단원을 넘긴다
