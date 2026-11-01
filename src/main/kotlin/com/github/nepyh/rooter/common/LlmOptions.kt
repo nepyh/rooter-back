@@ -21,3 +21,16 @@ data class LlmThinking(val type: String) {
  * 앱 앞의 ALB idle timeout 이 60초라서, 호출 한 번이 그 안에 끝나도록 50초로 둔다.
  */
 const val LLM_REQUEST_TIMEOUT_MILLIS = 50_000L
+
+private val CODE_FENCE_START = Regex("^```[A-Za-z]*\\s*")
+private val CODE_FENCE_END = Regex("\\s*```$")
+
+/**
+ * LLM 이 "JSON 만 응답하라" 는 지시에도 가끔 응답을 ```json ... ``` 코드블록으로 감싸 보낸다.
+ * 그대로 파싱하면 실패해 생성이 실패하므로 감싼 표시만 벗긴다. 코드블록이 아니면 앞뒤 공백만 뺀다.
+ */
+fun stripCodeFence(content: String): String {
+    val trimmed = content.trim()
+    if (!trimmed.startsWith("```")) return trimmed
+    return trimmed.replaceFirst(CODE_FENCE_START, "").replaceFirst(CODE_FENCE_END, "")
+}
