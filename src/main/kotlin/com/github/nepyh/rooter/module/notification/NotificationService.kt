@@ -62,8 +62,8 @@ class NotificationService(
         }
 
         if (pushEnabled) {
-            // 앱이 푸시를 눌렀을 때 알림함 항목을 읽음 처리할 수 있게 id 를 함께 싣는다
-            val pushData = data + (NOTIFICATION_ID_KEY to notificationId.toString())
+            // 앱이 푸시를 눌렀을 때 알림함 항목을 읽음 처리하고(id) 이동할 화면을 고를 수 있게(type) 함께 싣는다
+            val pushData = data + mapOf(NOTIFICATION_ID_KEY to notificationId.toString(), TYPE_KEY to type.name)
             val result = deviceTokenService.sendToUser(userId, PushMessage(savedTitle, savedBody, pushData))
             logger.info("알림 발송: userId={}, type={}, notificationId={}, sent={}", userId, type, notificationId, result.sent)
         }
@@ -143,6 +143,7 @@ class NotificationService(
 
     companion object {
         const val NOTIFICATION_ID_KEY = "notificationId"
+        const val TYPE_KEY = "type"
         private const val MAX_TITLE_LENGTH = 100 // DDL: varchar(100)
         private const val MAX_BODY_LENGTH = 500  // DDL: varchar(500)
         private val json = Json
