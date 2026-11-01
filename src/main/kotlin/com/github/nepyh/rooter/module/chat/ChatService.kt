@@ -7,6 +7,7 @@ import com.github.nepyh.rooter.module.chat.dto.AiChatPostpone
 import com.github.nepyh.rooter.module.chat.dto.AiChatTurn
 import com.github.nepyh.rooter.module.chat.dto.ChatMessageResponse
 import com.github.nepyh.rooter.module.chat.dto.ChatTurnResponse
+import com.github.nepyh.rooter.module.chat.dto.ChatUpdatedDay
 import com.github.nepyh.rooter.module.chat.exception.ChatValidationException
 import com.github.nepyh.rooter.module.chat.exception.DailyPlanNotFoundException
 import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
@@ -163,6 +164,7 @@ class ChatService(
                 history = history,
                 planBoardId = board.id.value,
                 planBoardIsManual = isManualPlanBoard(board.examDate),
+                planBoardStartDate = board.startDate,
                 planBoardEndDate = board.endDate,
                 pendingPostponedFrom = pendingTasks.associate { it.id.value to it.postponedFromDate }
             )
@@ -195,12 +197,19 @@ class ChatService(
         // 새로 생긴 공부 불가능 시간이 남은 태스크와 겹치는지는 서버가 직접 판단하고, 안 겹치면 계획을 건드리지 않는다.
         val busyWindow = update?.let { busyWindowOf(it.busy_window_start, it.busy_window_end) }
         val busyWindowOverlapsNothing = busyWindow != null && context.pendingTasks.none { overlaps(it, busyWindow) }
+        // 다른 날에 생긴 일정 (#334) — 그날 계획(같은 플랜보드)에서 겹치는 할일만 옮긴다
+        val planDate = LocalDate.parse(context.planDate)
+        val otherBusy = result?.takeIf { it.plan_changed && it.other_busy_days.isNotEmpty() }?.let {
+            otherBusyDaysOf(it.other_busy_days, planDate, todayInAppZone(clock), context.planBoardStartDate, context.planBoardEndDate)
+        }
+        // 다른 날 일정만 말했는데 AI 가 대화한 날 할일을 그대로 다시 보낸 경우엔 그날을 다시 배치하지 않는다
+        val onlyOtherDays = otherBusy != null && busyWindow == null
         val shouldReplan = result != null && result.plan_changed && update != null && update.tasks.isNotEmpty() &&
-            !busyWindowOverlapsNothing
+            !busyWindowOverlapsNothing && !onlyOtherDays
+        val otherDayResults = otherBusy?.let { rescheduleOtherDays(userId, context, it) }.orEmpty()
 
         // NICE 시간표 조회(네트워크 호출)가 있어 트랜잭션 밖에서 미리 계산해둔다.
         val replanBusyRanges = if (shouldReplan) {
-            val planDate = LocalDate.parse(context.planDate)
             val busyRanges = PlanTaskScheduler.buildUnavailableRanges(
                 schoolDataFetcher = schoolDataFetcher,
                 startDate = planDate,
@@ -225,7 +234,7 @@ class ChatService(
             emptyList()
         }
         // 오늘 계획이면 옮기는 태스크를 지난 시간에 넣지 않는다 (10분 단위로 올림)
-        val earliestMinute = if (LocalDate.parse(context.planDate) == todayInAppZone(clock)) {
+        val earliestMinute = if (planDate == todayInAppZone(clock)) {
             val now = LocalTime.now(clock.withZone(APP_ZONE))
             ((now.hour * 60 + now.minute + 9) / 10) * 10
         } else {
@@ -291,12 +300,21 @@ class ChatService(
                 updatedTasks = dayRows.map { it.toResponse(dailyPlanId, context.planBoardId, context.planBoardIsManual, it.subjectNameFrom(subjectNames)) }
             }
 
+            val updatedDays = otherDayResults.mapNotNull { it.applyInTransaction(context) }.takeIf { it.isNotEmpty() }
+
             // AI 가 계획을 바꿨다고 했는데 서버가 적용하지 못한 경우(바꿀 태스크 목록 없음 등), 사용자가 바뀐 줄 알지 않도록 답변을 바로잡는다
-            val reply = when {
+            val dayReply = when {
                 result.plan_changed && busyWindowOverlapsNothing -> noOverlapReply(busyWindow!!)
+                // 다른 날 일정만 말한 경우 — AI 는 그날 할일을 못 보므로 AI 문장 대신 아래 실제 결과로만 답한다
+                result.plan_changed && updatedTasks == null && otherBusy != null -> null
                 result.plan_changed && updatedTasks == null -> PLAN_NOT_APPLIED_REPLY
                 else -> result.reply_message
             }
+            // 다른 날은 AI 문장 대신 실제로 옮긴 결과로 답한다
+            val otherReply = otherBusy?.let {
+                otherDaysReply(it, otherDayResults.associate { day -> day.date to day.reschedule }, context.planBoardStartDate, context.planBoardEndDate)
+            }
+            val reply = listOfNotNull(dayReply, otherReply).joinToString(" ").ifBlank { PLAN_NOT_APPLIED_REPLY }
 
             ChatTurnRow.new {
                 this.dailyPlan = DailyPlanRow[dailyPlanId]
@@ -307,8 +325,9 @@ class ChatService(
 
             ChatMessageResponse(
                 reply = reply,
-                planChanged = updatedTasks != null,
-                updatedTasks = updatedTasks
+                planChanged = updatedTasks != null || updatedDays != null,
+                updatedTasks = updatedTasks,
+                updatedDays = updatedDays
             )
         }
     }
@@ -372,6 +391,59 @@ class ChatService(
             val updatedTasks = dayRows.map { it.toResponse(dailyPlanId, context.planBoardId, context.planBoardIsManual, it.subjectNameFrom(subjectNames)) }
             saveTurnsInTransaction(dailyPlanId, userMessage, reply)
             ChatMessageResponse(reply = reply, planChanged = true, updatedTasks = updatedTasks)
+        }
+    }
+
+    /**
+     * 다른 날 일정([busy])에 맞춰 날마다 겹치는 할일을 어디로 옮길지 계산한다 (#334, 저장은 [OtherDayPlan.applyInTransaction]).
+     * 같은 플랜보드의 그날 계획만 고치고, 그날 다른 플랜보드의 할일·완료한 할일·수면·등교·불가능 시간은 피한다.
+     * 결과의 reschedule 이 null 이면 그날 계획이 없거나 겹치는 할일이 없는 날이다.
+     */
+    private suspend fun rescheduleOtherDays(userId: Int, context: ChatContext, busy: OtherBusyDays): List<OtherDayPlan> {
+        if (busy.days.isEmpty()) return emptyList()
+        val dates = busy.days.map { it.date }
+        val rows = newSuspendedTransaction {
+            (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+                .selectAll()
+                .where { (PlanBoardTable.userId eq userId) and (DailyPlanTable.planDate inList dates) }
+                .map { row ->
+                    OtherDayTaskRow(
+                        date = row[DailyPlanTable.planDate],
+                        dailyPlanId = row[DailyPlanTable.id].value,
+                        sameBoard = row[DailyPlanTable.planBoardId].value == context.planBoardId,
+                        task = ExistingPendingTask(
+                            row[PlanTaskTable.id].value, row[PlanTaskTable.taskName],
+                            PlanTaskScheduler.toMinutes(row[PlanTaskTable.startTime]), PlanTaskScheduler.toMinutes(row[PlanTaskTable.endTime]),
+                            aiGenerated = row[PlanTaskTable.origin] == PlanTaskOrigin.AI
+                        ),
+                        pending = row[PlanTaskTable.status] == PlanTaskStatus.PENDING
+                    )
+                }
+        }.groupBy { it.date }
+        // 옮길 할일이 있는 날만 NICE 를 조회한다 (트랜잭션 밖)
+        val withTasks = busy.days.filter { day -> rows[day.date].orEmpty().any { it.sameBoard && it.pending } }
+        val unavailable = if (withTasks.isEmpty()) emptyMap() else PlanTaskScheduler.buildUnavailableRanges(
+            schoolDataFetcher = schoolDataFetcher,
+            startDate = withTasks.first().date,
+            endDate = withTasks.last().date,
+            schoolId = context.schoolId,
+            classNumber = context.classNumber,
+            grade = context.grade,
+            routine = context.routine
+        )
+        return busy.days.map { day ->
+            val dayRows = rows[day.date].orEmpty()
+            val (mine, others) = dayRows.partition { it.sameBoard && it.pending }
+            OtherDayPlan(
+                date = day.date,
+                dailyPlanId = mine.firstOrNull()?.dailyPlanId,
+                reschedule = if (mine.isEmpty()) null else rescheduleOtherDay(
+                    pending = mine.map { it.task },
+                    windows = day.windows,
+                    blocked = unavailable[day.date].orEmpty() + others.map { it.task.startMinutes to it.task.endMinutes },
+                    earliestMinute = earliestMinuteOn(day.date)
+                )
+            )
         }
     }
 
@@ -538,9 +610,6 @@ internal fun postponeBlockedReply(taskNames: List<String>): String =
 internal fun postponedFromPreviousDay(postponedFromDate: LocalDate?, planDate: LocalDate): Boolean =
     postponedFromDate == planDate.minusDays(1)
 
-private fun formatDay(date: LocalDate): String =
-    "${date.monthValue}월 ${date.dayOfMonth}일(${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)})"
-
 private fun PlanTaskRow.toResponse(dailyPlanId: Int, planBoardId: Int, isManual: Boolean, subjectName: String?) = PlanTaskResponse(
     id = id.value,
     dailyPlanId = dailyPlanId,
@@ -590,6 +659,7 @@ private data class ChatContext(
     val history: List<AiChatTurn>,
     val planBoardId: Int,
     val planBoardIsManual: Boolean,
+    val planBoardStartDate: LocalDate,
     val planBoardEndDate: LocalDate,
     val pendingPostponedFrom: Map<Int, LocalDate?>, // 미완료 태스크 id → 미뤄져 온 원래 날짜
     val editable: List<EditableTask>, // 할일 직접 편집 대상 (미완료 할일 + 과목·퀴즈 상태)
@@ -597,6 +667,39 @@ private data class ChatContext(
     val planSubjectsText: String, // 프롬프트 <PLAN_SUBJECTS>
     val subjectIdsByName: Map<String, Int> // 플랜보드 과목명 → 과목 id (추가하는 할일에 과목을 붙일 때)
 )
+
+/** 다른 날 일정 반영용으로 읽은 그날 할일 한 건 (같은 보드의 대기 할일이면 옮길 후보, 아니면 피할 시간) */
+private data class OtherDayTaskRow(
+    val date: LocalDate,
+    val dailyPlanId: Int,
+    val sameBoard: Boolean,
+    val task: ExistingPendingTask,
+    val pending: Boolean
+)
+
+/** 다른 날 하루의 재배치 계산 결과 (#334). [reschedule] 이 null 이면 계획이 없거나 겹치는 할일이 없어 그대로 */
+private class OtherDayPlan(val date: LocalDate, val dailyPlanId: Int?, val reschedule: OtherDayReschedule?) {
+    /** 옮긴 할일의 시각을 저장하고 그날 할일 전체를 돌려준다. 옮긴 게 없으면 null. 트랜잭션 안에서 부른다 */
+    fun applyInTransaction(context: ChatContext): ChatUpdatedDay? {
+        val moved = reschedule?.moved?.takeIf { it.isNotEmpty() } ?: return null
+        val planId = dailyPlanId ?: return null
+        moved.forEach { task ->
+            PlanTaskRow.findById(task.existingId!!)?.apply {
+                startTime = task.startTime
+                endTime = task.endTime
+            }
+        }
+        val dayRows = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq planId }
+            .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
+            .toList()
+        val subjectNames = subjectNamesOf(dayRows)
+        return ChatUpdatedDay(
+            date = date.toString(),
+            dailyPlanId = planId,
+            tasks = dayRows.map { it.toResponse(planId, context.planBoardId, context.planBoardIsManual, it.subjectNameFrom(subjectNames)) }
+        )
+    }
+}
 
 private fun minutesToTime(minutes: Int): LocalTime =
     if (minutes >= 24 * 60) LocalTime.of(23, 59) else LocalTime.of(minutes / 60, minutes % 60)

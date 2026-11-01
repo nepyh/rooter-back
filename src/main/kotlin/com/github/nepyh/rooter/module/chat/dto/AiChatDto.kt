@@ -31,6 +31,14 @@ data class AiChatPlanUpdate(
     val busy_window_end: String? = null
 )
 
+/** TARGET_DATE 가 아닌 날에 생긴 공부 불가능 시간 (#334). 서버가 그날 계획에서 겹치는 할일만 옮긴다 */
+@Serializable
+data class AiChatBusyDay(
+    val date: String, // "yyyy-MM-dd"
+    val start: String, // "HH:mm"
+    val end: String
+)
+
 @Serializable
 data class AiChatPostpone(
     val task_names: List<String> = emptyList(), // CURRENT_TASKS 의 task_name 그대로
@@ -59,7 +67,8 @@ data class AiChatResult(
     val plan_changed: Boolean = false,
     val plan_update: AiChatPlanUpdate? = null,
     val postpone: AiChatPostpone? = null, // 할일을 다른 날로 미뤄달라는 요청일 때만
-    val edits: List<AiChatEdit> = emptyList() // 그날 할일을 줄이기·추가·삭제·특정 시각으로 옮기기 요청일 때만
+    val edits: List<AiChatEdit> = emptyList(), // 그날 할일을 줄이기·추가·삭제·특정 시각으로 옮기기 요청일 때만
+    val other_busy_days: List<AiChatBusyDay> = emptyList() // TARGET_DATE 말고 다른 날에도 생긴 일정일 때만 (#334)
 )
 
 /** 프롬프트에 <CHAT_HISTORY_JSON> 으로 그대로 실어 보내기 위한 대화 턴 wire 포맷. */
