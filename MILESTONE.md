@@ -50,7 +50,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M10 | 챗봇 재조정 | 7/8 | doing |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
-| M13 | 인프라·배포 | 7/13 | doing |
+| M13 | 인프라·배포 | 8/13 | doing |
 
 ## 블로커
 
@@ -260,7 +260,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-124 dev 서버 — ECS `rooter-dev` + 같은 RDS 의 `rooter_dev` DB(마스터 데이터만 복사) + `develop` 자동 배포 — PR #234 (10-04) · 첫 배포 성공, health·swagger 200
 - [x] done RB-125 dev 전용 DB 계정 `rooter_dev_app` — dev DB 소유, 운영 테이블 읽기 permission denied 확인 (10-04)
 - [x] done RB-135 dev 서버 삭제 (운영만 사용) — ECS Express 서비스 `rooter-dev`·태스크 정의 `default-rooter-dev` 18개·로그 그룹 `/ecs/rooter-dev` 삭제, 운영 health 200 확인 (10-19) · `develop` 브랜치 삭제 · `deploy-dev.yml` 제거·README 정리 (이 커밋들)
-- [ ] todo RB-136 같은 RDS 의 `rooter_dev` DB·`rooter_dev_app` 계정 DROP — DB 접속 권한이 있는 사람이 실행 (운영 `postgres` DB 가 아닌지 확인 후)
+- [x] done RB-136 같은 RDS 의 `rooter_dev` DB·`rooter_dev_app` 계정 DROP — DB 접속 권한이 있는 사람이 실행 (운영 `postgres` DB 가 아닌지 확인 후) · 사용자가 운영 RDS 에서 `DROP DATABASE rooter_dev`·`DROP OWNED BY`/`DROP ROLE rooter_dev_app` 실행 완료 (11-02, 사용자 보고)
 - [ ] todo RB-126 고정 도메인 연결 (B-02) — 지금은 ECS 자동 주소. 도메인 결정 필요
 - [ ] todo RB-127 서버 DB 초기화 여부 (B-01) + 운영에 남은 테스트 계정 정리 — 결정 필요
 - [ ] todo RB-128 운영 `textbooks.file_url` 잔여 컬럼 정리 — DDL main 은 삭제했는데 운영 DB 에는 남아 있음 (10-04 확인)
