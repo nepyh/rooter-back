@@ -6,6 +6,7 @@ import com.github.nepyh.rooter.module.chat.dto.AiChatBusyDay
 import com.github.nepyh.rooter.module.chat.otherBusyDaysOf
 import com.github.nepyh.rooter.module.chat.otherDaysReply
 import com.github.nepyh.rooter.module.chat.rescheduleOtherDay
+import com.github.nepyh.rooter.module.chat.todayText
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import java.time.LocalDate
@@ -41,6 +42,21 @@ class ChatOtherDaysTest : StringSpec({
             ),
             outOfRange = listOf(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 10))
         )
+    }
+
+    "otherBusyDaysOf: 끝 시각 24:00 은 하루 끝으로 받는다 (\"8시 이후 못 해\")" {
+        val result = otherBusyDaysOf(
+            listOf(AiChatBusyDay("2026-11-04", "20:00", "24:00")),
+            planDate = planDate, today = planDate, boardStart = boardStart, boardEnd = boardEnd
+        )
+
+        result.days shouldBe listOf(OtherBusyDay(LocalDate.of(2026, 11, 4), listOf(m("20:00") to m("23:59"))))
+    }
+
+    "todayText: 오늘 날짜에 이번 주·다음 주(월~일) 범위를 붙인다" {
+        todayText(LocalDate.of(2026, 11, 8)) shouldBe "2026-11-08 (일요일)\n" +
+            "이번 주: 2026-11-02(월) ~ 2026-11-08(일)\n" +
+            "다음 주: 2026-11-09(월) ~ 2026-11-15(일)"
     }
 
     "rescheduleOtherDay: 새 일정과 겹치는 할일만 원래 시각 이후로 옮기고, 안 겹치는 할일·AI 가 만든 할일은 제자리" {

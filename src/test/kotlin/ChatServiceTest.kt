@@ -42,6 +42,7 @@ import com.github.nepyh.rooter.module.user.model.UserTable
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -424,7 +425,7 @@ class ChatServiceTest : StringSpec({
         transaction(db) {
             listOf(conceptId, problemId).map { PlanTaskRow[it].postponedFromDate } shouldBe listOf(tuesday, tuesday)
         }
-        llm.lastToday shouldBe "2026-09-01 (화요일)"
+        llm.lastToday shouldBe "2026-09-01 (화요일)\n이번 주: 2026-08-31(월) ~ 2026-09-06(일)\n다음 주: 2026-09-07(월) ~ 2026-09-13(일)"
     }
 
     // ---- 할일 직접 편집 (#306) ----
@@ -648,6 +649,110 @@ class ChatServiceTest : StringSpec({
         response.reply shouldBe "9월 30일(수), 10월 1일(목)에는 그 시간에 잡힌 할일이 없어서 그대로예요. " +
             "10월 4일(일)은(는) 지난 날이거나 플랜보드 기간(9월 29일(화)~10월 2일(금)) 밖이라 바꾸지 않았어요."
         transaction(db) { PlanTaskRow[todayTaskId].startTime shouldBe LocalTime.of(19, 10) }
+    }
+
+    "대화한 날 할일을 줄여 달라면서 다른 날 일정을 말하면, 대화한 날 변경도 빠뜨리지 않는다" {
+        val wednesday = tuesday.plusDays(1)
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        val todayId = seedTask(dailyPlanId, "오늘 수학", LocalTime.of(19, 10), LocalTime.of(20, 0), completed = false)
+        val wedPlanId = seedOtherDay(dailyPlanId, wednesday)
+        seedTask(wedPlanId, "암기", LocalTime.of(19, 10), LocalTime.of(20, 0), completed = false)
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "오늘 수학은 30분으로 줄였어요",
+                plan_changed = true,
+                // busy_window 없이 대화한 날 할일 분만 바뀐 경우
+                plan_update = AiChatPlanUpdate(tasks = listOf(AiChatTask("오늘 수학", 30))),
+                other_busy_days = listOf(AiChatBusyDay(wednesday.toString(), "19:00", "21:00"))
+            )
+        )
+
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "오늘 수학 30분으로 줄여줘, 수요일엔 7~9시 학원 있어")
+
+        response.updatedTasks!!.single().estimatedMinutes shouldBe 30
+        response.updatedDays!!.single().tasks.single().startTime shouldBe "21:00"
+        transaction(db) { PlanTaskRow[todayId].estimatedMinutes shouldBe 30 }
+    }
+
+    "AI 가 plan_changed=false 로 답해도 다른 날 일정을 줬으면 반영한다" {
+        val wednesday = tuesday.plusDays(1)
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        seedTask(dailyPlanId, "오늘 수학", LocalTime.of(19, 10), LocalTime.of(20, 0), completed = false)
+        val wedPlanId = seedOtherDay(dailyPlanId, wednesday)
+        seedTask(wedPlanId, "암기", LocalTime.of(19, 10), LocalTime.of(20, 0), completed = false)
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "알려줘서 고마워요",
+                plan_changed = false,
+                other_busy_days = listOf(AiChatBusyDay(wednesday.toString(), "19:00", "21:00"))
+            )
+        )
+
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "수요일 7~9시 학원 있어")
+
+        response.planChanged shouldBe true
+        response.updatedDays!!.single().tasks.single().startTime shouldBe "21:00"
+        response.reply shouldBe "9월 30일(수) 19:00~21:00 일정을 피해서 '암기' 할일을 21:00~21:50로 옮겼어요."
+    }
+
+    "할일 편집과 다른 날 일정을 함께 말하면 둘 다 반영하고, 같은 날이면 편집한 계획 기준으로 옮긴다" {
+        val wednesday = tuesday.plusDays(1)
+        val thursday = tuesday.plusDays(2)
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        seedTask(dailyPlanId, "오늘 영어", LocalTime.of(19, 10), LocalTime.of(20, 0), completed = false)
+        val wedPlanId = seedOtherDay(dailyPlanId, wednesday)
+        val wedId = seedTask(wedPlanId, "암기", LocalTime.of(19, 10), LocalTime.of(20, 0), completed = false)
+        val thuPlanId = seedOtherDay(dailyPlanId, thursday)
+        seedTask(thuPlanId, "목 과학", LocalTime.of(19, 10), LocalTime.of(20, 0), completed = false)
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "바꿀게요",
+                plan_changed = true,
+                edits = listOf(
+                    AiChatEdit(type = "delete", task_name = "오늘 영어"),
+                    AiChatEdit(type = "resize", task_name = "암기", minutes = 30, date = wednesday.toString())
+                ),
+                other_busy_days = listOf(
+                    AiChatBusyDay(wednesday.toString(), "19:00", "21:00"),
+                    AiChatBusyDay(thursday.toString(), "19:00", "21:00")
+                )
+            )
+        )
+
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "오늘 영어 빼고 수요일 암기 30분으로, 수·목 7~9시 학원")
+
+        response.planChanged shouldBe true
+        response.updatedTasks shouldBe emptyList()
+        response.updatedDays!!.map { day -> day.date to day.tasks.map { Triple(it.taskName, it.startTime, it.endTime) } } shouldBe listOf(
+            wednesday.toString() to listOf(Triple("암기", "21:00", "21:30")),
+            thursday.toString() to listOf(Triple("목 과학", "21:00", "21:50"))
+        )
+        response.reply shouldContain "'오늘 영어'을(를) 오늘 계획에서 뺐어요."
+        response.reply shouldContain "'목 과학'"
+        transaction(db) { PlanTaskRow[wedId].estimatedMinutes shouldBe 30 }
+    }
+
+    "미루기와 다른 날 일정을 함께 말하면 둘 다 반영한다" {
+        val wednesday = tuesday.plusDays(1)
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        seedTask(dailyPlanId, "오늘 영어", LocalTime.of(19, 10), LocalTime.of(20, 0), completed = false)
+        val wedPlanId = seedOtherDay(dailyPlanId, wednesday)
+        seedTask(wedPlanId, "암기", LocalTime.of(19, 10), LocalTime.of(20, 0), completed = false)
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "미룰게요",
+                plan_changed = true,
+                postpone = AiChatPostpone(task_names = listOf("오늘 영어"), to_date = tuesday.plusDays(2).toString()),
+                other_busy_days = listOf(AiChatBusyDay(wednesday.toString(), "19:00", "21:00"))
+            )
+        )
+
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "영어 목요일로 미뤄줘, 수요일엔 7~9시 학원")
+
+        response.updatedTasks shouldBe emptyList()
+        response.movedTasks!!.single().taskName shouldBe "오늘 영어"
+        response.updatedDays!!.single().tasks.single().startTime shouldBe "21:00"
+        ChatService(llm, schoolDataFetcher, otherDayClock).getHistory(userId, dailyPlanId).last().content shouldBe response.reply
     }
 
     "전체 계획(#337): AI 에 플랜보드 기간의 날짜별 할일을 보여주고, 지난 날은 수정 불가로 표시한다" {
