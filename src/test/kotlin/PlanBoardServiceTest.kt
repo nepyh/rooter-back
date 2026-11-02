@@ -829,6 +829,56 @@ class PlanBoardServiceTest : StringSpec({
         context.contains("- day 4 (2026-07-04 토): 공부 가능 840분, 가장 긴 연속 300분, 권장 150~240분") shouldBe true
     }
 
+    "plan-generation: 평소 공부량이 30분 이하면 계획 첫 3일만 권장을 낮춰 알려준다 (구간을 나눠도 첫 구간만)" {
+        val userId = seedUser("gen-ramp@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        transaction(db) {
+            StudyStyleAnswerRow.new {
+                user = UserRow[userId]
+                questionNumber = 5
+                answerOption = 1 // 30분 이하
+            }
+        }
+        val llm = FakePlanGenerationLlmClient()
+
+        // 2026-07-01(수) 부터 30일 → 10일씩 3구간. 2구간 첫날은 07-11(토)
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "적게", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 30)
+        )
+
+        val first = llm.contexts.single { it.contains("총 학습 기간: 10일 (2026-07-01") }
+        first.contains("- day 1 (2026-07-01 수): 공부 가능 290분, 가장 긴 연속 240분, 권장 45~60분") shouldBe true
+        first.contains("- day 3 (2026-07-03 금): 공부 가능 290분, 가장 긴 연속 240분, 권장 75~90분") shouldBe true
+        first.contains("- day 4 (2026-07-04 토): 공부 가능 840분, 가장 긴 연속 300분, 권장 150~240분") shouldBe true
+        llm.contexts.single { it.contains("총 학습 기간: 10일 (2026-07-11") }.contains("- day 1 (2026-07-11 토): 공부 가능 840분, 가장 긴 연속 300분, 권장 150~240분") shouldBe true
+    }
+
+    "plan-generation: 주말이 변수면 토·일요일 권장을 평일보다 낮게 알려준다" {
+        val userId = seedUser("gen-weekend-target@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        transaction(db) {
+            StudyStyleAnswerRow.new {
+                user = UserRow[userId]
+                questionNumber = 4
+                answerOption = 3 // 주말 전체
+            }
+        }
+        val llm = FakePlanGenerationLlmClient()
+
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(title = "주말", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-03", daysRemaining = 3)
+        )
+
+        val context = llm.contexts.single()
+        context.contains("- day 1 (2026-07-03 금): 공부 가능 290분, 가장 긴 연속 240분, 권장 90~150분") shouldBe true
+        context.contains("- day 2 (2026-07-04 토): 공부 가능 840분, 가장 긴 연속 300분, 권장 60~120분") shouldBe true
+        context.contains("- day 3 (2026-07-05 일): 공부 가능 840분, 가장 긴 연속 300분, 권장 60~120분") shouldBe true
+    }
+
     "plan-generation: 벼락치기 모드면 하루 권장 공부량을 1.5배로 알려준다" {
         val userId = seedUser("gen-cram-target@test.com")
         val math = seedTextbook(seedSubject("수학"), title = "수학")

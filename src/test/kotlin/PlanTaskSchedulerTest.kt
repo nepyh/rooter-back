@@ -1,6 +1,7 @@
 import com.github.nepyh.rooter.module.planboard.PlacedTask
 import com.github.nepyh.rooter.module.planboard.PlacementOptions
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
+import com.github.nepyh.rooter.module.planboard.dailyTargetMinutes
 import com.github.nepyh.rooter.module.planboard.placementOptions
 import com.github.nepyh.rooter.module.planboard.RoutineSlot
 import com.github.nepyh.rooter.module.planboard.SleepTime
@@ -10,6 +11,7 @@ import com.github.nepyh.rooter.module.planboard.UserRoutine
 import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import com.github.nepyh.rooter.module.studystyle.BestTime
+import com.github.nepyh.rooter.module.studystyle.DailyStudyHabit
 import com.github.nepyh.rooter.module.studystyle.Distraction
 import com.github.nepyh.rooter.module.studystyle.FocusSpan
 import com.github.nepyh.rooter.module.studystyle.StudyStyleProfile
@@ -366,5 +368,34 @@ class PlanTaskSchedulerTest : StringSpec({
         // 00:30 취침이면 전날 밤 23:30~24:00 과 00:00~00:30
         StudyStyleProfile(distraction = Distraction.SLEEPY).placementOptions(true, SleepTime(t(0, 30), t(7))).avoidRanges shouldBe
             listOf(0 to 30, (23 * 60 + 30) to (24 * 60))
+    }
+
+    "설문 → 하루 권장: 설문이 없거나 분량과 무관한 문항만 고르면 기본 권장 그대로" {
+        val weekday = 90..150
+        val weekend = 150..240
+
+        StudyStyleProfile.EMPTY.dailyTargetMinutes(weekend, weekday, planDay = 1, isWeekend = true) shouldBe weekend
+        StudyStyleProfile(focus = FocusSpan.SHORT, volatileTime = VolatileTime.EVENING)
+            .dailyTargetMinutes(weekend, weekday, planDay = 1, isWeekend = true) shouldBe weekend
+        StudyStyleProfile(dailyStudy = DailyStudyHabit.OVER_60).dailyTargetMinutes(weekday, weekday, planDay = 1, isWeekend = false) shouldBe weekday
+    }
+
+    "설문 → 하루 권장: 주말이 변수면 토·일요일 권장을 평일 권장보다 30분 낮춘다 (벼락치기 배율도 평일 기준을 따른다)" {
+        val weekendVolatile = StudyStyleProfile(volatileTime = VolatileTime.WEEKEND)
+
+        weekendVolatile.dailyTargetMinutes(150..240, 90..150, planDay = 5, isWeekend = true) shouldBe 60..120
+        weekendVolatile.dailyTargetMinutes(90..150, 90..150, planDay = 5, isWeekend = false) shouldBe 90..150
+        weekendVolatile.dailyTargetMinutes(225..360, 135..225, planDay = 5, isWeekend = true) shouldBe 105..195
+    }
+
+    "설문 → 하루 권장: 평소 공부량이 적으면 계획 첫 3일만 권장 상한을 낮춰 점점 늘린다" {
+        val under30 = StudyStyleProfile(dailyStudy = DailyStudyHabit.UNDER_30)
+
+        (1..4).map { under30.dailyTargetMinutes(90..150, 90..150, planDay = it, isWeekend = false) } shouldBe
+            listOf(45..60, 60..75, 75..90, 90..150)
+        // 쉬는 날도 첫날은 같은 상한
+        under30.dailyTargetMinutes(150..240, 90..150, planDay = 1, isWeekend = true) shouldBe 45..60
+        (1..4).map { StudyStyleProfile(dailyStudy = DailyStudyHabit.UP_TO_60).dailyTargetMinutes(90..150, 90..150, it, false) } shouldBe
+            listOf(75..90, 90..105, 90..120, 90..150)
     }
 })

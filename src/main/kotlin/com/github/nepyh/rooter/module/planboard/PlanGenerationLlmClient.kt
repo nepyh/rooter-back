@@ -4,6 +4,7 @@ import com.github.nepyh.rooter.common.LLM_REQUEST_TIMEOUT_MILLIS
 import com.github.nepyh.rooter.common.LlmThinking
 import com.github.nepyh.rooter.common.PromptLoader
 import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.stripCodeFence
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -76,7 +77,7 @@ open class PlanGenerationLlmClient(private val appConfig: AppConfig) {
         val content = requestChatCompletion(prompt)
             ?: throw PlanBoardValidationException.GenerationFailedException()
 
-        return runCatching { json.decodeFromString<GeneratedPlan>(content) }
+        return runCatching { json.decodeFromString<GeneratedPlan>(stripCodeFence(content)) }
             .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
             .getOrElse { throw PlanBoardValidationException.GenerationFailedException() }
     }

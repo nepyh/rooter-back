@@ -46,16 +46,29 @@ enum class VolatileTime(val label: String) {
         WEEKEND -> if (weekendDays.isEmpty()) {
             "이 구간에는 주말이 없다."
         } else {
-            "주말(day ${weekendDays.joinToString(", ")})은 평일보다 분량을 가볍게 하고, 못 한 공부를 채울 여유를 남겨라."
+            // 분량은 서버가 날짜별 권장을 평일보다 낮춰 이미 줄였다 (dailyTargetMinutes). 프롬프트 문구만으로는 주말 권장 범위를 따라가 버렸다
+            "주말(day ${weekendDays.joinToString(", ")})은 날짜별 권장을 평일보다 낮게 줬다. 그 권장을 넘기지 말고, 못 한 공부를 채울 여유를 남겨라."
         }
     }
 }
 
-/** Q5 시험 기간이 아닐 때 평소 하루 자습 시간 */
-enum class DailyStudyHabit(val label: String, val planRule: String) {
-    UNDER_30("30분 이하", "평소 공부량이 적으니 처음 2~3일은 하루 총 공부량을 60분 안팎으로 가볍게 시작해 점점 늘려라."),
-    UP_TO_60("30분 ~ 1시간", "처음 2~3일은 하루 총 공부량을 90분 안팎에서 시작해 점점 늘려라."),
-    OVER_60("1시간 이상", "평소 공부 습관이 있으니 처음부터 학년·실력 등급에 맞는 분량으로 잡아도 된다.")
+/**
+ * Q5 시험 기간이 아닐 때 평소 하루 자습 시간.
+ * [rampMinutes]: 계획 첫날부터 하루씩, 그날 권장 공부량의 상한(분). 서버가 날짜별 권장에 직접 반영한다 (dailyTargetMinutes).
+ * 예전엔 "처음 2~3일은 가볍게 시작해 점점 늘려라" 를 프롬프트로만 줘서, AI 가 처음 분량에서 늘리지 않고 끝까지 머물렀다.
+ */
+enum class DailyStudyHabit(val label: String, val rampMinutes: List<Int>) {
+    UNDER_30("30분 이하", listOf(60, 75, 90)),
+    UP_TO_60("30분 ~ 1시간", listOf(90, 105, 120)),
+    OVER_60("1시간 이상", emptyList());
+
+    val planRule
+        get() = if (rampMinutes.isEmpty()) {
+            "평소 공부 습관이 있으니 처음부터 학년·실력 등급에 맞는 분량으로 잡아도 된다."
+        } else {
+            "계획 첫 ${rampMinutes.size}일의 날짜별 권장을 ${rampMinutes.joinToString("·")}분 이하로 낮춰 뒀다. " +
+                "날짜별 권장을 그대로 따라 가볍게 시작하고, 그 뒤로는 권장 범위만큼 늘려라."
+        }
 }
 
 /** Q6 계획한 공부를 다 못 끝냈을 때 */
