@@ -1,7 +1,9 @@
 package com.github.nepyh.rooter.module.chat
 
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.temporal.TemporalAdjusters
 import java.time.format.TextStyle
 import java.util.Locale
 
@@ -73,6 +75,20 @@ internal fun planDaysText(days: List<PlanDay>, target: LocalDate, today: LocalDa
         "- ${day.date} (${day.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)}) [${tags.joinToString(", ")}]: $tasks"
     }
 }
+
+/**
+ * 프롬프트 <TODAY>. 날짜·요일에 이번 주·다음 주(월~일) 날짜 범위를 붙인다 —
+ * AI 가 "다음 주"를 플랜보드가 걸친 이번 주로 계산하는 일이 잦아서 서버가 직접 계산해 준다.
+ */
+internal fun todayText(today: LocalDate): String {
+    val monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    fun range(start: LocalDate) = "${dayWithWeekday(start)} ~ ${dayWithWeekday(start.plusDays(6))}"
+    return "$today (${today.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.KOREAN)})\n" +
+        "이번 주: ${range(monday)}\n" +
+        "다음 주: ${range(monday.plusWeeks(1))}"
+}
+
+private fun dayWithWeekday(date: LocalDate) = "$date(${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)})"
 
 private fun statusLabel(status: PlanTaskStatus): String = when (status) {
     PlanTaskStatus.PENDING -> "대기"

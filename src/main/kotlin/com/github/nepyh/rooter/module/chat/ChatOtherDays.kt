@@ -28,8 +28,8 @@ internal fun otherBusyDaysOf(
 ): OtherBusyDays {
     val parsed = raw.mapNotNull { day ->
         val date = runCatching { LocalDate.parse(day.date) }.getOrNull() ?: return@mapNotNull null
-        val start = runCatching { LocalTime.parse(day.start) }.getOrNull() ?: return@mapNotNull null
-        val end = runCatching { LocalTime.parse(day.end) }.getOrNull() ?: return@mapNotNull null
+        val start = aiClockOf(day.start) ?: return@mapNotNull null
+        val end = aiClockOf(day.end) ?: return@mapNotNull null
         if (!start.isBefore(end) || date == planDate) return@mapNotNull null
         date to (start.toSecondOfDay() / 60 to end.toSecondOfDay() / 60)
     }
@@ -39,6 +39,13 @@ internal fun otherBusyDaysOf(
         days = inRange.take(MAX_OTHER_BUSY_DAYS).map { OtherBusyDay(it, byDate.getValue(it).distinct()) },
         outOfRange = outOfRange
     )
+}
+
+/** AI 가 준 시각("HH:mm"). "8시 이후 못 해" 를 끝 24:00 으로 주는 경우가 많아 하루 끝으로 받는다. 형식이 틀리면 null */
+internal fun aiClockOf(text: String?): LocalTime? {
+    val trimmed = text?.trim() ?: return null
+    if (trimmed == "24:00") return LocalTime.MAX
+    return runCatching { LocalTime.parse(trimmed) }.getOrNull()
 }
 
 /** 다른 날 재배치 결과. [moved] 는 시각이 바뀐 할일, [leftInPlace] 는 빈 시간이 없어 그대로 둔 할일 이름 */
