@@ -21,6 +21,19 @@ data class NotificationListResponse(
     val nextCursor: Int?                           // 다음 페이지에 넘길 cursor. null 이면 마지막 페이지
 )
 
+/** 테스트 알림 요청. 둘 다 생략하거나 비우면 기본 문구로 보낸다 (body 는 {} 로 보내면 된다) */
+@Serializable
+data class NotificationTestRequest(
+    val title: String? = null, // 최대 100자, 넘으면 자른다
+    val body: String? = null   // 최대 500자, 넘으면 자른다
+)
+
+@Serializable
+data class NotificationTestResponse(
+    val notification: NotificationResponse, // 알림함에 남은 알림
+    val pushedDevices: Int                  // Expo 가 받아들인 기기 수. 0 이면 등록된 기기 토큰이 없다 (POST /notifications/device-tokens 먼저)
+)
+
 @Serializable
 data class UnreadCountResponse(
     val unreadCount: Long
