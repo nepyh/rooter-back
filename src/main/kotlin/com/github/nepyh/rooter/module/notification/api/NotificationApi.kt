@@ -13,6 +13,8 @@ import com.github.nepyh.rooter.module.notification.dto.NotificationListResponse
 import com.github.nepyh.rooter.module.notification.dto.NotificationResponse
 import com.github.nepyh.rooter.module.notification.dto.NotificationSettingsResponse
 import com.github.nepyh.rooter.module.notification.dto.NotificationSettingsUpdateRequest
+import com.github.nepyh.rooter.module.notification.dto.NotificationTestRequest
+import com.github.nepyh.rooter.module.notification.dto.NotificationTestResponse
 import com.github.nepyh.rooter.module.notification.dto.ReadAllResponse
 import com.github.nepyh.rooter.module.notification.dto.UnreadCountResponse
 import com.github.nepyh.rooter.module.notification.exception.NotificationException
@@ -74,6 +76,40 @@ fun NotificationApi(
             }
         }
 
+        post("test") {
+            val request = call.receive<NotificationTestRequest>()
+            call.respond(HttpStatusCode.OK, notificationService.sendTest(call.userId(), request))
+        }.describe {
+            tag("Notification")
+            summary = "테스트 알림 보내기 (본인에게)"
+            description = "로그인한 본인에게 알림을 한 건 보낸다 — 알림함에 type=TEST 로 남고, 등록된 모든 기기로 푸시가 간다. " +
+                "앱의 푸시 연동(토큰 등록·수신·눌렀을 때 알림함 이동)을 확인하는 용도라 할일 알림 설정을 꺼도 푸시를 보낸다. " +
+                "다른 사용자에게는 보낼 수 없다. title·body 를 생략하거나 비우면 기본 문구로 보낸다 (body 는 {} 로 보내면 된다). " +
+                "응답의 pushedDevices 가 0 이면 그 계정에 등록된 기기 토큰이 없다는 뜻이다 (POST /notifications/device-tokens 먼저)"
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<NotificationTestRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "보냄 (pushedDevices=0 이어도 알림함에는 남는다)"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<NotificationTestResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "body 가 JSON 이 아니거나 비어 있음 — 최소 {} 를 보내야 한다 (code=INVALID_REQUEST_BODY)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
         get("") {
             val cursor = call.request.queryParameters["cursor"]
                 ?.let { it.toIntOrNull() ?: throw NotificationException.InvalidPageException() }
@@ -86,7 +122,7 @@ fun NotificationApi(
             summary = "알림함 목록"
             description = "본인 알림을 최신순으로 돌려준다. 푸시 설정을 꺼도 알림은 여기에 남는다. " +
                 "다음 페이지는 응답의 nextCursor 를 cursor 로 넘겨 받는다 (nextCursor=null 이면 마지막). " +
-                "type 으로 눌렀을 때 이동할 화면을 고르고, 이동 대상은 data 에 있다 (TASK_REMINDER → data.planTaskId)"
+                "type 으로 눌렀을 때 이동할 화면을 고르고, 이동 대상은 data 에 있다 (TASK_REMINDER → data.planTaskId, TEST → data 없음)"
             parameters {
                 query("cursor") {
                     description = "앞 페이지 응답의 nextCursor. 생략하면 첫 페이지"

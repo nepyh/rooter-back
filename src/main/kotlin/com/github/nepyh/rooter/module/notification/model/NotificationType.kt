@@ -8,5 +8,6 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 enum class NotificationType {
-    TASK_REMINDER // 할일 시작 전 알림. data: planTaskId
+    TASK_REMINDER, // 할일 시작 전 알림. data: planTaskId
+    TEST // 테스트 알림 (POST /notifications/test). data 없음 — 앱은 알림함만 열면 된다
 }
