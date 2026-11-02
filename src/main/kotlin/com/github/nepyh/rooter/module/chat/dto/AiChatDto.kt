@@ -31,14 +31,24 @@ data class AiChatPlanUpdate(
     val busy_window_end: String? = null
 )
 
+/** TARGET_DATE 가 아닌 날에 생긴 공부 불가능 시간 (#334). 서버가 그날 계획에서 겹치는 할일만 옮긴다 */
+@Serializable
+data class AiChatBusyDay(
+    val date: String, // "yyyy-MM-dd"
+    val start: String, // "HH:mm"
+    val end: String
+)
+
 @Serializable
 data class AiChatPostpone(
-    val task_names: List<String> = emptyList(), // CURRENT_TASKS 의 task_name 그대로
-    val to_date: String? = null // "yyyy-MM-dd". null 이면 TARGET_DATE 다음 날
+    val task_names: List<String> = emptyList(), // 옮길 날(from_date) 할일의 task_name 그대로
+    val to_date: String? = null, // "yyyy-MM-dd". null 이면 from_date 다음 날
+    val from_date: String? = null // "yyyy-MM-dd". 다른 날 할일을 미룰 때 (#337). null 이면 TARGET_DATE
 )
 
 /**
- * 그날 할일을 직접 고치는 동작 (#306). 서버가 시간이 비어 있는지 검증해 적용한다 (ChatEdits.kt).
+ * 할일을 직접 고치는 동작 (#306). 서버가 시간이 비어 있는지 검증해 적용한다 (ChatEdits.kt).
+ * date 로 플랜보드 기간 안 다른 날(오늘 이후)도 고칠 수 있다 (#337).
  * - resize: task_name 을 minutes 로 (시작 시각 그대로)
  * - add: task_name·subject_name·minutes 로 새 할일, start_time 이 있으면 그 시각, 없으면 그날 가장 이른 빈 시간
  * - delete: task_name 을 뺀다
@@ -50,7 +60,8 @@ data class AiChatEdit(
     val task_name: String? = null, // resize·delete·move 는 CURRENT_TASKS 의 이름 그대로, add 는 새 할일 이름
     val minutes: Int? = null,
     val start_time: String? = null, // "HH:mm"
-    val subject_name: String? = null // add 일 때 PLAN_SUBJECTS 의 과목명 그대로
+    val subject_name: String? = null, // add 일 때 PLAN_SUBJECTS 의 과목명 그대로
+    val date: String? = null // "yyyy-MM-dd". 고칠 날 (#337). null 이면 TARGET_DATE
 )
 
 @Serializable
@@ -59,7 +70,8 @@ data class AiChatResult(
     val plan_changed: Boolean = false,
     val plan_update: AiChatPlanUpdate? = null,
     val postpone: AiChatPostpone? = null, // 할일을 다른 날로 미뤄달라는 요청일 때만
-    val edits: List<AiChatEdit> = emptyList() // 그날 할일을 줄이기·추가·삭제·특정 시각으로 옮기기 요청일 때만
+    val edits: List<AiChatEdit> = emptyList(), // 그날 할일을 줄이기·추가·삭제·특정 시각으로 옮기기 요청일 때만
+    val other_busy_days: List<AiChatBusyDay> = emptyList() // TARGET_DATE 말고 다른 날에도 생긴 일정일 때만 (#334)
 )
 
 /** 프롬프트에 <CHAT_HISTORY_JSON> 으로 그대로 실어 보내기 위한 대화 턴 wire 포맷. */

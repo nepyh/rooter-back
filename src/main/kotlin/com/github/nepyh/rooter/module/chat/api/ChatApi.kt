@@ -45,7 +45,15 @@ fun ChatApi(chatService: ChatService) = ApiRoute("daily-plans") {
                 "바로 전날에서 미뤄져 온 할일은 이틀 연속 미룰 수 없고, 플랜보드 기간 밖·과거 날짜로도 미룰 수 없다 (이때 planChanged=false, reply 로 이유 안내). " +
                 "그날 할일을 직접 고치는 요청도 된다 — \"수학 30분으로 줄여줘\"(줄이기·늘리기), \"8시에 과학 추가해줘\"(추가, 플랜보드 학습 범위로 이름·과목을 붙임), " +
                 "\"영어 빼줘\"(삭제), \"수학 9시로 옮겨줘\"(특정 시각으로 옮기기). 그 시간이 수면·등교·불가능 시간·다른 할일·지난 시간과 겹치거나, " +
-                "퀴즈를 시작한 할일 삭제·결과가 확정된 할일 시간 변경이면 그 편집은 거절하고 reply 로 이유와 그날 빈 시간을 안내한다. 하나라도 적용되면 planChanged=true, updatedTasks 는 그날 할일 전체"
+                "퀴즈를 시작한 할일 삭제·결과가 확정된 할일 시간 변경이면 그 편집은 거절하고 reply 로 이유와 그날 빈 시간을 안내한다. 하나라도 적용되면 planChanged=true, updatedTasks 는 그날 할일 전체. " +
+                "다른 날에도 걸린 일정이면(\"이번 주 수·목 저녁 7~9시 학원\", \"다음 주 내내 8시 이후엔 못 해\", \"매주 수요일 학원\" — 플랜보드 기간까지 최대 31일) " +
+                "그 날들의 같은 플랜보드 계획에서 겹치는 할일만 원래 시각 이후 빈 시간으로 옮기고(이름·길이 그대로, AI 가 만든 할일·완료한 할일은 안 옮김, 빈 시간이 없으면 그대로 둠) " +
+                "updatedDays 로 돌려준다(날짜·dailyPlanId·그날 할일 전체, 실제로 옮긴 날만). 대화한 날이 안 바뀌었으면 updatedTasks 는 null. " +
+                "그날 계획이 없거나 겹치는 할일이 없는 날, 지난 날·플랜보드 기간 밖인 날은 reply 로 그대로라고 안내한다. 반복 일정을 앞으로의 계획 생성에도 반영하려면 불가능 시간(unavailable-times)으로 등록해야 한다. " +
+                "AI 는 플랜보드 기간 전체의 날짜별 할일을 보고 답한다 (#337) — \"목요일에 뭐 해?\" 같은 질문, " +
+                "\"목요일 수학 30분으로 줄여줘\"·\"주말에 과학 1시간씩 추가해줘\"·\"이번 주 너무 많아, 줄여줘\" 처럼 다른 날 할일 편집(줄이기·늘리기·추가·삭제·시각 옮기기), " +
+                "\"목요일 영어 금요일로 미뤄줘\" 처럼 다른 날 할일 미루기도 된다. 고칠 수 있는 날은 오늘부터 플랜보드 끝까지이고 지난 날은 reply 로 안내만 한다. " +
+                "다른 날이 바뀌면 updatedDays 에 그날 할일 전체가 들어가고(계획이 없던 날에 추가하면 그날 계획을 새로 만든다), 대화한 날이 바뀌었을 때만 updatedTasks 가 채워진다"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<ChatMessageRequest>()
@@ -53,7 +61,7 @@ fun ChatApi(chatService: ChatService) = ApiRoute("daily-plans") {
             }
             responses {
                 HttpStatusCode.OK {
-                    description = "처리 성공 (계획이 안 바뀌었으면 updatedTasks 는 null, 미루지 않았으면 movedTasks 는 null)"
+                    description = "처리 성공 (대화한 날 계획이 안 바뀌었으면 updatedTasks 는 null, 미루지 않았으면 movedTasks 는 null, 다른 날을 안 바꿨으면 updatedDays 는 null. planChanged 는 어느 날이든 바뀌었으면 true)"
                     ContentType.Application.Json {
                         schema = jsonSchema<ChatMessageResponse>()
                     }
