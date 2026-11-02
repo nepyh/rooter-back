@@ -3,6 +3,7 @@ package com.github.nepyh.rooter.module.chat
 import com.github.nepyh.rooter.common.APP_ZONE
 import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.chat.dto.AiChatCurrentTask
+import com.github.nepyh.rooter.module.chat.dto.AiChatTask
 import com.github.nepyh.rooter.module.chat.dto.AiChatPostpone
 import com.github.nepyh.rooter.module.chat.dto.AiChatTurn
 import com.github.nepyh.rooter.module.chat.dto.ChatMessageResponse
@@ -186,7 +187,7 @@ class ChatService(
             grade = context.grade,
             studyStyleSummary = context.studyStyleSummary,
             targetDate = "${context.planDate} (${context.dayOfWeekLabel})",
-            today = todayInAppZone(clock).let { "$it (${it.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.KOREAN)})" },
+            today = todayText(todayInAppZone(clock)),
             currentTasksJson = json.encodeToString(context.pendingTasks),
             chatHistoryJson = json.encodeToString(context.history),
             planBoardSummary = context.planBoardSummary,
@@ -195,14 +196,22 @@ class ChatService(
             planDays = context.planDaysText
         )
 
-        // 다른 날로 미뤄 달라는 요청이면 그날 계획 재구성 대신 미루기만 한다
-        result?.postpone?.takeIf { it.task_names.isNotEmpty() }?.let { postpone ->
-            return postponeTasks(userId, dailyPlanId, trimmed, context, postpone, result.reply_message)
+        // 다른 날에 생긴 일정 (#334) — 그날 계획(같은 플랜보드)에서 겹치는 할일만 옮긴다.
+        // AI 가 plan_changed=false 로 답해도 날짜·시각을 줬으면 반영한다 (plan_changed 를 자주 틀린다)
+        val planDate = LocalDate.parse(context.planDate)
+        val otherBusy = result?.other_busy_days?.takeIf { it.isNotEmpty() }?.let {
+            otherBusyDaysOf(it, planDate, todayInAppZone(clock), context.planBoardStartDate, context.planBoardEndDate)
         }
 
-        // 할일을 직접 줄이기·추가·삭제·옮기기 해 달라는 요청이면 그 동작만 검증해 적용한다 (#306)
+        // 다른 날로 미뤄 달라는 요청이면 그날 계획 재구성 대신 미루기만 한다. 다른 날 일정도 같이 말했으면 이어서 반영한다
+        result?.postpone?.takeIf { it.task_names.isNotEmpty() }?.let { postpone ->
+            val response = postponeTasks(userId, dailyPlanId, context, postpone, result.reply_message)
+            return withOtherDays(userId, dailyPlanId, trimmed, context, response, otherBusy)
+        }
+
+        // 할일을 직접 줄이기·추가·삭제·옮기기 해 달라는 요청이면 그 동작만 검증해 적용한다 (#306). 다른 날 일정도 같이 말했으면 이어서 반영한다
         result?.edits?.takeIf { it.isNotEmpty() }?.let { edits ->
-            return editTasks(dailyPlanId, trimmed, context, edits)
+            return withOtherDays(userId, dailyPlanId, trimmed, context, editTasks(dailyPlanId, context, edits), otherBusy)
         }
 
         val update = result?.plan_update
@@ -210,13 +219,9 @@ class ChatService(
         // 새로 생긴 공부 불가능 시간이 남은 태스크와 겹치는지는 서버가 직접 판단하고, 안 겹치면 계획을 건드리지 않는다.
         val busyWindow = update?.let { busyWindowOf(it.busy_window_start, it.busy_window_end) }
         val busyWindowOverlapsNothing = busyWindow != null && context.pendingTasks.none { overlaps(it, busyWindow) }
-        // 다른 날에 생긴 일정 (#334) — 그날 계획(같은 플랜보드)에서 겹치는 할일만 옮긴다
-        val planDate = LocalDate.parse(context.planDate)
-        val otherBusy = result?.takeIf { it.plan_changed && it.other_busy_days.isNotEmpty() }?.let {
-            otherBusyDaysOf(it.other_busy_days, planDate, todayInAppZone(clock), context.planBoardStartDate, context.planBoardEndDate)
-        }
-        // 다른 날 일정만 말했는데 AI 가 대화한 날 할일을 그대로 다시 보낸 경우엔 그날을 다시 배치하지 않는다
-        val onlyOtherDays = otherBusy != null && busyWindow == null
+        // 다른 날 일정만 말했는데 AI 가 대화한 날 할일을 그대로 다시 보낸 경우엔 그날을 다시 배치하지 않는다.
+        // 할일 이름·분이 바뀌었으면 대화한 날도 고쳐 달라고 한 것이라("오늘 수학 줄이고 수요일엔 학원") 다시 배치한다
+        val onlyOtherDays = otherBusy != null && busyWindow == null && update != null && sameTasks(update.tasks, context.pendingTasks)
         val shouldReplan = result != null && result.plan_changed && update != null && update.tasks.isNotEmpty() &&
             !busyWindowOverlapsNothing && !onlyOtherDays
         val otherDayResults = otherBusy?.let { rescheduleOtherDays(userId, context, it) }.orEmpty()
@@ -232,14 +237,7 @@ class ChatService(
                 grade = context.grade,
                 routine = context.routine
             )[planDate].orEmpty()
-            val extraBusy = if (update!!.busy_window_start != null && update.busy_window_end != null) {
-                listOf(
-                    PlanTaskScheduler.toMinutes(LocalTime.parse(update.busy_window_start)) to
-                        PlanTaskScheduler.toMinutes(LocalTime.parse(update.busy_window_end))
-                )
-            } else {
-                emptyList()
-            }
+            val extraBusy = listOfNotNull(busyWindow?.let { PlanTaskScheduler.toMinutes(it.first) to PlanTaskScheduler.toMinutes(it.second) })
             // AI 가 만든 할일은 재조정에서 지우지도 옮기지도 않으므로 그 시간대를 막아둔다 (#245)
             val aiTaskRanges = context.pendingExisting.filter { it.aiGenerated }.map { it.startMinutes to it.endMinutes }
             busyRanges + extraBusy + context.completedRanges + aiTaskRanges
@@ -318,8 +316,8 @@ class ChatService(
             // AI 가 계획을 바꿨다고 했는데 서버가 적용하지 못한 경우(바꿀 태스크 목록 없음 등), 사용자가 바뀐 줄 알지 않도록 답변을 바로잡는다
             val dayReply = when {
                 result.plan_changed && busyWindowOverlapsNothing -> noOverlapReply(busyWindow!!)
-                // 다른 날 일정만 말한 경우 — AI 는 그날 할일을 못 보므로 AI 문장 대신 아래 실제 결과로만 답한다
-                result.plan_changed && updatedTasks == null && otherBusy != null -> null
+                // 다른 날 일정만 말한 경우 — AI 문장 대신 아래 실제 결과로만 답한다
+                updatedTasks == null && otherBusy != null -> null
                 result.plan_changed && updatedTasks == null -> PLAN_NOT_APPLIED_REPLY
                 else -> result.reply_message
             }
@@ -350,7 +348,7 @@ class ChatService(
      * 편집마다 date 가 있으면 그날을 고친다 — 대화한 날 말고도 오늘부터 플랜보드 끝까지 (#337). 날짜별로 따로 판단·저장한다.
      * 시간이 실제로 비어 있는지는 [applyChatEdits] 가 판단하고, 답변은 AI 문장 대신 실제로 적용·거절한 결과로 만든다.
      */
-    private suspend fun editTasks(dailyPlanId: Int, userMessage: String, context: ChatContext, edits: List<AiChatEdit>): ChatMessageResponse {
+    private suspend fun editTasks(dailyPlanId: Int, context: ChatContext, edits: List<AiChatEdit>): ChatMessageResponse {
         val planDate = LocalDate.parse(context.planDate)
         val today = todayInAppZone(clock)
         // 날짜가 없거나 형식이 틀리면 대화한 날. 대화한 날은 지금처럼 늘 고칠 수 있고, 다른 날은 오늘~플랜보드 끝만
@@ -391,7 +389,7 @@ class ChatService(
             .joinToString(" ").ifBlank { PLAN_NOT_APPLIED_REPLY }
         val changed = results.filter { it.edited.changed }
         if (changed.isEmpty()) {
-            return saveTurns(dailyPlanId, userMessage, reply, ChatMessageResponse(reply = reply, planChanged = false))
+            return ChatMessageResponse(reply = reply, planChanged = false)
         }
 
         return newSuspendedTransaction {
@@ -422,7 +420,6 @@ class ChatService(
                 }
                 ChatUpdatedDay(dayEdit.date.toString(), planId, dayTaskResponses(planId, context))
             }
-            saveTurnsInTransaction(dailyPlanId, userMessage, reply)
             ChatMessageResponse(
                 reply = reply,
                 planChanged = true,
@@ -520,7 +517,6 @@ class ChatService(
     private suspend fun postponeTasks(
         userId: Int,
         dailyPlanId: Int,
-        userMessage: String,
         context: ChatContext,
         postpone: AiChatPostpone,
         aiReply: String
@@ -532,7 +528,7 @@ class ChatService(
         val sourceDay = if (planDate == targetDate) null else context.days[planDate]
         if (planDate != targetDate && (sourceDay == null || !isEditableDay(planDate, today, context.planBoardEndDate))) {
             val reply = "${formatDay(planDate)}은(는) 지난 날이거나 플랜보드 기간 밖이라 할일을 미룰 수 없어요."
-            return saveTurns(dailyPlanId, userMessage, reply, ChatMessageResponse(reply = reply, planChanged = false))
+            return ChatMessageResponse(reply = reply, planChanged = false)
         }
         val sourcePlanId = sourceDay?.dailyPlanId ?: dailyPlanId
         val pendingExisting = sourceDay?.pendingTasks?.map { it.toExisting() } ?: context.pendingExisting
@@ -554,7 +550,7 @@ class ChatService(
             toDate.isAfter(context.planBoardEndDate) -> "플랜보드 기간이 ${formatDay(context.planBoardEndDate)}까지라서 ${formatDay(toDate)}로는 미룰 수 없어요."
             else -> null
         }
-        if (rejection != null) return saveTurns(dailyPlanId, userMessage, rejection, ChatMessageResponse(reply = rejection, planChanged = false))
+        if (rejection != null) return ChatMessageResponse(reply = rejection, planChanged = false)
 
         // 옮길 날의 막힌 시간: 수면·등교·불가능 시간 + 그날의 모든 기존 할일(다른 보드 포함). NICE 조회는 트랜잭션 밖에서
         val existingOnTarget = newSuspendedTransaction { userTaskRanges(userId, toDate, toDate) }
@@ -576,7 +572,7 @@ class ChatService(
         )
         if (placed.isEmpty()) {
             val reply = "${formatDay(toDate)}에는 빈 시간이 없어서 미루지 못했어요. 다른 날을 말씀해 주세요."
-            return saveTurns(dailyPlanId, userMessage, reply, ChatMessageResponse(reply = reply, planChanged = false))
+            return ChatMessageResponse(reply = reply, planChanged = false)
         }
         val moved = movable.take(placed.size) // placeTasks 는 앞에서부터 들어가는 만큼만 배치한다
         val leftBehind = movable.drop(placed.size).map { it.taskName }
@@ -609,7 +605,6 @@ class ChatService(
                 if (leftBehind.isNotEmpty()) append(" ${leftBehind.joinToString(", ") { "'$it'" }}은(는) 그날 빈 시간이 부족해서 그대로 뒀어요.")
                 if (blocked.isNotEmpty()) append(" ${blocked.joinToString(", ") { "'${it.taskName}'" }}은(는) 어제 미룬 할일이라 이틀 연속으로는 미룰 수 없어요.")
             }
-            saveTurnsInTransaction(dailyPlanId, userMessage, reply)
             // 대화한 날에서 미뤘으면 남은 할일은 updatedTasks, 다른 날에서 미뤘으면 그날을 updatedDays 로 (#337)
             if (sourcePlanId == dailyPlanId) {
                 ChatMessageResponse(reply = reply, planChanged = true, updatedTasks = remaining, movedTasks = movedResponses)
@@ -622,11 +617,35 @@ class ChatService(
         }
     }
 
-    private suspend fun saveTurns(dailyPlanId: Int, userMessage: String, reply: String, response: ChatMessageResponse): ChatMessageResponse =
-        newSuspendedTransaction {
+    /**
+     * 할일 편집·미루기 결과([response])에 같은 메시지로 말한 다른 날 일정([otherBusy], #334)을 이어서 반영하고 대화를 저장한다.
+     * 다른 날 계획은 편집·미루기가 저장된 뒤 DB 에서 다시 읽어 계산하므로, 같은 날을 함께 고쳐도 바뀐 계획 기준으로 옮긴다.
+     */
+    private suspend fun withOtherDays(
+        userId: Int,
+        dailyPlanId: Int,
+        userMessage: String,
+        context: ChatContext,
+        response: ChatMessageResponse,
+        otherBusy: OtherBusyDays?
+    ): ChatMessageResponse {
+        val otherDayResults = otherBusy?.let { rescheduleOtherDays(userId, context, it) }.orEmpty()
+        return newSuspendedTransaction {
+            val otherDays = otherDayResults.mapNotNull { it.applyInTransaction(context) }
+            val otherReply = otherBusy?.let {
+                otherDaysReply(it, otherDayResults.associate { day -> day.date to day.reschedule }, context.planBoardStartDate, context.planBoardEndDate)
+            }
+            val reply = listOfNotNull(response.reply, otherReply).joinToString(" ")
             saveTurnsInTransaction(dailyPlanId, userMessage, reply)
-            response
+            // 같은 날이 두 번 바뀌었으면 나중에 읽은(다른 날 일정까지 반영된) 그날 할일로
+            val updatedDays = (response.updatedDays.orEmpty() + otherDays).associateBy { it.date }.values.toList()
+            response.copy(
+                reply = reply,
+                planChanged = response.planChanged || otherDays.isNotEmpty(),
+                updatedDays = updatedDays.takeIf { it.isNotEmpty() }
+            )
         }
+    }
 
     private fun saveTurnsInTransaction(dailyPlanId: Int, userMessage: String, reply: String) {
         ChatTurnRow.new {
@@ -660,13 +679,18 @@ class ChatService(
 
 /** AI 가 준 공부 불가능 시간대("HH:mm") 를 파싱한다. 형식이 틀리거나 시작이 끝보다 늦으면 null */
 private fun busyWindowOf(start: String?, end: String?): Pair<LocalTime, LocalTime>? {
-    val from = start?.let { runCatching { LocalTime.parse(it) }.getOrNull() } ?: return null
-    val to = end?.let { runCatching { LocalTime.parse(it) }.getOrNull() } ?: return null
+    val from = aiClockOf(start) ?: return null
+    val to = aiClockOf(end) ?: return null
     return if (from.isBefore(to)) from to to else null
 }
 
 private fun overlaps(task: AiChatCurrentTask, window: Pair<LocalTime, LocalTime>): Boolean =
     LocalTime.parse(task.start_time).isBefore(window.second) && window.first.isBefore(LocalTime.parse(task.end_time))
+
+/** AI 가 다시 보낸 할일 목록이 지금 할일과 이름·분까지 같은지 (순서는 무시) — 같으면 대화한 날은 고칠 게 없다 */
+internal fun sameTasks(tasks: List<AiChatTask>, current: List<AiChatCurrentTask>): Boolean =
+    tasks.map { it.task_name.trim() to it.estimated_minutes }.sortedBy { "${it.first}:${it.second}" } ==
+        current.map { it.task_name.trim() to it.estimated_minutes }.sortedBy { "${it.first}:${it.second}" }
 
 internal const val POSTPONE_NOTHING_REPLY = "미룰 할일을 찾지 못했어요. 미루고 싶은 할일 이름을 말씀해 주세요."
 
