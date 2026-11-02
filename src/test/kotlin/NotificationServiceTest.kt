@@ -4,6 +4,7 @@ import com.github.nepyh.rooter.module.notification.NotificationSettingService
 import com.github.nepyh.rooter.module.notification.dto.DeviceTokenRegisterRequest
 import com.github.nepyh.rooter.module.notification.dto.NotificationSettingsResponse
 import com.github.nepyh.rooter.module.notification.dto.NotificationSettingsUpdateRequest
+import com.github.nepyh.rooter.module.notification.dto.NotificationTestRequest
 import com.github.nepyh.rooter.module.notification.exception.NotificationException
 import com.github.nepyh.rooter.module.notification.model.DevicePlatform
 import com.github.nepyh.rooter.module.notification.model.NotificationSettingTable
@@ -130,6 +131,45 @@ class NotificationServiceTest : StringSpec({
         serviceWith(sender).first.remind(userId)
 
         serviceWith().first.unreadCount(userId).unreadCount shouldBe 1L
+        sender.sent.shouldBeEmpty()
+    }
+
+    "sendTest: 본인 알림함에 TEST 로 남기고, 할일 알림을 꺼도 모든 기기로 푸시를 보낸다" {
+        val userId = newUser("a@test.com")
+        val other = newUser("b@test.com")
+        val sender = RecordingPushSender()
+        val (service, devices) = serviceWith(sender)
+        devices.registerPhone(userId)
+        devices.registerPhone(userId, "ExponentPushToken[tablet]")
+        devices.registerPhone(other)
+        settingService.update(userId, NotificationSettingsUpdateRequest(taskReminderEnabled = false))
+
+        val response = service.sendTest(userId, NotificationTestRequest(title = "푸시 확인", body = "잘 오나요?"))
+
+        response.pushedDevices shouldBe 2
+        response.notification.type shouldBe NotificationType.TEST
+        response.notification.title shouldBe "푸시 확인"
+        response.notification.read shouldBe false
+        service.list(userId).notifications.single().id shouldBe response.notification.id
+        service.list(other).notifications.shouldBeEmpty()
+        sender.sent.single().let { (tokens, message) ->
+            tokens.toSet() shouldBe setOf("ExponentPushToken[phone-$userId]", "ExponentPushToken[tablet]")
+            message shouldBe PushMessage(
+                "푸시 확인", "잘 오나요?", mapOf("notificationId" to response.notification.id.toString(), "type" to "TEST")
+            )
+        }
+    }
+
+    "sendTest: 제목·본문을 비우면 기본 문구로 보내고, 기기가 없으면 pushedDevices=0 으로 알림함에만 남긴다" {
+        val userId = newUser("a@test.com")
+        val sender = RecordingPushSender()
+        val (service, _) = serviceWith(sender)
+
+        val response = service.sendTest(userId, NotificationTestRequest(title = " "))
+
+        response.pushedDevices shouldBe 0
+        response.notification.title shouldBe NotificationService.DEFAULT_TEST_TITLE
+        response.notification.body shouldBe NotificationService.DEFAULT_TEST_BODY
         sender.sent.shouldBeEmpty()
     }
 
