@@ -31,12 +31,17 @@ fun ChatApi(chatService: ChatService) = ApiRoute("daily-plans") {
 
             val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
             val request = call.receive<ChatMessageRequest>()
-            val response = chatService.sendMessage(userId, dailyPlanId, request.message)
+            val response = chatService.sendMessage(userId, dailyPlanId, request.message, request.sessionId)
             call.respond(HttpStatusCode.OK, response)
         }.describe {
             tag("Chat")
             summary = "챗봇에게 메시지 보내기 (계획 재조정)"
-            description = "갑자기 생긴 일정을 대화로 알려주면 AI가 그 날의 태스크를 현실적으로 재조정한다 " +
+            description = "대화는 세션(#342)에 쌓인다 — 요청의 sessionId 세션에 이어 붙이고 AI 는 그 세션 대화만 기억한다(새 세션은 빈 대화로 시작). " +
+                "sessionId 를 생략하면 이 날 계획으로 마지막에 대화한 세션, 그것도 없으면 새 세션에 저장한다(예전 앱 호환). 세션은 날짜와 상관없는 유저 전체 목록이고, " +
+                "경로의 dailyPlanId 는 이 메시지로 어느 날 계획을 보고 고칠지다. 응답의 sessionId·sessionTitle 은 저장된 세션과 그 제목(세션 첫 메시지에서 AI 가 정함), " +
+                "userTurnId·assistantTurnId 는 저장된 메시지 id(좋아요·싫어요·삭제용). " +
+                "교과서·수업 내용(개념·공식·풀이 방법)을 물으면 학년과 플랜보드 교과서 단원에 맞춰 설명하고 계획은 그대로 둔다(planChanged=false). " +
+                "갑자기 생긴 일정을 대화로 알려주면 AI가 그 날의 태스크를 현실적으로 재조정한다 " +
                 "(예: \"오늘 5~10시까지 할머니댁 가야 해\"). 계획과 무관한 질문/잡담이면 계획은 그대로 두고 답변만 한다. " +
                 "실제 시각 배정은 서버가 결정론적으로 계산하며(PlanTaskScheduler, plan-generation 과 동일 로직), " +
                 "AI 는 태스크 이름/소요시간과 새로 생긴 공부 불가능 시간(busy window)만 판단한다. " +
@@ -67,13 +72,13 @@ fun ChatApi(chatService: ChatService) = ApiRoute("daily-plans") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "잘못된 dailyPlanId (code=INVALID_ID), 또는 메시지가 비어있음 (code=CHAT_001)"
+                    description = "잘못된 dailyPlanId (code=INVALID_ID), 메시지가 비어있음 (code=CHAT_001), 요청 형식이 틀림 (code=INVALID_REQUEST_BODY)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.NotFound {
-                    description = "존재하지 않거나 본인 소유가 아닌 일일 계획 (code=DAILY_PLAN_NOT_FOUND)"
+                    description = "존재하지 않거나 본인 소유가 아닌 일일 계획 (code=DAILY_PLAN_NOT_FOUND), 존재하지 않거나 본인 소유가 아닌 세션 (code=CHAT_SESSION_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -93,8 +98,9 @@ fun ChatApi(chatService: ChatService) = ApiRoute("daily-plans") {
             call.respond(HttpStatusCode.OK, history)
         }.describe {
             tag("Chat")
-            summary = "챗봇 대화 이력 조회"
-            description = "해당 일일 계획에 쌓인 대화 이력을 시간순으로 조회. 본인 소유의 일일 계획만 조회 가능"
+            summary = "챗봇 대화 이력 조회 (날짜별)"
+            description = "해당 일일 계획을 보고 나눈 대화를 세션 상관없이 시간순으로 조회. 본인 소유의 일일 계획만 조회 가능. " +
+                "세션별 대화는 GET /chat/sessions/{sessionId}/turns (#342). 항목의 id 로 좋아요·싫어요·삭제를 한다"
             responses {
                 HttpStatusCode.OK {
                     description = "조회 성공"

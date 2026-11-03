@@ -58,7 +58,8 @@ open class ChatLlmClient(private val appConfig: AppConfig) {
         planBoardSummary: String,
         userMessage: String,
         planSubjects: String = "",
-        planDays: String = ""
+        planDays: String = "",
+        needsSessionTitle: Boolean = false
     ): AiChatResult? {
         val prompt = PromptLoader.load(
             "prompts/chat-plan-adjustment.md",
@@ -71,7 +72,8 @@ open class ChatLlmClient(private val appConfig: AppConfig) {
             "PLAN_BOARD" to planBoardSummary,
             "PLAN_SUBJECTS" to planSubjects.ifBlank { "등록된 과목 없음" },
             "PLAN_DAYS" to planDays.ifBlank { "계획 없음" },
-            "USER_MESSAGE" to userMessage
+            "USER_MESSAGE" to userMessage,
+            "SESSION_TITLE_NEEDED" to if (needsSessionTitle) "예" else "아니오"
         )
 
         val content = requestChatCompletion(prompt) ?: return null

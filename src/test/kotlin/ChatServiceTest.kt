@@ -2,6 +2,14 @@ import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.chat.ChatLlmClient
 import com.github.nepyh.rooter.module.chat.ChatService
+import com.github.nepyh.rooter.module.chat.ChatSessionService
+import com.github.nepyh.rooter.module.chat.sessionTitleOf
+import com.github.nepyh.rooter.module.chat.exception.ChatSessionNotFoundException
+import com.github.nepyh.rooter.module.chat.exception.ChatTurnNotFoundException
+import com.github.nepyh.rooter.module.chat.exception.ChatValidationException
+import com.github.nepyh.rooter.module.chat.model.ChatTurnFeedback
+import io.kotest.assertions.throwables.shouldThrow
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import com.github.nepyh.rooter.module.chat.PLAN_NOT_APPLIED_REPLY
 import com.github.nepyh.rooter.module.chat.POSTPONE_NOTHING_REPLY
 import com.github.nepyh.rooter.module.chat.dto.AiChatBusyDay
@@ -10,6 +18,7 @@ import com.github.nepyh.rooter.module.chat.dto.AiChatPlanUpdate
 import com.github.nepyh.rooter.module.chat.dto.AiChatPostpone
 import com.github.nepyh.rooter.module.chat.dto.AiChatResult
 import com.github.nepyh.rooter.module.chat.dto.AiChatTask
+import com.github.nepyh.rooter.module.chat.model.ChatSessionTable
 import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.chat.planBoardSummaryOf
@@ -84,6 +93,7 @@ class ChatServiceTest : StringSpec({
     beforeSpec {
         transaction(db) {
             exec("DROP TABLE IF EXISTS chat_turns CASCADE")
+            exec("DROP TABLE IF EXISTS chat_sessions CASCADE")
             exec("DROP TABLE IF EXISTS plan_subjects CASCADE")
             exec("DROP TABLE IF EXISTS task_quiz_attempts CASCADE")
             exec("DROP TABLE IF EXISTS plan_tasks CASCADE")
@@ -95,7 +105,7 @@ class ChatServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS users CASCADE")
             SchemaUtils.create(
                 UserTable, StudentProfileTable, UnavailableTimeTable, StudyStyleAnswerTable,
-                PlanBoardTable, DailyPlanTable, PlanTaskTable, ChatTurnTable,
+                PlanBoardTable, DailyPlanTable, PlanTaskTable, ChatSessionTable, ChatTurnTable,
                 // 할일 과목(plan_tasks.subject_id) FK 대상
                 SubjectTable,
                 // 할일 직접 편집: 플랜보드 과목·학습 범위, 할일 퀴즈 상태
@@ -107,6 +117,7 @@ class ChatServiceTest : StringSpec({
     beforeEach {
         transaction(db) {
             ChatTurnTable.deleteAll()
+            ChatSessionTable.deleteAll()
             TaskQuizAttemptTable.deleteAll()
             PlanSubjectTable.deleteAll()
             PlanTaskTable.deleteAll()
@@ -897,16 +908,157 @@ class ChatServiceTest : StringSpec({
         planBoardSummaryOf("보드", day, day, day, day).lines().last() shouldBe "시험일: 2026-10-05 (D-day(오늘))"
         planBoardSummaryOf("보드", day, day, day, day.plusDays(2)).lines().last() shouldBe "시험일: 2026-10-05 (이미 지남(2일 전))"
     }
+
+    // ── 세션 (#342) ─────────────────────────────────────────────
+
+    fun plainReply(reply: String, title: String? = null) =
+        AiChatResult(reply_message = reply, plan_changed = false, session_title = title)
+
+    fun seedOtherUser(): Int = transaction(db) {
+        UserRow.new {
+            email = "other@test.com"
+            username = "other"
+            password = "x"
+            createdAt = OffsetDateTime.now()
+        }.id.value
+    }
+
+    "sessionId 없이 보내면 새 세션에 저장되고 AI 제목이 붙는다. 같은 날 다시 보내면 그 세션에 이어지고 제목은 그대로다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val llm = FakeChatLlmClient(plainReply("광합성은 빛으로 양분을 만드는 과정이에요.", title = "광합성 개념 질문"))
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+
+        val first = service.sendMessage(userId, dailyPlanId, "광합성이 뭐야?")
+        llm.lastNeedsSessionTitle shouldBe true
+        llm.lastChatHistoryJson shouldBe "[]"
+        first.sessionId shouldNotBe null
+        first.sessionTitle shouldBe "광합성 개념 질문"
+        first.userTurnId shouldNotBe null
+        first.assistantTurnId shouldNotBe null
+
+        llm.result = plainReply("엽록체에서 일어나요.", title = "다른 제목")
+        val second = service.sendMessage(userId, dailyPlanId, "어디서 일어나?")
+        llm.lastNeedsSessionTitle shouldBe false
+        llm.lastChatHistoryJson!! shouldContain "광합성이 뭐야?"
+        second.sessionId shouldBe first.sessionId
+        second.sessionTitle shouldBe "광합성 개념 질문"
+
+        ChatSessionService().listSessions(userId).map { it.title } shouldBe listOf("광합성 개념 질문")
+        ChatSessionService().getSessionTurns(userId, first.sessionId!!).map { it.role to it.content } shouldBe listOf(
+            "user" to "광합성이 뭐야?", "assistant" to "광합성은 빛으로 양분을 만드는 과정이에요.",
+            "user" to "어디서 일어나?", "assistant" to "엽록체에서 일어나요."
+        )
+    }
+
+    "새 세션으로 보내면 다른 세션 대화는 AI 에 넘기지 않고, AI 제목이 없으면 첫 메시지 앞부분이 제목이 된다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val llm = FakeChatLlmClient(plainReply("네", title = "첫 세션"))
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+        val sessions = ChatSessionService()
+        val old = service.sendMessage(userId, dailyPlanId, "예전 세션 대화")
+
+        val fresh = sessions.createSession(userId)
+        fresh.title shouldBe null
+        llm.result = plainReply("좋아요")
+        val longMessage = "이번 주 목요일에 학원 보강이 생겨서 저녁에는 공부를 못 할 것 같아"
+        val response = service.sendMessage(userId, dailyPlanId, longMessage, fresh.id)
+
+        llm.lastChatHistoryJson shouldBe "[]"
+        llm.lastNeedsSessionTitle shouldBe true
+        response.sessionId shouldBe fresh.id
+        response.sessionTitle shouldBe longMessage.take(29) + "…"
+        // 마지막으로 대화한 세션부터
+        sessions.listSessions(userId).map { it.id } shouldBe listOf(fresh.id, old.sessionId)
+        // 날짜별 이력은 세션 상관없이 이 날 대화 전체
+        service.getHistory(userId, dailyPlanId).map { it.sessionId }.distinct() shouldBe listOf(old.sessionId, fresh.id)
+    }
+
+    "남의 세션으로 보내거나 조회·삭제하면 CHAT_SESSION_NOT_FOUND" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val otherUserId = seedOtherUser()
+        val othersSession = ChatSessionService().createSession(otherUserId)
+        val service = ChatService(FakeChatLlmClient(plainReply("네")), schoolDataFetcher, otherDayClock)
+
+        shouldThrow<ChatSessionNotFoundException> { service.sendMessage(userId, dailyPlanId, "안녕", othersSession.id) }
+        shouldThrow<ChatSessionNotFoundException> { ChatSessionService().getSessionTurns(userId, othersSession.id) }
+        shouldThrow<ChatSessionNotFoundException> { ChatSessionService().deleteSession(userId, othersSession.id) }
+        transaction(db) { ChatTurnTable.selectAll().count() } shouldBe 0L
+    }
+
+    "좋아요·싫어요는 챗봇 답변에만 남고 null 로 취소된다. 사용자 메시지는 400, 남의 메시지는 404" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val response = ChatService(FakeChatLlmClient(plainReply("네")), schoolDataFetcher, otherDayClock)
+            .sendMessage(userId, dailyPlanId, "안녕")
+        val sessions = ChatSessionService()
+
+        sessions.setFeedback(userId, response.assistantTurnId!!, ChatTurnFeedback.LIKE).feedback shouldBe ChatTurnFeedback.LIKE
+        sessions.setFeedback(userId, response.assistantTurnId!!, ChatTurnFeedback.DISLIKE).feedback shouldBe ChatTurnFeedback.DISLIKE
+        sessions.getSessionTurns(userId, response.sessionId!!).last().feedback shouldBe ChatTurnFeedback.DISLIKE
+        sessions.setFeedback(userId, response.assistantTurnId!!, null).feedback shouldBe null
+
+        shouldThrow<ChatValidationException.FeedbackNotAllowedException> {
+            sessions.setFeedback(userId, response.userTurnId!!, ChatTurnFeedback.LIKE)
+        }
+        shouldThrow<ChatTurnNotFoundException> { sessions.setFeedback(seedOtherUser(), response.assistantTurnId!!, ChatTurnFeedback.LIKE) }
+    }
+
+    "사용자 메시지를 지우면 그 답변도 같이 지워지고, 답변 id 로 지워도 질문과 함께 지워진다. 지운 대화는 AI 히스토리에서 빠진다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val llm = FakeChatLlmClient(plainReply("답1"))
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+        val sessions = ChatSessionService()
+        val first = service.sendMessage(userId, dailyPlanId, "질문1")
+        llm.result = plainReply("답2")
+        val second = service.sendMessage(userId, dailyPlanId, "질문2", first.sessionId)
+        llm.result = plainReply("답3")
+        val third = service.sendMessage(userId, dailyPlanId, "질문3", first.sessionId)
+
+        sessions.deleteTurn(userId, second.userTurnId!!) shouldBe listOf(second.userTurnId, second.assistantTurnId)
+        sessions.deleteTurn(userId, third.assistantTurnId!!).toSet() shouldBe setOf(third.userTurnId, third.assistantTurnId)
+        sessions.getSessionTurns(userId, first.sessionId!!).map { it.content } shouldBe listOf("질문1", "답1")
+
+        shouldThrow<ChatTurnNotFoundException> { sessions.deleteTurn(userId, second.userTurnId!!) }
+        shouldThrow<ChatTurnNotFoundException> { sessions.deleteTurn(seedOtherUser(), first.userTurnId!!) }
+
+        llm.result = plainReply("답4")
+        service.sendMessage(userId, dailyPlanId, "질문4", first.sessionId)
+        llm.lastChatHistoryJson!! shouldContain "질문1"
+        llm.lastChatHistoryJson!! shouldNotContain "질문2"
+        llm.lastChatHistoryJson!! shouldNotContain "질문3"
+    }
+
+    "세션을 지우면 그 대화도 지워지고 계획은 그대로다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val taskId = seedTask(dailyPlanId, "수학", LocalTime.of(20, 0), LocalTime.of(21, 0), completed = false)
+        val response = ChatService(FakeChatLlmClient(plainReply("네")), schoolDataFetcher, otherDayClock)
+            .sendMessage(userId, dailyPlanId, "안녕")
+
+        ChatSessionService().deleteSession(userId, response.sessionId!!)
+
+        ChatSessionService().listSessions(userId) shouldBe emptyList()
+        transaction(db) {
+            ChatTurnTable.selectAll().count() shouldBe 0L
+            PlanTaskRow.findById(taskId) shouldNotBe null
+        }
+    }
+
+    "sessionTitleOf: AI 제목은 30자까지, 없으면 첫 메시지 첫 줄" {
+        sessionTitleOf("  \"수학 할일 줄이기\" ", "아무거나") shouldBe "수학 할일 줄이기"
+        sessionTitleOf(null, "수학 줄여줘\n그리고 영어도") shouldBe "수학 줄여줘"
+        sessionTitleOf(" ", "가".repeat(40)) shouldBe "가".repeat(29) + "…"
+    }
 })
 
 
-private class FakeChatLlmClient(private val result: AiChatResult?) : ChatLlmClient(dummyAppConfig()) {
+private class FakeChatLlmClient(var result: AiChatResult?) : ChatLlmClient(dummyAppConfig()) {
     var lastCurrentTasksJson: String? = null
     var lastPlanBoardSummary: String? = null
     var lastToday: String? = null
     var lastStudyStyleSummary: String? = null
     var lastPlanSubjects: String? = null
     var lastPlanDays: String? = null
+    var lastChatHistoryJson: String? = null
+    var lastNeedsSessionTitle: Boolean? = null
 
     override suspend fun adjustPlan(
         grade: Int,
@@ -918,8 +1070,11 @@ private class FakeChatLlmClient(private val result: AiChatResult?) : ChatLlmClie
         planBoardSummary: String,
         userMessage: String,
         planSubjects: String,
-        planDays: String
+        planDays: String,
+        needsSessionTitle: Boolean
     ): AiChatResult? {
+        lastChatHistoryJson = chatHistoryJson
+        lastNeedsSessionTitle = needsSessionTitle
         lastPlanSubjects = planSubjects
         lastPlanDays = planDays
         lastToday = today

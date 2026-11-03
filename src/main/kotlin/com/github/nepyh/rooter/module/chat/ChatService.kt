@@ -56,7 +56,6 @@ import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTrans
 import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalTime
-import java.time.OffsetDateTime
 import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
 import java.util.Locale
@@ -84,12 +83,17 @@ class ChatService(
             ?.let { DailyPlanRow.wrapRow(it) }
             ?: throw DailyPlanNotFoundException()
 
-    suspend fun sendMessage(userId: Int, dailyPlanId: Int, message: String): ChatMessageResponse {
+    /**
+     * 챗봇에게 메시지를 보낸다. [sessionId] 세션에 이어 붙이고 AI 에는 그 세션 대화만 히스토리로 넣는다 (#342).
+     * [sessionId] 가 없으면 이 날 계획으로 마지막에 대화한 세션, 그것도 없으면 새 세션에 저장한다.
+     */
+    suspend fun sendMessage(userId: Int, dailyPlanId: Int, message: String, sessionId: Int? = null): ChatMessageResponse {
         val trimmed = message.trim()
         if (trimmed.isBlank()) throw ChatValidationException.MessageRequiredException()
 
         val context = newSuspendedTransaction {
             val dailyPlanRow = requireOwnedDailyPlan(userId, dailyPlanId)
+            val session = sessionToContinue(userId, dailyPlanId, sessionId)
             val planDate = dailyPlanRow.planDate
             val board = dailyPlanRow.planBoard
 
@@ -124,8 +128,8 @@ class ChatService(
                 .filter { it.date == planDate || isEditableDay(it.date, today, board.endDate) }
                 .flatMap { day -> day.pendingTasks.map { it.id } }
 
-            val history = ChatTurnRow.find { ChatTurnTable.dailyPlanId eq dailyPlanId }
-                .orderBy(ChatTurnTable.createdAt to SortOrder.ASC)
+            // 새 세션은 빈 대화로 시작한다 — 다른 세션 대화는 AI 에 넣지 않는다 (#342)
+            val history = session?.let { turnsOf(it.id.value) }.orEmpty()
                 .map { AiChatTurn(role = it.role, content = it.content) }
                 .takeLast(HISTORY_LIMIT)
 
@@ -172,6 +176,8 @@ class ChatService(
                 studyStyleSummary = studyStyleSummary,
                 planBoardSummary = planBoardSummaryOf(board.title, board.startDate, board.endDate, board.examDate, planDate),
                 history = history,
+                sessionId = session?.id?.value,
+                needsSessionTitle = session?.title == null,
                 planBoardId = board.id.value,
                 planBoardIsManual = isManualPlanBoard(board.examDate),
                 planBoardStartDate = board.startDate,
@@ -193,8 +199,10 @@ class ChatService(
             planBoardSummary = context.planBoardSummary,
             userMessage = trimmed,
             planSubjects = context.planSubjectsText,
-            planDays = context.planDaysText
+            planDays = context.planDaysText,
+            needsSessionTitle = context.needsSessionTitle
         )
+        val aiTitle = result?.session_title
 
         // 다른 날에 생긴 일정 (#334) — 그날 계획(같은 플랜보드)에서 겹치는 할일만 옮긴다.
         // AI 가 plan_changed=false 로 답해도 날짜·시각을 줬으면 반영한다 (plan_changed 를 자주 틀린다)
@@ -206,12 +214,12 @@ class ChatService(
         // 다른 날로 미뤄 달라는 요청이면 그날 계획 재구성 대신 미루기만 한다. 다른 날 일정도 같이 말했으면 이어서 반영한다
         result?.postpone?.takeIf { it.task_names.isNotEmpty() }?.let { postpone ->
             val response = postponeTasks(userId, dailyPlanId, context, postpone, result.reply_message)
-            return withOtherDays(userId, dailyPlanId, trimmed, context, response, otherBusy)
+            return withOtherDays(userId, dailyPlanId, trimmed, context, response, otherBusy, aiTitle)
         }
 
         // 할일을 직접 줄이기·추가·삭제·옮기기 해 달라는 요청이면 그 동작만 검증해 적용한다 (#306). 다른 날 일정도 같이 말했으면 이어서 반영한다
         result?.edits?.takeIf { it.isNotEmpty() }?.let { edits ->
-            return withOtherDays(userId, dailyPlanId, trimmed, context, editTasks(dailyPlanId, context, edits), otherBusy)
+            return withOtherDays(userId, dailyPlanId, trimmed, context, editTasks(dailyPlanId, context, edits), otherBusy, aiTitle)
         }
 
         val update = result?.plan_update
@@ -253,22 +261,10 @@ class ChatService(
         }
 
         return newSuspendedTransaction {
-            ChatTurnRow.new {
-                this.dailyPlan = DailyPlanRow[dailyPlanId]
-                role = "user"
-                content = trimmed
-                createdAt = OffsetDateTime.now()
-            }
-
             if (result == null) {
                 val fallback = "죄송해요, 지금은 답변을 드릴 수 없어요. 잠시 후 다시 시도해주세요."
-                ChatTurnRow.new {
-                    this.dailyPlan = DailyPlanRow[dailyPlanId]
-                    role = "assistant"
-                    content = fallback
-                    createdAt = OffsetDateTime.now()
-                }
-                return@newSuspendedTransaction ChatMessageResponse(reply = fallback, planChanged = false)
+                val saved = saveTurns(userId, context.sessionId, dailyPlanId, trimmed, fallback, aiTitle = null)
+                return@newSuspendedTransaction ChatMessageResponse(reply = fallback, planChanged = false).withTurns(saved)
             }
 
             var updatedTasks: List<PlanTaskResponse>? = null
@@ -327,19 +323,14 @@ class ChatService(
             }
             val reply = listOfNotNull(dayReply, otherReply).joinToString(" ").ifBlank { PLAN_NOT_APPLIED_REPLY }
 
-            ChatTurnRow.new {
-                this.dailyPlan = DailyPlanRow[dailyPlanId]
-                role = "assistant"
-                content = reply
-                createdAt = OffsetDateTime.now()
-            }
+            val saved = saveTurns(userId, context.sessionId, dailyPlanId, trimmed, reply, aiTitle)
 
             ChatMessageResponse(
                 reply = reply,
                 planChanged = updatedTasks != null || updatedDays != null,
                 updatedTasks = updatedTasks,
                 updatedDays = updatedDays
-            )
+            ).withTurns(saved)
         }
     }
 
@@ -627,7 +618,8 @@ class ChatService(
         userMessage: String,
         context: ChatContext,
         response: ChatMessageResponse,
-        otherBusy: OtherBusyDays?
+        otherBusy: OtherBusyDays?,
+        aiTitle: String?
     ): ChatMessageResponse {
         val otherDayResults = otherBusy?.let { rescheduleOtherDays(userId, context, it) }.orEmpty()
         return newSuspendedTransaction {
@@ -636,46 +628,33 @@ class ChatService(
                 otherDaysReply(it, otherDayResults.associate { day -> day.date to day.reschedule }, context.planBoardStartDate, context.planBoardEndDate)
             }
             val reply = listOfNotNull(response.reply, otherReply).joinToString(" ")
-            saveTurnsInTransaction(dailyPlanId, userMessage, reply)
+            val saved = saveTurns(userId, context.sessionId, dailyPlanId, userMessage, reply, aiTitle)
             // 같은 날이 두 번 바뀌었으면 나중에 읽은(다른 날 일정까지 반영된) 그날 할일로
             val updatedDays = (response.updatedDays.orEmpty() + otherDays).associateBy { it.date }.values.toList()
             response.copy(
                 reply = reply,
                 planChanged = response.planChanged || otherDays.isNotEmpty(),
                 updatedDays = updatedDays.takeIf { it.isNotEmpty() }
-            )
+            ).withTurns(saved)
         }
     }
 
-    private fun saveTurnsInTransaction(dailyPlanId: Int, userMessage: String, reply: String) {
-        ChatTurnRow.new {
-            this.dailyPlan = DailyPlanRow[dailyPlanId]
-            role = "user"
-            content = userMessage
-            createdAt = OffsetDateTime.now()
-        }
-        ChatTurnRow.new {
-            this.dailyPlan = DailyPlanRow[dailyPlanId]
-            role = "assistant"
-            content = reply
-            createdAt = OffsetDateTime.now()
-        }
-    }
-
+    /** 이 날 계획을 보고 나눈 대화 전체 (세션 상관없이, 순서대로). 세션별 대화는 [ChatSessionService.getSessionTurns] */
     suspend fun getHistory(userId: Int, dailyPlanId: Int): List<ChatTurnResponse> = newSuspendedTransaction {
         requireOwnedDailyPlan(userId, dailyPlanId)
 
         ChatTurnRow.find { ChatTurnTable.dailyPlanId eq dailyPlanId }
-            .orderBy(ChatTurnTable.createdAt to SortOrder.ASC)
-            .map {
-                ChatTurnResponse(
-                    role = it.role,
-                    content = it.content,
-                    createdAt = it.createdAt.toString()
-                )
-            }
+            .orderBy(ChatTurnTable.id to SortOrder.ASC)
+            .map { it.toResponse() }
     }
 }
+
+private fun ChatMessageResponse.withTurns(saved: SavedTurns) = copy(
+    sessionId = saved.sessionId,
+    sessionTitle = saved.sessionTitle,
+    userTurnId = saved.userTurnId,
+    assistantTurnId = saved.assistantTurnId
+)
 
 /** AI 가 준 공부 불가능 시간대("HH:mm") 를 파싱한다. 형식이 틀리거나 시작이 끝보다 늦으면 null */
 private fun busyWindowOf(start: String?, end: String?): Pair<LocalTime, LocalTime>? {
@@ -748,6 +727,8 @@ private data class ChatContext(
     val studyStyleSummary: String,
     val planBoardSummary: String,
     val history: List<AiChatTurn>,
+    val sessionId: Int?, // 이어 붙일 세션. null 이면 저장할 때 새로 만든다 (#342)
+    val needsSessionTitle: Boolean, // 세션 첫 메시지라 AI 에 제목을 받아야 하는지
     val planBoardId: Int,
     val planBoardIsManual: Boolean,
     val planBoardStartDate: LocalDate,

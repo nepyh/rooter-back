@@ -34,6 +34,8 @@ import com.github.nepyh.rooter.module.school.exception.NiceApiException
 import com.github.nepyh.rooter.module.storage.FileStorageModule
 import com.github.nepyh.rooter.module.studystyle.StudyStyleModule
 import com.github.nepyh.rooter.module.swagger.SwaggerDocsModule
+import com.github.nepyh.rooter.module.chat.exception.ChatSessionNotFoundException
+import com.github.nepyh.rooter.module.chat.exception.ChatTurnNotFoundException
 import com.github.nepyh.rooter.module.chat.exception.ChatValidationException
 import com.github.nepyh.rooter.module.chat.exception.DailyPlanNotFoundException as ChatDailyPlanNotFoundException
 import com.github.nepyh.rooter.module.feedback.exception.DailyPlanNotFoundException as FeedbackDailyPlanNotFoundException
@@ -177,6 +179,12 @@ fun Application.configureErrorResponses() {
         }
         exception<ChatValidationException> { call, cause ->
             call.respondError(cause.status, cause.code, cause.message)
+        }
+        exception<ChatSessionNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "CHAT_SESSION_NOT_FOUND", cause.message)
+        }
+        exception<ChatTurnNotFoundException> { call, cause ->
+            call.respondError(HttpStatusCode.NotFound, "CHAT_TURN_NOT_FOUND", cause.message)
         }
         exception<FeedbackNotFoundException> { call, cause ->
             call.respondError(HttpStatusCode.NotFound, "FEEDBACK_NOT_FOUND", cause.message)
