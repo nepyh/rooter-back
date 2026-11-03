@@ -1042,6 +1042,29 @@ class ChatServiceTest : StringSpec({
         }
     }
 
+    "세션 전체 삭제는 내 세션만 전부 지우고 남의 세션·계획은 그대로다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val taskId = seedTask(dailyPlanId, "수학", LocalTime.of(20, 0), LocalTime.of(21, 0), completed = false)
+        val otherUserId = seedOtherUser()
+        val service = ChatService(FakeChatLlmClient(plainReply("네")), schoolDataFetcher, otherDayClock)
+        val sessions = ChatSessionService()
+        val first = service.sendMessage(userId, dailyPlanId, "안녕")
+        sessions.createSession(userId)
+        service.sendMessage(userId, dailyPlanId, "또 안녕", sessions.createSession(userId).id)
+        val othersSession = sessions.createSession(otherUserId)
+
+        sessions.deleteAllSessions(userId) shouldBe 3
+
+        sessions.listSessions(userId) shouldBe emptyList()
+        sessions.listSessions(otherUserId).map { it.id } shouldBe listOf(othersSession.id)
+        shouldThrow<ChatSessionNotFoundException> { sessions.getSessionTurns(userId, first.sessionId!!) }
+        transaction(db) {
+            ChatTurnTable.selectAll().count() shouldBe 0L
+            PlanTaskRow.findById(taskId) shouldNotBe null
+        }
+        sessions.deleteAllSessions(userId) shouldBe 0
+    }
+
     "sessionTitleOf: AI 제목은 30자까지, 없으면 첫 메시지 첫 줄" {
         sessionTitleOf("  \"수학 할일 줄이기\" ", "아무거나") shouldBe "수학 할일 줄이기"
         sessionTitleOf(null, "수학 줄여줘\n그리고 영어도") shouldBe "수학 줄여줘"
