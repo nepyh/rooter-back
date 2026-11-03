@@ -55,6 +55,19 @@ class ChatSessionService {
         session.delete()
     }
 
+    /**
+     * 내 세션을 전부 지운다 (그 안의 대화까지). 챗봇이 이미 바꾼 계획은 그대로다.
+     * @return 지운 세션 수 (없으면 0)
+     */
+    fun deleteAllSessions(userId: Int): Int = transaction {
+        val sessionIds = ChatSessionTable.select(ChatSessionTable.id)
+            .where { ChatSessionTable.userId eq userId }
+            .map { it[ChatSessionTable.id] }
+        if (sessionIds.isEmpty()) return@transaction 0
+        ChatTurnTable.deleteWhere { ChatTurnTable.sessionId inList sessionIds }
+        ChatSessionTable.deleteWhere { ChatSessionTable.id inList sessionIds }
+    }
+
     fun getSessionTurns(userId: Int, sessionId: Int): List<ChatTurnResponse> = transaction {
         requireOwnedSession(userId, sessionId)
         turnsOf(sessionId).map { it.toResponse() }

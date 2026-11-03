@@ -71,6 +71,27 @@ fun ChatSessionApi(chatSessionService: ChatSessionService) = ApiRoute("chat") {
             }
         }
 
+        delete("sessions") {
+            val deleted = chatSessionService.deleteAllSessions(call.userId())
+            call.respond(HttpStatusCode.OK, mapOf("deletedSessionCount" to deleted))
+        }.describe {
+            tag("Chat")
+            summary = "챗봇 세션 전체 삭제"
+            description = "내 세션과 그 안의 대화를 전부 지운다. 챗봇이 이미 바꾼 계획(할일)은 되돌리지 않는다. " +
+                "요청 body 없음. 응답 deletedSessionCount 는 지운 세션 수 (세션이 없으면 0, 그래도 200)"
+            responses {
+                HttpStatusCode.OK {
+                    description = "삭제 성공 ({\"deletedSessionCount\": 3})"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
         delete("sessions/{sessionId}") {
             val sessionId = call.parameters["sessionId"]?.toIntOrNull()
                 ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "잘못된 sessionId 입니다."))
