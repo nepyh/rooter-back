@@ -38,7 +38,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 | # | 마일스톤 | 진행 | 상태 |
 |---|---|---|---|
-| M1 | 플랜보드 코어 | 11/17 | doing |
+| M1 | 플랜보드 코어 | 11/20 | doing |
 | M2 | 컨벤션·구조 정비 | 5/6 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 7/10 | doing |
@@ -92,6 +92,8 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] doing RB-147 할일 수정(PATCH) 보강 (#302, 할일 위치·길이 조정용) — 시간만 바꾸고 `estimatedMinutes` 를 안 보내면 바뀐 길이로 자동 맞춤(태스크 퀴즈 문항 수·캘린더 합계 기준이라), 퀴즈로 결과가 확정된 할일의 시간·예상 시간 변경은 400 `TASK_FINALIZED`(이름 변경·같은 값 재전송은 허용) — 이슈 #302, PR #303 open · `./gradlew test` 291건 0 실패 · 다른 날로 옮기기·겹침 검사·자정 넘김(RB-077)은 범위 밖
 - [ ] doing RB-138 할일 상태를 `status`(PENDING/DONE/FAILED) 하나로 통합 (#258) — `is_completed`·`is_failed` 를 `plan_tasks.status` 로 교체, 실패 처리·완료 취소는 `PATCH /plan-tasks/{taskId}` 의 `status` 로 (`/fail` 제거), →DONE 은 퀴즈 통과로만 (`TASK_QUIZ_REQUIRED`). 퀴즈 히스토리는 실패 처리한 할일의 채점 전 차수를 `MISSED` 로. 응답·API 에 남아 있던 `isCompleted`(`PlanTaskResponse`·예전 앱 호환용)와 `PATCH .../complete` 도 제거해 상태는 `status` 하나로만 오감 — 프론트 `main` 이 아직 `isCompleted`·`/complete` 를 쓰므로 프론트 PR 동반 필요. PR #283 open (`f9a4f4f`·`a465bbd`, #288 병합 후 `changeStatus` 가 그 규칙을 포함, 10-22 main 재병합 `59e8456` 으로 RB-147 의 시간 변경 금지에 실패 할일 포함) · `./gradlew test` 317건 0 실패 · rooter-ddl #36 / PR #37 머지됨(10-20, status 추가 1단계) — **운영 DB 적용 확인 후 머지** · 구 컬럼 삭제는 배포 후 rooter-ddl 다음 PR
 - [ ] doing RB-150 피드백을 할일 단위로 분리 + AI 재조정을 자정 배치 1회로 (#269, rooter-front #128 — 같은 날 한 할일의 설문을 내면 다른 할일도 제출된 것으로 보이던 문제) — `daily_feedback.plan_task_id`(rooter-ddl #33, main 머지 10-19)로 할일당 1건, API 는 `POST/GET /plan-tasks/{taskId}/feedback` 신규 + `GET /daily-plans/{dailyPlanId}/feedback`(그날 제출 목록)으로 의미 변경, 기존 `POST /daily-plans/{id}/feedback` 제거. 제출 시 replan 을 빼고(`insertedAdjustmentTasks` 필드만 유지·항상 빈 배열) `FeedbackReplanJob`(`job_type=feedback_replan`)이 KST 자정에 직전 하루의 (보드, 날짜)마다 1회 조정 — 설문 0건이면 후보 없음, `run_key` claim 으로 중복 방지, 오답 0건·전부 적당이면 AI 생략. PR #310 open (`develop` 기준으로 닫힌 PR #271 커밋 4개를 `main` `c8c9793` 위로 cherry-pick — `27457b9`·`6968ea4`·`08ea696`·`bee85ab`) · `./gradlew test` 323건 0 실패(기준선 317, 신규 6, `FeedbackServiceTest` 13건) · **운영 DB 에 `daily_feedback.plan_task_id` 적용 확인 후 머지** · 프론트는 피드백 호출 경로 변경 필요
+- [ ] doing RB-167 플랜보드 메타데이터 컬럼(`description`·`is_archived`·`updated_at`) DDL 추가 — 한 유저가 여러 플랜보드를 이름·설명으로 구분하는 작업의 1단계. `plan_boards` 에 `description`(text null)·`is_archived`(boolean not null default false, 보관한 보드는 목록에서 빠지고 행은 남는다)·`updated_at`(timestamptz not null default current_timestamp) — rooter-ddl PR #47 open · **DDL 먼저**: 운영 DB 적용 후 RB-168 머지
+- [ ] doing RB-168 다중 보드 백엔드 지원 (보드 메타데이터 API + 보드 스코프 조회 경로) — 보드 컨텍스트는 클라이언트가 목록에서 고르고 서버는 path 로 받는다. `GET /plan-boards` 는 최근 생성 순(클라가 첫 항목을 현재 보드로 씀)이고 기본으로 보관 보드를 빼며 `includeArchived=true` 로 포함, `POST/PATCH` 에 `description`·`isArchived`(빈 문자열 = 설명 지우기, 500자 초과 400 `INVALID_DESCRIPTION`), 응답에 `description`·`isArchived`·`updatedAt`. 신규 경로 `GET /plan-boards/{boardId}/weekly`(그 주 dailyPlanId 까지 채움), `GET /plan-boards/{boardId}/calendar?start=&end=`·`/{boardId}/calendar/{date}`(그 보드 계획·시험만 집계, 개인 일정은 사용자 단위라 포함). `busy-times` 는 다른 보드 할일도 실제 시간을 먹으므로 사용자 단위 유지 — PR #346 open · `./gradlew test` 462건 0 실패(기준선 453, 신규 9) · 운영 DB 에 RB-167 컬럼 적용 후 머지
 
 ## M2. 컨벤션·구조 정비
 

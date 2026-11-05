@@ -19,6 +19,7 @@ import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.user.model.UserRow
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -26,7 +27,10 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
 
-/** 과목 범위 등록에 필요한 엔티티 묶음 — DAO 로 그대로 연결할 수 있게 Row 타입으로 들고 다닌다. */
+/** 보드 설명 최대 길이 (DDL 은 text 라 제한이 없어 서비스에서 막는다) */
+private const val MAX_DESCRIPTION_LENGTH = 500
+
+/** 과목 범위 등록에 필요한 엔티티 묶음 — DAO 로 그대로 연결할 수 있게 Row 타입으로 들고 다인다. */
 private data class ResolvedTextbookSubject(
     val subject: SubjectRow,
     val textbook: TextbookRow,
@@ -35,21 +39,41 @@ private data class ResolvedTextbookSubject(
 )
 
 class PlanBoardService {
-    fun getAllBoards(userId: Int): List<PlanBoardResponse> = transaction {
+    /**
+     * 본인 보드 목록. 최근에 만든 보드가 앞에 온다 — 클라이언트가 목록의 첫 항목을 현재 보드 컨텍스트로 쓴다.
+     * [includeArchived] 가 false(기본)면 보관한 보드는 빠진다.
+     */
+    fun getAllBoards(userId: Int, includeArchived: Boolean = false): List<PlanBoardResponse> = transaction {
         val user = UserRow.findById(userId)
             ?: return@transaction emptyList()
 
-        PlanBoardRow.find { PlanBoardTable.userId eq user.id }
-            .map {
-                PlanBoardResponse(
-                    id = it.id.value,
-                    title = it.title,
-                    startDate = it.startDate.toString(),
-                    endDate = it.endDate.toString(),
-                    examDate = it.examDate?.toString(),
-                    createdAt = it.createdAt.toString()
-                )
-            }
+        PlanBoardRow.find {
+            if (includeArchived) PlanBoardTable.userId eq user.id
+            else (PlanBoardTable.userId eq user.id) and (PlanBoardTable.isArchived eq false)
+        }
+            .orderBy(PlanBoardTable.createdAt to SortOrder.DESC)
+            .map { it.toResponse() }
+    }
+
+    private fun PlanBoardRow.toResponse() = PlanBoardResponse(
+        id = id.value,
+        title = title,
+        description = description,
+        startDate = startDate.toString(),
+        endDate = endDate.toString(),
+        examDate = examDate?.toString(),
+        isArchived = isArchived,
+        createdAt = createdAt.toString(),
+        updatedAt = updatedAt.toString()
+    )
+
+    /** PATCH 에서 null 은 "변경 없음"이라 설명을 지우는 표현이 따로 필요하다 — 빈 문자열/공백만 있는 문자열을 지우기로 본다. */
+    private fun normalizeDescription(description: String?): String? {
+        val trimmed = description?.trim().orEmpty()
+        if (trimmed.length > MAX_DESCRIPTION_LENGTH) {
+            throw PlanBoardValidationException.InvalidDescriptionException()
+        }
+        return trimmed.ifEmpty { null }
     }
 
     fun createBoard(userId: Int, request: PlanBoardCreateRequest): Int {
@@ -73,6 +97,7 @@ class PlanBoardService {
             PlanBoardRow.new {
                 user = UserRow[userId]
                 title = request.title
+                description = normalizeDescription(request.description)
                 this.startDate = startDate
                 this.endDate = endDate
                 this.examDate = examDate
@@ -81,7 +106,7 @@ class PlanBoardService {
         }
     }
 
-    /** title/startDate/endDate/examDate 중 전달된 필드만 수정 (null 은 변경 없음). 본인 보드만 가능 */
+    /** title/description/startDate/endDate/examDate/isArchived 중 전달된 필드만 수정 (null 은 변경 없음). 본인 보드만 가능 */
     fun updateBoard(userId: Int, boardId: Int, request: PlanBoardUpdateRequest): PlanBoardResponse = transaction {
         val board = PlanBoardRow.findById(boardId) ?: throw PlanBoardNotFoundException()
         if (board.user.id.value != userId) throw PlanBoardForbiddenException()
@@ -106,14 +131,11 @@ class PlanBoardService {
                 .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
         }
 
-        PlanBoardResponse(
-            id = board.id.value,
-            title = board.title,
-            startDate = board.startDate.toString(),
-            endDate = board.endDate.toString(),
-            examDate = board.examDate?.toString(),
-            createdAt = board.createdAt.toString()
-        )
+        request.description?.let { board.description = normalizeDescription(it) }
+        request.isArchived?.let { board.isArchived = it }
+        board.updatedAt = OffsetDateTime.now()
+
+        board.toResponse()
     }
 
     /** 보드를 삭제하면 과목 범위/일별 계획/태스크 등 하위 데이터가 전부 cascade 삭제됨 (DDL FK 기준). 본인 보드만 가능 */
