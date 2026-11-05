@@ -30,6 +30,7 @@ import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.core.between
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -120,6 +121,55 @@ class PlanTaskService {
             dailyPlanId = dailyPlan.id.value,
             planDate = targetDate.toString(),
             tasks = taskRows.map { it.toResponse(board.id.value, isManualPlanBoard(board.examDate), it.subjectNameFrom(subjectNames)) }
+        )
+    }
+
+    /**
+     * 특정 플랜보드의 주간(월~일) 플랜. 그 주에 그 보드의 일일 계획이 있으면 날짜별 dailyPlanId 도 채운다
+     * (/plan-tasks/week 는 여러 보드를 합치므로 dailyPlanId 를 비운다 — 채팅·피드백 호출에는 이 경로를 쓴다).
+     */
+    fun getBoardWeeklyPlan(userId: Int, boardId: Int, referenceDate: LocalDate): WeeklyPlanResponse = transaction {
+        val board = PlanBoardRow.findById(boardId)
+            ?: throw PlanBoardNotFoundException()
+
+        if (board.user.id.value != userId) {
+            throw PlanBoardForbiddenException()
+        }
+
+        val weekStart = referenceDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val weekEnd = weekStart.plusDays(6)
+
+        val dailyPlans = DailyPlanRow.find {
+            (DailyPlanTable.planBoardId eq board.id) and (DailyPlanTable.planDate.between(weekStart, weekEnd))
+        }.toList()
+        val dailyPlanIdByDate = dailyPlans.associate { it.planDate to it.id.value }
+
+        // 할일은 일일 계획 id 로 한 번에 가져와 묶는다 (날짜마다 조회하면 최대 7번 더 나간다)
+        val tasksByDailyPlanId = if (dailyPlans.isEmpty()) {
+            emptyMap()
+        } else {
+            PlanTaskRow.find { PlanTaskTable.dailyPlanId inList dailyPlans.map { it.id } }
+                .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
+                .groupBy { it.readValues[PlanTaskTable.dailyPlanId].value }
+        }
+        val subjectNames = subjectNamesOf(tasksByDailyPlanId.values.flatten())
+        val isManual = isManualPlanBoard(board.examDate)
+
+        WeeklyPlanResponse(
+            weekStart = weekStart.toString(),
+            weekEnd = weekEnd.toString(),
+            days = (0..6).map { offset ->
+                val date = weekStart.plusDays(offset.toLong())
+                val dailyPlanId = dailyPlanIdByDate[date]
+                DailyPlanResponse(
+                    dailyPlanId = dailyPlanId,
+                    planDate = date.toString(),
+                    tasks = dailyPlanId
+                        ?.let { tasksByDailyPlanId[it] }
+                        .orEmpty()
+                        .map { it.toResponse(boardId, isManual, it.subjectNameFrom(subjectNames)) }
+                )
+            }
         )
     }
 

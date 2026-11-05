@@ -29,12 +29,21 @@ import io.ktor.utils.io.ExperimentalKtorApi
 fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
     authenticate("auth-jwt") {
         get("") {
-            val boards = planBoardService.getAllBoards(call.userId())
+            val includeArchived = call.request.queryParameters["includeArchived"]?.toBooleanStrictOrNull() ?: false
+            val boards = planBoardService.getAllBoards(call.userId(), includeArchived)
             call.respond(HttpStatusCode.OK, boards)
         }.describe {
             tag("PlanBoard")
             summary = "플랜보드 목록 조회"
-            description = "본인 플랜보드 목록만 조회 가능"
+            description = "본인 플랜보드 목록만 조회 가능. 최근에 만든 보드가 앞에 온다 (클라이언트는 목록의 첫 항목을 현재 보드로 쓴다). " +
+                "기본으로 보관(isArchived=true)된 보드는 빠지고, includeArchived=true 면 함께 온다"
+            parameters {
+                query("includeArchived") {
+                    description = "보관한 보드도 포함할지 (기본 false)"
+                    required = false
+                    schema = jsonSchema<Boolean>()
+                }
+            }
             responses {
                 HttpStatusCode.OK {
                     description = "조회 성공"
@@ -74,7 +83,8 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     description = "인증되지 않음"
                 }
                 HttpStatusCode.BadRequest {
-                    description = "제목이 1~100자를 벗어남 (code=INVALID_TITLE), 날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠름 (code=INVALID_DATE_RANGE)"
+                    description = "제목이 1~100자를 벗어남 (code=INVALID_TITLE), 설명이 500자를 넘음 (code=INVALID_DESCRIPTION), " +
+                        "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠름 (code=INVALID_DATE_RANGE)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -91,7 +101,8 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
         }.describe {
             tag("PlanBoard")
             summary = "플랜보드 수정"
-            description = "title/startDate/endDate/examDate 중 전달된 필드만 수정 (전달하지 않거나 null 인 필드는 변경 없음). 본인 보드만 가능"
+            description = "title/description/startDate/endDate/examDate/isArchived 중 전달된 필드만 수정 (전달하지 않거나 null 인 필드는 변경 없음). " +
+                "description 에 빈 문자열을 보내면 설명이 지워진다. isArchived=true 면 보관(목록에서 빠짐), false 면 보관 해제. 본인 보드만 가능"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<PlanBoardUpdateRequest>()
@@ -105,7 +116,8 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID), 제목이 1~100자를 벗어남 (code=INVALID_TITLE), 날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠름 (code=INVALID_DATE_RANGE)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 제목이 1~100자를 벗어남 (code=INVALID_TITLE), 설명이 500자를 넘음 (code=INVALID_DESCRIPTION), " +
+                        "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠름 (code=INVALID_DATE_RANGE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
