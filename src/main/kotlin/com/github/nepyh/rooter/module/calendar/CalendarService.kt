@@ -19,9 +19,12 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
+import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.isManualPlanBoard
 import com.github.nepyh.rooter.module.planboard.subjectNameFrom
 import com.github.nepyh.rooter.module.planboard.subjectNamesOf
+import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
@@ -34,17 +37,35 @@ import java.time.temporal.ChronoUnit
 
 class CalendarService {
 
-    fun getRange(userId: Int, start: LocalDate, end: LocalDate): CalendarRangeResponse {
+    /** 보드 캘린더 경로의 소유권 확인. 없는 보드는 404, 남의 보드는 403 (플랜보드 모듈과 같은 규칙) */
+    private fun requireOwnedBoard(userId: Int, boardId: Int): PlanBoardRow {
+        val board = PlanBoardRow.findById(boardId) ?: throw PlanBoardNotFoundException()
+        if (board.user.id.value != userId) throw PlanBoardForbiddenException()
+        return board
+    }
+
+    /**
+     * [planBoardId] 를 주면 그 보드의 계획·시험만 집계한다 — 한 유저가 여러 보드를 가질 때 보드 하나의 캘린더를 보기 위한 경로
+     * (개인 일정은 사용자 단위라 보드와 무관하게 항상 포함). 보드 소유권은 여기서 확인한다.
+     */
+    fun getRange(userId: Int, start: LocalDate, end: LocalDate, planBoardId: Int? = null): CalendarRangeResponse {
         if (end.isBefore(start)) {
             throw CalendarValidationException.InvalidDateRangeException()
         }
 
         return transaction {
+            planBoardId?.let { requireOwnedBoard(userId, it) }
+            val boardFilter: Op<Boolean> = if (planBoardId == null) {
+                PlanBoardTable.userId eq userId
+            } else {
+                (PlanBoardTable.userId eq userId) and (PlanBoardTable.id eq planBoardId)
+            }
+
             // 기간별 예상 학습 시간 합계 — 여러 테이블을 조인한 집계라 DAO 로 표현할 수 없어 Table DSL 을 쓴다.
             val minutesByDate = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
                 .selectAll()
                 .where {
-                    (PlanBoardTable.userId eq userId) and
+                    boardFilter and
                         (DailyPlanTable.planDate greaterEq start) and
                         (DailyPlanTable.planDate lessEq end)
                 }
@@ -61,8 +82,13 @@ class CalendarService {
                 }
                 .toList()
 
+            val examFilter: Op<Boolean> = if (planBoardId == null) {
+                PlanBoardTable.userId eq userId
+            } else {
+                PlanBoardTable.id eq planBoardId
+            }
             val exams = PlanBoardRow.find {
-                (PlanBoardTable.userId eq userId) and
+                examFilter and
                     (PlanBoardTable.examDate.isNotNull()) and
                     (PlanBoardTable.examDate greaterEq start) and
                     (PlanBoardTable.examDate lessEq end)
@@ -86,11 +112,19 @@ class CalendarService {
         }
     }
 
-    fun getDaySummary(userId: Int, date: LocalDate): DailyCompletionResponse {
+    /** [planBoardId] 를 주면 그 보드의 할일만으로 달성률을 계산한다 (개인 일정은 항상 포함) */
+    fun getDaySummary(userId: Int, date: LocalDate, planBoardId: Int? = null): DailyCompletionResponse {
         return transaction {
+            planBoardId?.let { requireOwnedBoard(userId, it) }
+            val boardFilter: Op<Boolean> = if (planBoardId == null) {
+                PlanBoardTable.userId eq userId
+            } else {
+                (PlanBoardTable.userId eq userId) and (PlanBoardTable.id eq planBoardId)
+            }
+
             val rows = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
                 .selectAll()
-                .where { (PlanBoardTable.userId eq userId) and (DailyPlanTable.planDate eq date) }
+                .where { boardFilter and (DailyPlanTable.planDate eq date) }
                 .orderBy(PlanTaskTable.startTime)
                 .toList()
             val taskRows = rows.map { PlanTaskRow.wrapRow(it) }
