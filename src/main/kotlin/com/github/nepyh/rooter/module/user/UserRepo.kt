@@ -60,7 +60,8 @@ interface UserRepo {
 
     fun findUnavailableTimesByUserId(userId: Int): List<UnavailableTimeRow>
 
-    fun insertStudentProfile(
+    /** 학생 프로필 저장. 이미 있으면 그 행을 덮어쓴다 (유저당 1개, student_profiles.user_id unique) */
+    fun upsertStudentProfile(
         userId: Int,
         schoolId: String,
         grade: Int,
