@@ -39,7 +39,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | # | 마일스톤 | 진행 | 상태 |
 |---|---|---|---|
 | M1 | 플랜보드 코어 | 11/17 | doing |
-| M2 | 컨벤션·구조 정비 | 5/6 | doing |
+| M2 | 컨벤션·구조 정비 | 5/7 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 7/10 | doing |
 | M5 | 사용자 기능 | 7/12 | doing |
@@ -104,6 +104,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] blocked RB-014 planboard 네이밍 통일 (`plan_boards` → `planboards`) — `rooter-ddl` #10 open
 - [x] done RB-015 code 없이 나가던 에러 응답을 `ErrorResponse` 로 통일, 핸들러 try-catch 제거 — PR #172 (09-28)
 - [x] done RB-016 테스트 격리 — `CatalogServiceTest` 가 `chapters` 를 직접 만들지 않아 새 DB 에서 실패하던 것 수정 — PR #236 (10-04, develop)
+- [ ] doing RB-167 스키마 정규화 1단계 + 학생 프로필 중복 등록 버그 (#347 · rooter-ddl #48) — 3NF 점검 결과 데이터 이전 없이 되는 것만: `plan_tasks.is_completed`·`is_failed` 삭제(코드 미사용), `chat_turns.session_id` not null, `student_profiles.user_id` unique, `plan_subjects` 범위 단원·`school_textbook_adoptions` 과목을 교과서와 복합 FK. 프로필 `POST /users/{id}/profile` 은 다시 보내면 덮어쓰기(id 유지, 201 그대로 — 전에는 2행이 쌓여 `singleOrNull` 로 프로필 null). `./gradlew test` 454건 0 실패(3 skipped) · 로컬 DB 에 main 스키마 → 새 스키마 psqldef 적용, 재실행 차이 0, 어긋난 단원·과목·중복 프로필이 각각 DB 에서 막힘 확인 · **코드 먼저 머지 → 운영 DB 사전 확인 조회 전부 0 → rooter-ddl 머지·적용** (DB 를 좁히는 변경이라 평소와 반대). 남은 후보: `daily_feedback.daily_plan_id`(예전 행 정리 후 삭제), `level_test_attempts.reference_grade_label`, 퀴즈 4벌 통합
 
 ## M3. AI 기능 포팅 (ai-poc)
 
