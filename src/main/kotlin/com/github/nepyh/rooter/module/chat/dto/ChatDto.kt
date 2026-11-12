@@ -7,14 +7,14 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ChatMessageRequest(
     val message: String,
-    val sessionId: Int? = null // 없으면 이 날 계획으로 마지막에 대화한 세션, 그것도 없으면 새 세션 (#342)
+    val sessionId: Int? = null // 없으면 이 날 계획으로 마지막에 대화한 세션, 그것도 없으면 새 세션 (#342). 계획 없이 보낼 때(POST /chat/message)는 없으면 새 세션
 )
 
 @Serializable
 data class ChatTurnResponse(
     val id: Int,
     val sessionId: Int,
-    val dailyPlanId: Int, // 이 메시지로 보고 고친 날의 계획
+    val dailyPlanId: Int?, // 이 메시지로 보고 고친 날의 계획. 계획 없이 나눈 대화(POST /chat/message)면 null
     val role: String,
     val content: String,
     val feedback: ChatTurnFeedback? = null, // 챗봇 답변의 좋아요·싫어요. 사용자 메시지는 항상 null

@@ -5,6 +5,7 @@ import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.chat.dto.AiChatCurrentTask
 import com.github.nepyh.rooter.module.chat.dto.AiChatTask
 import com.github.nepyh.rooter.module.chat.dto.AiChatPostpone
+import com.github.nepyh.rooter.module.chat.dto.AiChatResult
 import com.github.nepyh.rooter.module.chat.dto.AiChatTurn
 import com.github.nepyh.rooter.module.chat.dto.ChatMessageResponse
 import com.github.nepyh.rooter.module.chat.dto.ChatTurnResponse
@@ -62,6 +63,13 @@ import java.util.Locale
 
 /** 한 번의 챗봇 호출에 함께 실어 보내는 최근 대화 턴 수. 너무 길면 프롬프트가 불필요하게 커진다. */
 private const val HISTORY_LIMIT = 10
+
+/** AI 호출이 실패했거나 응답을 못 읽었을 때의 답변 */
+internal const val LLM_FAILED_REPLY = "죄송해요, 지금은 답변을 드릴 수 없어요. 잠시 후 다시 시도해주세요."
+
+/** 계획 없이 대화할 때(#351) AI 가 계획을 바꾸려 했으면 대신 보여줄 답변 — 플랜보드가 없는 학생 / 있는 학생 */
+internal const val NO_PLAN_BOARD_REPLY = "아직 공부 계획이 없어서 계획을 바꿀 수는 없어요. 플랜보드에서 계획을 먼저 만들면 그 날 계획을 보면서 바꿔 드릴게요."
+internal const val NO_PLAN_OPEN_REPLY = "여기서는 계획을 바꿀 수 없어요. 플랜보드에서 바꿀 날짜의 계획을 열고 말씀해 주시면 계획을 보면서 바꿔 드릴게요."
 
 /** AI 가 plan_changed=true 라고 했지만 적용할 변경이 없었을 때 대신 보여줄 답변 */
 internal const val PLAN_NOT_APPLIED_REPLY = "계획을 바꾸려고 했는데 적용하지 못했어요. 오늘 계획은 그대로예요. 바꾸고 싶은 내용을 조금 더 자세히 말씀해 주세요."
@@ -201,9 +209,8 @@ class ChatService(
 
         return newSuspendedTransaction {
             if (result == null) {
-                val fallback = "죄송해요, 지금은 답변을 드릴 수 없어요. 잠시 후 다시 시도해주세요."
-                val saved = saveTurns(userId, context.sessionId, dailyPlanId, trimmed, fallback, aiTitle = null)
-                return@newSuspendedTransaction ChatMessageResponse(reply = fallback, planChanged = false).withTurns(saved)
+                val saved = saveTurns(userId, context.sessionId, dailyPlanId, trimmed, LLM_FAILED_REPLY, aiTitle = null)
+                return@newSuspendedTransaction ChatMessageResponse(reply = LLM_FAILED_REPLY, planChanged = false).withTurns(saved)
             }
 
             var updatedTasks: List<PlanTaskResponse>? = null
@@ -677,6 +684,52 @@ class ChatService(
         }
     }
 
+    /**
+     * 보고 있는 계획 없이 챗봇에게 메시지를 보낸다 (#351). 교과서 질문·잡담에만 답하고 계획은 바꾸지 않는다 —
+     * 계획을 바꿔 달라고 하면 AI 가 계획을 먼저 만들라고 안내한다. [sessionId] 세션에 이어 붙이고, 없으면 새 세션에 저장한다.
+     * 저장되는 대화의 dailyPlanId 는 null 이다.
+     */
+    suspend fun sendMessageWithoutPlan(userId: Int, message: String, sessionId: Int? = null): ChatMessageResponse {
+        val trimmed = message.trim()
+        if (trimmed.isBlank()) throw ChatValidationException.MessageRequiredException()
+
+        val context = newSuspendedTransaction {
+            val session = sessionId?.let { requireOwnedSession(userId, it) }
+            NoPlanContext(
+                hasPlanBoard = !PlanBoardTable.selectAll().where { PlanBoardTable.userId eq userId }.empty(),
+                sessionId = session?.id?.value,
+                needsSessionTitle = session?.title == null,
+                grade = StudentProfileRow.find { StudentProfileTable.user eq userId }.firstOrNull()?.grade ?: 2,
+                studyStyleSummary = userStudyStyle(userId).summary(),
+                history = session?.let { turnsOf(it.id.value) }.orEmpty()
+                    .map { AiChatTurn(role = it.role, content = it.content) }
+                    .takeLast(HISTORY_LIMIT)
+            )
+        }
+
+        val result = chatLlmClient.chatWithoutPlan(
+            grade = context.grade,
+            studyStyleSummary = context.studyStyleSummary,
+            today = todayText(todayInAppZone(clock)),
+            chatHistoryJson = json.encodeToString(context.history),
+            userMessage = trimmed,
+            hasPlanBoard = context.hasPlanBoard,
+            needsSessionTitle = context.needsSessionTitle
+        )
+        // 바꿀 계획이 없다. AI 가 계획을 바꾸려 했으면(프롬프트를 어기고 계획 필드를 채움) 답변도 "바꿨어요"일 수 있어
+        // 바꾸지 않았다는 고정 답변으로 바꾼다
+        val reply = when {
+            result == null -> LLM_FAILED_REPLY
+            result.triesToChangePlan() -> if (context.hasPlanBoard) NO_PLAN_OPEN_REPLY else NO_PLAN_BOARD_REPLY
+            else -> result.reply_message.trim().ifBlank { LLM_FAILED_REPLY }
+        }
+
+        return newSuspendedTransaction {
+            val saved = saveTurns(userId, context.sessionId, null, trimmed, reply, result?.session_title)
+            ChatMessageResponse(reply = reply, planChanged = false).withTurns(saved)
+        }
+    }
+
     /** 이 날 계획을 보고 나눈 대화 전체 (세션 상관없이, 순서대로). 세션별 대화는 [ChatSessionService.getSessionTurns] */
     suspend fun getHistory(userId: Int, dailyPlanId: Int): List<ChatTurnResponse> = newSuspendedTransaction {
         requireOwnedDailyPlan(userId, dailyPlanId)
@@ -686,6 +739,21 @@ class ChatService(
             .map { it.toResponse() }
     }
 }
+
+/** 계획 없이 보내는 메시지(#351)에 AI 로 넘기는 맥락 */
+private class NoPlanContext(
+    val hasPlanBoard: Boolean,
+    val sessionId: Int?,
+    val needsSessionTitle: Boolean,
+    val grade: Int,
+    val studyStyleSummary: String,
+    val history: List<AiChatTurn>
+)
+
+/** 계획을 바꾸려는 응답인지 — 계획 없이 대화할 때(#351)는 반영할 수 없다 */
+private fun AiChatResult.triesToChangePlan(): Boolean =
+    plan_changed || plan_update != null || postpone?.task_names?.isNotEmpty() == true ||
+        edits.isNotEmpty() || other_busy_days.isNotEmpty()
 
 private fun ChatMessageResponse.withTurns(saved: SavedTurns) = copy(
     sessionId = saved.sessionId,

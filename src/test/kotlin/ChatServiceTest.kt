@@ -11,6 +11,9 @@ import com.github.nepyh.rooter.module.chat.model.ChatTurnFeedback
 import io.kotest.assertions.throwables.shouldThrow
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import com.github.nepyh.rooter.module.chat.CLARIFY_SUFFIX
+import com.github.nepyh.rooter.module.chat.LLM_FAILED_REPLY
+import com.github.nepyh.rooter.module.chat.NO_PLAN_BOARD_REPLY
+import com.github.nepyh.rooter.module.chat.NO_PLAN_OPEN_REPLY
 import com.github.nepyh.rooter.module.chat.PLAN_NOT_APPLIED_REPLY
 import com.github.nepyh.rooter.module.chat.POSTPONE_NOTHING_REPLY
 import com.github.nepyh.rooter.module.chat.dto.AiChatBusyDay
@@ -1133,6 +1136,103 @@ class ChatServiceTest : StringSpec({
         llm.lastChatHistoryJson!! shouldNotContain "질문3"
     }
 
+    // ---- 계획 없이 대화 (#351) ----
+
+    "계획이 없어도 대화할 수 있다 — 대화는 dailyPlanId 없이 세션에 쌓인다" {
+        val userId = seedOtherUser() // 플랜보드·계획이 하나도 없는 학생
+        val llm = FakeChatLlmClient(null)
+        llm.noPlanResult = plainReply("광합성은 식물이 빛으로 양분을 만드는 과정이에요.", title = "광합성 개념 질문")
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+
+        val first = service.sendMessageWithoutPlan(userId, "  광합성이 뭐야?  ")
+
+        first.reply shouldBe "광합성은 식물이 빛으로 양분을 만드는 과정이에요."
+        first.planChanged shouldBe false
+        first.updatedTasks shouldBe null
+        first.movedTasks shouldBe null
+        first.updatedDays shouldBe null
+        first.sessionTitle shouldBe "광합성 개념 질문"
+        llm.lastNoPlanNeedsSessionTitle shouldBe true
+        llm.lastNoPlanHistoryJson shouldBe "[]"
+        llm.lastNoPlanUserMessage shouldBe "광합성이 뭐야?"
+        llm.lastNoPlanHasPlanBoard shouldBe false
+
+        llm.noPlanResult = plainReply("엽록체에서 일어나요.", title = "무시되는 제목")
+        val second = service.sendMessageWithoutPlan(userId, "어디서 일어나?", first.sessionId)
+
+        second.sessionId shouldBe first.sessionId
+        second.sessionTitle shouldBe "광합성 개념 질문"
+        llm.lastNoPlanNeedsSessionTitle shouldBe false
+        llm.lastNoPlanHistoryJson!! shouldContain "광합성이 뭐야?"
+        val turns = ChatSessionService().getSessionTurns(userId, first.sessionId!!)
+        turns.map { it.role to it.content } shouldBe listOf(
+            "user" to "광합성이 뭐야?", "assistant" to "광합성은 식물이 빛으로 양분을 만드는 과정이에요.",
+            "user" to "어디서 일어나?", "assistant" to "엽록체에서 일어나요."
+        )
+        turns.map { it.dailyPlanId }.distinct() shouldBe listOf(null)
+        ChatSessionService().listSessions(userId).map { it.title } shouldBe listOf("광합성 개념 질문")
+    }
+
+    "계획 없이 대화할 때 AI 가 계획을 바꾸려 하면 바꿨다는 답 대신 플랜보드 유무에 맞는 안내로 바꾼다" {
+        val noBoardUserId = seedOtherUser()
+        val llm = FakeChatLlmClient(null)
+        llm.noPlanResult = AiChatResult(
+            reply_message = "수학을 내일로 옮겼어요", plan_changed = false,
+            postpone = AiChatPostpone(task_names = listOf("수학"))
+        )
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+
+        val noBoard = service.sendMessageWithoutPlan(noBoardUserId, "수학 내일로 미뤄줘")
+        noBoard.reply shouldBe NO_PLAN_BOARD_REPLY
+        noBoard.planChanged shouldBe false
+
+        val (boardUserId, _) = seedDailyPlan()
+        llm.noPlanResult = AiChatResult(reply_message = "과학 추가했어요", edits = listOf(AiChatEdit("add", "과학", minutes = 30)))
+        service.sendMessageWithoutPlan(boardUserId, "과학 추가해줘").reply shouldBe NO_PLAN_OPEN_REPLY
+        llm.lastNoPlanHasPlanBoard shouldBe true
+
+        llm.noPlanResult = AiChatResult(reply_message = "바꿨어요", plan_changed = true)
+        service.sendMessageWithoutPlan(boardUserId, "줄여줘").reply shouldBe NO_PLAN_OPEN_REPLY
+        // 저장되는 답변도 안내 문구다
+        ChatSessionService().getSessionTurns(noBoardUserId, noBoard.sessionId!!).last().content shouldBe NO_PLAN_BOARD_REPLY
+    }
+
+    "계획 없이 나눈 대화도 세션 주인만 좋아요·삭제할 수 있다" {
+        val userId = seedOtherUser()
+        val llm = FakeChatLlmClient(null).apply { noPlanResult = plainReply("네") }
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessageWithoutPlan(userId, "안녕")
+        val (planOwnerId, _) = seedDailyPlan()
+        val sessions = ChatSessionService()
+
+        sessions.setFeedback(userId, response.assistantTurnId!!, ChatTurnFeedback.LIKE).feedback shouldBe ChatTurnFeedback.LIKE
+        shouldThrow<ChatTurnNotFoundException> { sessions.setFeedback(planOwnerId, response.assistantTurnId!!, ChatTurnFeedback.LIKE) }
+        shouldThrow<ChatTurnNotFoundException> { sessions.deleteTurn(planOwnerId, response.userTurnId!!) }
+
+        sessions.deleteTurn(userId, response.userTurnId!!) shouldBe listOf(response.userTurnId, response.assistantTurnId)
+        sessions.getSessionTurns(userId, response.sessionId!!) shouldBe emptyList()
+    }
+
+    "계획 없이 보낼 때: 계획을 보며 나눈 세션에도 이어지고, AI 가 실패하면 안내 답변, 빈 메시지·남의 세션은 거절" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val llm = FakeChatLlmClient(plainReply("계획 보며 답"))
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+        val withPlan = service.sendMessage(userId, dailyPlanId, "오늘 뭐 해?")
+
+        val failed = service.sendMessageWithoutPlan(userId, "광합성이 뭐야?", withPlan.sessionId)
+
+        failed.reply shouldBe LLM_FAILED_REPLY
+        failed.sessionId shouldBe withPlan.sessionId
+        llm.lastNoPlanHistoryJson!! shouldContain "오늘 뭐 해?"
+        ChatSessionService().getSessionTurns(userId, withPlan.sessionId!!).map { it.dailyPlanId } shouldBe
+            listOf(dailyPlanId, dailyPlanId, null, null)
+        // 날짜별 이력에는 그 날 계획을 보며 나눈 대화만
+        service.getHistory(userId, dailyPlanId).map { it.content } shouldBe listOf("오늘 뭐 해?", "계획 보며 답")
+
+        shouldThrow<ChatValidationException.MessageRequiredException> { service.sendMessageWithoutPlan(userId, "   ") }
+        val othersSession = ChatSessionService().createSession(seedOtherUser())
+        shouldThrow<ChatSessionNotFoundException> { service.sendMessageWithoutPlan(userId, "안녕", othersSession.id) }
+    }
+
     "세션을 지우면 그 대화도 지워지고 계획은 그대로다" {
         val (userId, dailyPlanId) = seedDailyPlan()
         val taskId = seedTask(dailyPlanId, "수학", LocalTime.of(20, 0), LocalTime.of(21, 0), completed = false)
@@ -1188,6 +1288,11 @@ private class FakeChatLlmClient(var result: AiChatResult?) : ChatLlmClient(dummy
     var lastPlanDays: String? = null
     var lastChatHistoryJson: String? = null
     var lastNeedsSessionTitle: Boolean? = null
+    var noPlanResult: AiChatResult? = null // 계획 없이 대화 (#351)
+    var lastNoPlanHistoryJson: String? = null
+    var lastNoPlanNeedsSessionTitle: Boolean? = null
+    var lastNoPlanUserMessage: String? = null
+    var lastNoPlanHasPlanBoard: Boolean? = null
 
     override suspend fun adjustPlan(
         grade: Int,
@@ -1211,6 +1316,22 @@ private class FakeChatLlmClient(var result: AiChatResult?) : ChatLlmClient(dummy
         lastCurrentTasksJson = currentTasksJson
         lastPlanBoardSummary = planBoardSummary
         return result
+    }
+
+    override suspend fun chatWithoutPlan(
+        grade: Int,
+        studyStyleSummary: String,
+        today: String,
+        chatHistoryJson: String,
+        userMessage: String,
+        hasPlanBoard: Boolean,
+        needsSessionTitle: Boolean
+    ): AiChatResult? {
+        lastNoPlanHasPlanBoard = hasPlanBoard
+        lastNoPlanHistoryJson = chatHistoryJson
+        lastNoPlanNeedsSessionTitle = needsSessionTitle
+        lastNoPlanUserMessage = userMessage
+        return noPlanResult
     }
 }
 

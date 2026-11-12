@@ -9,8 +9,6 @@ import com.github.nepyh.rooter.module.chat.model.ChatSessionTable
 import com.github.nepyh.rooter.module.chat.model.ChatTurnFeedback
 import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
-import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
-import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
@@ -102,11 +100,11 @@ class ChatSessionService {
             .firstOrNull()
     }
 
-    /** 본인 메시지. 소유는 그 메시지가 본 날 계획의 플랜보드 주인으로 판단한다. 트랜잭션 안에서 부른다 */
+    /** 본인 메시지. 소유는 그 메시지가 속한 세션의 주인으로 판단한다 (계획 없이 나눈 대화(#351)도 같은 기준). 트랜잭션 안에서 부른다 */
     private fun requireOwnedTurn(userId: Int, turnId: Int): ChatTurnRow {
-        val owned = (ChatTurnTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+        val owned = (ChatTurnTable innerJoin ChatSessionTable)
             .select(ChatTurnTable.id)
-            .where { (ChatTurnTable.id eq turnId) and (PlanBoardTable.userId eq userId) }
+            .where { (ChatTurnTable.id eq turnId) and (ChatSessionTable.userId eq userId) }
             .any()
         if (!owned) throw ChatTurnNotFoundException()
         return ChatTurnRow[turnId]
