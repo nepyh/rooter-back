@@ -2,7 +2,10 @@ package com.github.nepyh.rooter.module.chat.api
 
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
+import com.github.nepyh.rooter.module.chat.ChatService
 import com.github.nepyh.rooter.module.chat.ChatSessionService
+import com.github.nepyh.rooter.module.chat.dto.ChatMessageRequest
+import com.github.nepyh.rooter.module.chat.dto.ChatMessageResponse
 import com.github.nepyh.rooter.module.chat.dto.ChatSessionResponse
 import com.github.nepyh.rooter.module.chat.dto.ChatTurnFeedbackRequest
 import com.github.nepyh.rooter.module.chat.dto.ChatTurnResponse
@@ -22,10 +25,50 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.utils.io.ExperimentalKtorApi
 
-/** 챗봇 세션·메시지 관리 (#342). 메시지 보내기는 POST /daily-plans/{dailyPlanId}/chat/message */
+/**
+ * 챗봇 세션·메시지 관리 (#342). 계획을 보며 보내는 메시지는 POST /daily-plans/{dailyPlanId}/chat/message,
+ * 계획 없이 보내는 메시지는 POST /chat/message (#351)
+ */
 @OptIn(ExperimentalKtorApi::class)
-fun ChatSessionApi(chatSessionService: ChatSessionService) = ApiRoute("chat") {
+fun ChatSessionApi(chatSessionService: ChatSessionService, chatService: ChatService) = ApiRoute("chat") {
     authenticate("auth-jwt") {
+        post("message") {
+            val request = call.receive<ChatMessageRequest>()
+            call.respond(HttpStatusCode.OK, chatService.sendMessageWithoutPlan(call.userId(), request.message, request.sessionId))
+        }.describe {
+            tag("Chat")
+            summary = "챗봇에게 메시지 보내기 (계획 없이)"
+            description = "보고 있는 계획이 없을 때 챗봇과 대화한다 (#351). 교과서·수업 내용 질문과 잡담에 답하고, 계획은 바꾸지 않는다 — " +
+                "할일 미루기·추가나 일정 반영을 부탁하면 플랜보드에서 계획을 먼저 만들라고 안내한다. 계획이 있으면 POST /daily-plans/{dailyPlanId}/chat/message 를 쓴다. " +
+                "body 는 그 API 와 같다. sessionId 세션에 이어 붙이고(AI 는 그 세션 대화만 기억), 생략하면 새 세션에 저장한다. " +
+                "응답도 같은 형태이고 planChanged 는 항상 false, updatedTasks·movedTasks·updatedDays 는 null. 저장된 대화의 dailyPlanId 는 null"
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<ChatMessageRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "처리 성공"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<ChatMessageResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "메시지가 비어있음 (code=CHAT_001), 요청 형식이 틀림 (code=INVALID_REQUEST_BODY)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않거나 본인 소유가 아닌 세션 (code=CHAT_SESSION_NOT_FOUND)"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
         get("sessions") {
             call.respond(HttpStatusCode.OK, chatSessionService.listSessions(call.userId()))
         }.describe {
@@ -54,7 +97,7 @@ fun ChatSessionApi(chatSessionService: ChatSessionService) = ApiRoute("chat") {
             tag("Chat")
             summary = "새 챗봇 세션 만들기"
             description = "빈 대화로 시작하는 새 세션. 챗봇은 이 세션의 대화만 기억한다. 요청 body 없음. " +
-                "만든 세션 id 를 POST /daily-plans/{dailyPlanId}/chat/message 의 sessionId 로 보내면 이 세션에 쌓인다 (title 은 첫 메시지에서 정해짐)"
+                "만든 세션 id 를 POST /daily-plans/{dailyPlanId}/chat/message (계획 없이는 POST /chat/message) 의 sessionId 로 보내면 이 세션에 쌓인다 (title 은 첫 메시지에서 정해짐)"
             responses {
                 HttpStatusCode.Created {
                     description = "생성 성공 (title 은 null)"
@@ -135,7 +178,7 @@ fun ChatSessionApi(chatSessionService: ChatSessionService) = ApiRoute("chat") {
             tag("Chat")
             summary = "챗봇 세션 대화 조회"
             description = "세션의 대화를 시간순으로. 항목의 id 로 좋아요·싫어요(챗봇 답변만)·삭제를 하고, " +
-                "dailyPlanId 는 그 메시지로 어느 날 계획을 보고 고쳤는지다. feedback 은 챗봇 답변의 LIKE / DISLIKE / null. 본인 세션만"
+                "dailyPlanId 는 그 메시지로 어느 날 계획을 보고 고쳤는지다 (계획 없이 나눈 대화면 null). feedback 은 챗봇 답변의 LIKE / DISLIKE / null. 본인 세션만"
             parameters {
                 path("sessionId") {
                     description = "세션 ID"

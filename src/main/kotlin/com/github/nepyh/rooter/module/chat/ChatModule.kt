@@ -12,5 +12,5 @@ fun ChatModule(appConfig: AppConfig) = module {
     single { ChatSessionService() }
 
     single(named("chatApi")) { ChatApi(get()) }
-    single(named("chatSessionApi")) { ChatSessionApi(get()) }
+    single(named("chatSessionApi")) { ChatSessionApi(get(), get()) }
 }
