@@ -101,7 +101,8 @@ class ChatSessionService {
      */
     private fun neighborOf(turn: ChatTurnRow, after: Boolean): ChatTurnRow? {
         val sameConversation: Op<Boolean> = turn.sessionKey?.let { ChatTurnTable.sessionId eq it }
-            ?: ((ChatTurnTable.dailyPlanId eq turn.dailyPlanKey) and ChatTurnTable.sessionId.isNull())
+            ?: turn.dailyPlanKey?.let { (ChatTurnTable.dailyPlanId eq it) and ChatTurnTable.sessionId.isNull() }
+            ?: return null
         val position = if (after) ChatTurnTable.id greater turn.id.value else ChatTurnTable.id less turn.id.value
         return ChatTurnRow.find { sameConversation and position }
             .orderBy(ChatTurnTable.id to if (after) SortOrder.ASC else SortOrder.DESC)
@@ -109,13 +110,18 @@ class ChatSessionService {
             .firstOrNull()
     }
 
-    /** 본인 메시지. 소유는 그 메시지가 본 날 계획의 플랜보드 주인으로 판단한다 (세션 없는 예전 대화도 같은 기준). 트랜잭션 안에서 부른다 */
+    /**
+     * 본인 메시지. 세션이 있으면 세션 주인으로, 세션 없는 예전 대화면 그 메시지가 본 날 계획의 플랜보드 주인으로 판단한다.
+     * 계획 없이 나눈 대화(#351)는 항상 세션이 있다. 트랜잭션 안에서 부른다
+     */
     private fun requireOwnedTurn(userId: Int, turnId: Int): ChatTurnRow {
-        val owned = (ChatTurnTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
-            .select(ChatTurnTable.id)
-            .where { (ChatTurnTable.id eq turnId) and (PlanBoardTable.userId eq userId) }
-            .any()
+        val turn = ChatTurnRow.findById(turnId) ?: throw ChatTurnNotFoundException()
+        val owned = turn.sessionKey?.let { ChatSessionRow[it].user.id.value == userId }
+            ?: (ChatTurnTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+                .select(ChatTurnTable.id)
+                .where { (ChatTurnTable.id eq turnId) and (PlanBoardTable.userId eq userId) }
+                .any()
         if (!owned) throw ChatTurnNotFoundException()
-        return ChatTurnRow[turnId]
+        return turn
     }
 }

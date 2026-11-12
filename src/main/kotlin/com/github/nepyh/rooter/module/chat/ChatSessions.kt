@@ -55,12 +55,13 @@ internal class SavedTurns(val sessionId: Int, val sessionTitle: String?, val use
 
 /**
  * 질문·답 한 쌍을 세션에 저장한다. 세션이 없으면([sessionId] null) 새로 만들고, 제목이 아직 없으면 정한다.
+ * 계획 없이 나눈 대화면 [dailyPlanId] 가 null 이다.
  * 세션의 updated_at 은 마지막 대화 시각으로 올린다. 트랜잭션 안에서 부른다.
  */
 internal fun saveTurns(
     userId: Int,
     sessionId: Int?,
-    dailyPlanId: Int,
+    dailyPlanId: Int?,
     userMessage: String,
     reply: String,
     aiTitle: String?
@@ -75,7 +76,7 @@ internal fun saveTurns(
     if (session.title == null) session.title = sessionTitleOf(aiTitle, userMessage)
     session.updatedAt = now
 
-    val dailyPlan = DailyPlanRow[dailyPlanId]
+    val dailyPlan = dailyPlanId?.let { DailyPlanRow[it] }
     val userTurn = ChatTurnRow.new {
         this.dailyPlan = dailyPlan
         this.session = session
@@ -103,7 +104,7 @@ internal fun ChatSessionRow.toResponse() = ChatSessionResponse(
 internal fun ChatTurnRow.toResponse() = ChatTurnResponse(
     id = id.value,
     sessionId = sessionKey?.value,
-    dailyPlanId = dailyPlanKey.value,
+    dailyPlanId = dailyPlanKey?.value,
     role = role,
     content = content,
     feedback = feedback,
