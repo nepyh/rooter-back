@@ -307,7 +307,7 @@ class UserService(
             throw UserValidationException.WrongSchoolIdException()
         }
 
-        val row = userRepo.insertStudentProfile(
+        val row = userRepo.upsertStudentProfile(
             userId = userId,
             schoolId = request.schoolId,
             grade = request.grade,

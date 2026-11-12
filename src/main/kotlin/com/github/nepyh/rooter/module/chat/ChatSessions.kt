@@ -102,7 +102,7 @@ internal fun ChatSessionRow.toResponse() = ChatSessionResponse(
 
 internal fun ChatTurnRow.toResponse() = ChatTurnResponse(
     id = id.value,
-    sessionId = sessionKey?.value,
+    sessionId = sessionKey.value,
     dailyPlanId = dailyPlanKey.value,
     role = role,
     content = content,

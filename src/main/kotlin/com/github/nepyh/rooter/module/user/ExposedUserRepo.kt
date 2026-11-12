@@ -181,8 +181,10 @@ class ExposedUserRepo : UserRepo {
     override fun findStudentProfileByUserId(userId: Int): StudentProfileRow? {
         return transaction {
             val user = UserRow.findById(userId) ?: return@transaction null
+            // 유저당 1개. unique 제약 전에 중복으로 쌓인 행이 있으면 마지막에 저장한 것을 쓴다
             StudentProfileRow.find { StudentProfileTable.user eq user.id }
-                .singleOrNull()
+                .orderBy(StudentProfileTable.id to SortOrder.DESC)
+                .firstOrNull()
         }
     }
 
@@ -194,7 +196,7 @@ class ExposedUserRepo : UserRepo {
         }
     }
 
-    override fun insertStudentProfile(
+    override fun upsertStudentProfile(
         userId: Int,
         schoolId: String,
         grade: Int,
@@ -202,8 +204,10 @@ class ExposedUserRepo : UserRepo {
     ): StudentProfileRow {
         return transaction {
             val user = UserRow.findById(userId) ?: throw UserNotFoundException()
-            StudentProfileRow.new {
-                this.user = user
+            val existing = StudentProfileRow.find { StudentProfileTable.user eq user.id }
+                .orderBy(StudentProfileTable.id to SortOrder.DESC)
+                .firstOrNull()
+            (existing ?: StudentProfileRow.new { this.user = user }).apply {
                 this.schoolId = schoolId
                 this.grade = grade
                 this.classNumber = classNumber
