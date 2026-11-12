@@ -75,11 +75,7 @@ open class ChatLlmClient(private val appConfig: AppConfig) {
             "USER_MESSAGE" to userMessage,
             "SESSION_TITLE_NEEDED" to if (needsSessionTitle) "예" else "아니오"
         )
-
-        val content = requestChatCompletion(prompt) ?: return null
-        return runCatching { json.decodeFromString<AiChatResult>(content) }
-            .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
-            .getOrNull()
+        return requestChatResult(prompt)
     }
 
     /**
@@ -92,10 +88,16 @@ open class ChatLlmClient(private val appConfig: AppConfig) {
         today: String,
         chatHistoryJson: String,
         userMessage: String,
+        hasPlanBoard: Boolean,
         needsSessionTitle: Boolean = false
     ): AiChatResult? {
         val prompt = PromptLoader.load(
             "prompts/chat-no-plan.md",
+            "PLAN_STATUS" to if (hasPlanBoard) {
+                "플랜보드 있음 — 공부 계획은 있지만 지금 보고 있는 날짜 계획은 없다"
+            } else {
+                "플랜보드 없음 — 아직 만든 공부 계획이 없다"
+            },
             "GRADE" to grade.toString(),
             "STUDY_STYLE_SUMMARY" to studyStyleSummary,
             "TODAY" to today,
@@ -103,7 +105,11 @@ open class ChatLlmClient(private val appConfig: AppConfig) {
             "USER_MESSAGE" to userMessage,
             "SESSION_TITLE_NEEDED" to if (needsSessionTitle) "예" else "아니오"
         )
+        return requestChatResult(prompt)
+    }
 
+    /** 프롬프트를 보내고 응답을 [AiChatResult] 로 읽는다. 호출 실패·JSON 파싱 실패면 null */
+    private suspend fun requestChatResult(prompt: String): AiChatResult? {
         val content = requestChatCompletion(prompt) ?: return null
         return runCatching { json.decodeFromString<AiChatResult>(content) }
             .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
