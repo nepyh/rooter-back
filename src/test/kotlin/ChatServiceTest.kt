@@ -522,6 +522,29 @@ class ChatServiceTest : StringSpec({
         )
     }
 
+    "되묻기의 답에 AI 가 또 되물으면 같이 채운 미루기·고치기가 있어도 반영하지 않고 다시 묻는다" {
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        val conceptId = seedTask(dailyPlanId, "개념 정리", LocalTime.of(19, 0), LocalTime.of(20, 0), completed = false)
+        val llm = FakeChatLlmClient(AiChatResult(reply_message = "어떤 걸 할까요?", needs_clarification = true))
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+        service.sendMessage(userId, dailyPlanId, "일정을 미뤄주고 과학 일정 추가해줘")
+
+        llm.result = AiChatResult(
+            reply_message = "미루기만 할까요, 추가만 할까요?",
+            needs_clarification = true,
+            postpone = AiChatPostpone(task_names = listOf("개념 정리")),
+            edits = listOf(AiChatEdit("add", "과학 개념 정리", minutes = 30))
+        )
+        val response = service.sendMessage(userId, dailyPlanId, "음 잘 모르겠어")
+
+        response.planChanged shouldBe false
+        response.reply shouldBe "미루기만 할까요, 추가만 할까요? $CLARIFY_SUFFIX"
+        transaction(db) {
+            PlanTaskRow[conceptId].dailyPlan.id.value shouldBe dailyPlanId
+            PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.map { it.taskName } shouldBe listOf("개념 정리")
+        }
+    }
+
     // ---- 할일 직접 편집 (#306) ----
 
     fun editLlm(vararg edits: AiChatEdit) = FakeChatLlmClient(AiChatResult(reply_message = "바꿀게요", plan_changed = true, edits = edits.toList()))
