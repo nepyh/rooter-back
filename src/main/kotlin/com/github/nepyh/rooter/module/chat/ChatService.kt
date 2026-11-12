@@ -130,11 +130,11 @@ class ChatService(
         val answeringClarification = context.history.lastOrNull()?.let { it.role == "assistant" && it.content.endsWith(CLARIFY_SUFFIX) } == true
 
         // 요청이 애매하면 계획은 건드리지 않고 되묻는다. 미루기와 할일 고치기가 한 메시지에 섞였으면 (예전엔 미루기만 하고
-        // 고치기는 버려졌다) AI 가 되묻지 않았어도 서버가 무엇을 할지 묻는다. 둘 다 하라고 답하면 아래에서 둘 다 반영한다
+        // 고치기는 버려졌다) AI 가 되묻지 않았어도 서버가 무엇을 할지 묻는다. 둘 다 하라고 답하면 아래에서 둘 다 반영한다.
+        // AI 가 되물으면 postpone·edits 를 같이 채웠더라도 (되묻기의 답이어도) 학생이 확인하지 않은 변경이라 반영하지 않는다
         val clarification = when {
             result == null -> null
-            result.needs_clarification && !(answeringClarification && (postpone != null || edits.isNotEmpty())) ->
-                result.reply_message.trim().ifBlank { CLARIFY_FALLBACK }
+            result.needs_clarification -> result.reply_message.trim().ifBlank { CLARIFY_FALLBACK }
             postpone != null && edits.isNotEmpty() && !answeringClarification -> postponeAndEditQuestion(postpone, edits)
             else -> null
         }
