@@ -854,7 +854,8 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
         }.describe {
             tag("User")
             summary = "학생 프로필 생성"
-            description = "본인 정보만 등록 가능"
+            description = "본인 정보만 등록 가능. 유저당 프로필은 1개라, 이미 있으면 새로 만들지 않고 그 프로필을 덮어쓴다 " +
+                "(응답 id 는 그대로, 상태 코드는 똑같이 201). 학교·학년·반을 바꿀 때도 이걸로 다시 보내면 된다"
             parameters {
                 path("id") {
                     description = "유저 ID"

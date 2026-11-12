@@ -13,11 +13,10 @@ import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
 /**
  * 챗봇 대화 한 턴. daily_plan_id 는 그 메시지로 어느 날 계획을 보고 고쳤는지 — 계획 없이 나눈 대화면 null (#351),
  * session_id 는 어느 대화에 속하는지 (#342).
- * session_id 는 기존 대화를 세션으로 옮기는 동안만 null 이 될 수 있다 (rooter-ddl 에서 옮긴 뒤 not null 로 바꾼다).
  */
 object ChatTurnTable : IntIdTable("chat_turns") {
     val dailyPlanId = reference("daily_plan_id", DailyPlanTable).nullable()
-    val sessionId = reference("session_id", ChatSessionTable, onDelete = ReferenceOption.CASCADE).nullable()
+    val sessionId = reference("session_id", ChatSessionTable, onDelete = ReferenceOption.CASCADE)
     val role = varchar("role", 10) // "user" | "assistant"
     val content = text("content")
     val feedback = enumerationByName("feedback", 10, ChatTurnFeedback::class).nullable() // 챗봇 답변에만
@@ -28,7 +27,7 @@ class ChatTurnRow(id: EntityID<Int>) : IntEntity(id) {
     companion object : IntEntityClass<ChatTurnRow>(ChatTurnTable)
 
     var dailyPlan by DailyPlanRow optionalReferencedOn ChatTurnTable.dailyPlanId
-    var session by ChatSessionRow optionalReferencedOn ChatTurnTable.sessionId
+    var session by ChatSessionRow referencedOn ChatTurnTable.sessionId
     val dailyPlanKey by ChatTurnTable.dailyPlanId // 조회 없이 id 만 쓸 때
     val sessionKey by ChatTurnTable.sessionId
     var role by ChatTurnTable.role

@@ -74,6 +74,15 @@ internal const val NO_PLAN_OPEN_REPLY = "여기서는 계획을 바꿀 수 없�
 /** AI 가 plan_changed=true 라고 했지만 적용할 변경이 없었을 때 대신 보여줄 답변 */
 internal const val PLAN_NOT_APPLIED_REPLY = "계획을 바꾸려고 했는데 적용하지 못했어요. 오늘 계획은 그대로예요. 바꾸고 싶은 내용을 조금 더 자세히 말씀해 주세요."
 
+/**
+ * 되묻는 답변의 마지막 문장. 다음 메시지가 그 답인지는 바로 앞 챗봇 답변이 이 문장으로 끝나는지로 판단한다
+ * (대화에 따로 표시 컬럼을 두지 않으려고). 바꾸면 이미 저장된 되묻기를 알아보지 못하니 그대로 둔다
+ */
+internal const val CLARIFY_SUFFIX = "다시 말씀해 주시면 그대로 반영할게요."
+
+/** AI 가 되묻겠다고 하고 질문을 비워 보냈을 때 */
+internal const val CLARIFY_FALLBACK = "어떻게 바꿔 드리면 될지 조금 더 자세히 알려 주세요."
+
 class ChatService(
     private val chatLlmClient: ChatLlmClient,
     private val schoolDataFetcher: SchoolDataFetcher,
@@ -99,103 +108,7 @@ class ChatService(
         val trimmed = message.trim()
         if (trimmed.isBlank()) throw ChatValidationException.MessageRequiredException()
 
-        val context = newSuspendedTransaction {
-            val dailyPlanRow = requireOwnedDailyPlan(userId, dailyPlanId)
-            val session = sessionToContinue(userId, dailyPlanId, sessionId)
-            val planDate = dailyPlanRow.planDate
-            val board = dailyPlanRow.planBoard
-
-            // 이미 완료·실패한 태스크는 재조정 대상이 아니다 — AI 에는 대기 태스크만 보내고,
-            // 완료·실패 태스크의 시간대는 재배치할 때 막아둔다.
-            val (completedTasks, pendingTasks) = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
-                .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
-                .partition { it.status != PlanTaskStatus.PENDING }
-
-            val profileRow = StudentProfileRow.find { StudentProfileTable.user eq userId }
-                .firstOrNull()
-            val grade = profileRow?.grade ?: 2
-            val schoolId = profileRow?.schoolId
-            val classNumber = profileRow?.classNumber
-
-            // 숫자(문항1=2)가 아니라 학생이 고른 보기 문구로 넘겨야 AI 가 뜻을 안다
-            val studyStyleSummary = userStudyStyle(userId).summary()
-
-            // 할일 직접 편집(edits)용 — 할일 과목, 퀴즈 진행·확정 여부, 플랜보드 과목·학습 범위, 같은 날 다른 보드의 할일
-            val subjectNames = subjectNamesOf(pendingTasks)
-            val quizState = quizStateOf(pendingTasks.map { it.id.value })
-            val planSubjects = planSubjectsOf(board.id.value)
-            val otherBoardRanges = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
-                .selectAll()
-                .where { (PlanBoardTable.userId eq userId) and (DailyPlanTable.planDate eq planDate) and (DailyPlanTable.id neq dailyPlanId) }
-                .map { PlanTaskScheduler.toMinutes(it[PlanTaskTable.startTime]) to PlanTaskScheduler.toMinutes(it[PlanTaskTable.endTime]) }
-
-            // 플랜보드 기간 전체 (#337) — AI 가 다른 날 할일도 보고 고칠 수 있게
-            val days = loadPlanDays(userId, board.id.value, board.startDate, board.endDate)
-            val today = todayInAppZone(clock)
-            val editablePendingIds = days.values
-                .filter { it.date == planDate || isEditableDay(it.date, today, board.endDate) }
-                .flatMap { day -> day.pendingTasks.map { it.id } }
-
-            // 새 세션은 빈 대화로 시작한다 — 다른 세션 대화는 AI 에 넣지 않는다 (#342)
-            val history = session?.let { turnsOf(it.id.value) }.orEmpty()
-                .map { AiChatTurn(role = it.role, content = it.content) }
-                .takeLast(HISTORY_LIMIT)
-
-            ChatContext(
-                planDate = planDate.toString(),
-                dayOfWeekLabel = planDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.KOREAN),
-                pendingTasks = pendingTasks.map {
-                    AiChatCurrentTask(
-                        it.taskName, it.estimatedMinutes, it.startTime.toString(), it.endTime.toString(),
-                        can_postpone = !postponedFromPreviousDay(it.postponedFromDate, planDate),
-                        subject_name = it.subjectNameFrom(subjectNames)
-                    )
-                },
-                editable = pendingTasks.map {
-                    val state = quizState[it.id.value]
-                    EditableTask(
-                        id = it.id.value,
-                        name = it.taskName,
-                        start = PlanTaskScheduler.toMinutes(it.startTime),
-                        end = PlanTaskScheduler.toMinutes(it.endTime),
-                        subjectId = it.subjectId?.value,
-                        quizStarted = state != null,
-                        quizFinalized = state == true,
-                        aiGenerated = it.origin == PlanTaskOrigin.AI
-                    )
-                },
-                otherBoardRanges = otherBoardRanges,
-                planSubjectsText = planSubjects.joinToString("\n") { it.line },
-                subjectIdsByName = planSubjects.associate { it.subjectName to it.subjectId },
-                pendingExisting = pendingTasks.map {
-                    ExistingPendingTask(
-                        it.id.value, it.taskName,
-                        PlanTaskScheduler.toMinutes(it.startTime), PlanTaskScheduler.toMinutes(it.endTime),
-                        aiGenerated = it.origin == PlanTaskOrigin.AI
-                    )
-                },
-                completedRanges = completedTasks.map {
-                    PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime)
-                },
-                grade = grade,
-                schoolId = schoolId,
-                classNumber = classNumber,
-                routine = userRoutine(userId),
-                studyStyleSummary = studyStyleSummary,
-                planBoardSummary = planBoardSummaryOf(board.title, board.startDate, board.endDate, board.examDate, planDate),
-                history = history,
-                sessionId = session?.id?.value,
-                needsSessionTitle = session?.title == null,
-                planBoardId = board.id.value,
-                planBoardIsManual = isManualPlanBoard(board.examDate),
-                planBoardStartDate = board.startDate,
-                planBoardEndDate = board.endDate,
-                pendingPostponedFrom = pendingTasks.associate { it.id.value to it.postponedFromDate },
-                days = days,
-                quizState = quizStateOf(editablePendingIds),
-                planDaysText = planDaysText(days.values.sortedBy { it.date }, planDate, today, board.endDate)
-            )
-        }
+        val context = loadContext(userId, dailyPlanId, sessionId)
 
         val result = chatLlmClient.adjustPlan(
             grade = context.grade,
@@ -219,14 +132,40 @@ class ChatService(
             otherBusyDaysOf(it, planDate, todayInAppZone(clock), context.planBoardStartDate, context.planBoardEndDate)
         }
 
+        val postpone = result?.postpone?.takeIf { it.task_names.isNotEmpty() }
+        val edits = result?.edits.orEmpty()
+        // 바로 앞 답변이 되묻기였으면 이번 메시지는 그 답이다 — 다시 묻지 않고 고른 대로 반영한다
+        val answeringClarification = context.history.lastOrNull()?.let { it.role == "assistant" && it.content.endsWith(CLARIFY_SUFFIX) } == true
+
+        // 요청이 애매하면 계획은 건드리지 않고 되묻는다. 미루기와 할일 고치기가 한 메시지에 섞였으면 (예전엔 미루기만 하고
+        // 고치기는 버려졌다) AI 가 되묻지 않았어도 서버가 무엇을 할지 묻는다. 둘 다 하라고 답하면 아래에서 둘 다 반영한다.
+        // AI 가 되물으면 postpone·edits 를 같이 채웠더라도 (되묻기의 답이어도) 학생이 확인하지 않은 변경이라 반영하지 않는다
+        val clarification = when {
+            result == null -> null
+            result.needs_clarification -> result.reply_message.trim().ifBlank { CLARIFY_FALLBACK }
+            postpone != null && edits.isNotEmpty() && !answeringClarification -> postponeAndEditQuestion(postpone, edits)
+            else -> null
+        }
+        if (clarification != null) {
+            val reply = if (clarification.endsWith(CLARIFY_SUFFIX)) clarification else "$clarification $CLARIFY_SUFFIX"
+            return newSuspendedTransaction {
+                val saved = saveTurns(userId, context.sessionId, dailyPlanId, trimmed, reply, aiTitle)
+                ChatMessageResponse(reply = reply, planChanged = false).withTurns(saved)
+            }
+        }
+
         // 다른 날로 미뤄 달라는 요청이면 그날 계획 재구성 대신 미루기만 한다. 다른 날 일정도 같이 말했으면 이어서 반영한다
-        result?.postpone?.takeIf { it.task_names.isNotEmpty() }?.let { postpone ->
-            val response = postponeTasks(userId, dailyPlanId, context, postpone, result.reply_message)
-            return withOtherDays(userId, dailyPlanId, trimmed, context, response, otherBusy, aiTitle)
+        if (postpone != null) {
+            val postponed = postponeTasks(userId, dailyPlanId, context, postpone, result!!.reply_message)
+            if (edits.isEmpty()) return withOtherDays(userId, dailyPlanId, trimmed, context, postponed, otherBusy, aiTitle)
+            // 되묻기에 "둘 다" 라고 답한 경우 — 미룬 뒤의 계획을 다시 읽어 할일 고치기까지 반영한다
+            val fresh = loadContext(userId, dailyPlanId, context.sessionId)
+            val edited = editTasks(dailyPlanId, fresh, edits)
+            return withOtherDays(userId, dailyPlanId, trimmed, fresh, postponed.then(edited), otherBusy, aiTitle)
         }
 
         // 할일을 직접 줄이기·추가·삭제·옮기기 해 달라는 요청이면 그 동작만 검증해 적용한다 (#306). 다른 날 일정도 같이 말했으면 이어서 반영한다
-        result?.edits?.takeIf { it.isNotEmpty() }?.let { edits ->
+        if (edits.isNotEmpty()) {
             return withOtherDays(userId, dailyPlanId, trimmed, context, editTasks(dailyPlanId, context, edits), otherBusy, aiTitle)
         }
 
@@ -339,6 +278,105 @@ class ChatService(
                 updatedDays = updatedDays
             ).withTurns(saved)
         }
+    }
+
+    /** 챗봇에 보낼 이 날 계획·플랜보드·대화 맥락. 미루기 뒤 할일 고치기처럼 DB 가 바뀐 뒤에 다시 읽을 때도 쓴다 */
+    private suspend fun loadContext(userId: Int, dailyPlanId: Int, sessionId: Int?): ChatContext = newSuspendedTransaction {
+        val dailyPlanRow = requireOwnedDailyPlan(userId, dailyPlanId)
+        val session = sessionToContinue(userId, dailyPlanId, sessionId)
+        val planDate = dailyPlanRow.planDate
+        val board = dailyPlanRow.planBoard
+
+        // 이미 완료·실패한 태스크는 재조정 대상이 아니다 — AI 에는 대기 태스크만 보내고,
+        // 완료·실패 태스크의 시간대는 재배치할 때 막아둔다.
+        val (completedTasks, pendingTasks) = PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }
+            .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
+            .partition { it.status != PlanTaskStatus.PENDING }
+
+        val profileRow = StudentProfileRow.find { StudentProfileTable.user eq userId }
+            .firstOrNull()
+        val grade = profileRow?.grade ?: 2
+        val schoolId = profileRow?.schoolId
+        val classNumber = profileRow?.classNumber
+
+        // 숫자(문항1=2)가 아니라 학생이 고른 보기 문구로 넘겨야 AI 가 뜻을 안다
+        val studyStyleSummary = userStudyStyle(userId).summary()
+
+        // 할일 직접 편집(edits)용 — 할일 과목, 퀴즈 진행·확정 여부, 플랜보드 과목·학습 범위, 같은 날 다른 보드의 할일
+        val subjectNames = subjectNamesOf(pendingTasks)
+        val quizState = quizStateOf(pendingTasks.map { it.id.value })
+        val planSubjects = planSubjectsOf(board.id.value)
+        val otherBoardRanges = (PlanTaskTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
+            .selectAll()
+            .where { (PlanBoardTable.userId eq userId) and (DailyPlanTable.planDate eq planDate) and (DailyPlanTable.id neq dailyPlanId) }
+            .map { PlanTaskScheduler.toMinutes(it[PlanTaskTable.startTime]) to PlanTaskScheduler.toMinutes(it[PlanTaskTable.endTime]) }
+
+        // 플랜보드 기간 전체 (#337) — AI 가 다른 날 할일도 보고 고칠 수 있게
+        val days = loadPlanDays(userId, board.id.value, board.startDate, board.endDate)
+        val today = todayInAppZone(clock)
+        val editablePendingIds = days.values
+            .filter { it.date == planDate || isEditableDay(it.date, today, board.endDate) }
+            .flatMap { day -> day.pendingTasks.map { it.id } }
+
+        // 새 세션은 빈 대화로 시작한다 — 다른 세션 대화는 AI 에 넣지 않는다 (#342)
+        val history = session?.let { turnsOf(it.id.value) }.orEmpty()
+            .map { AiChatTurn(role = it.role, content = it.content) }
+            .takeLast(HISTORY_LIMIT)
+
+        ChatContext(
+            planDate = planDate.toString(),
+            dayOfWeekLabel = planDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.KOREAN),
+            pendingTasks = pendingTasks.map {
+                AiChatCurrentTask(
+                    it.taskName, it.estimatedMinutes, it.startTime.toString(), it.endTime.toString(),
+                    can_postpone = !postponedFromPreviousDay(it.postponedFromDate, planDate),
+                    subject_name = it.subjectNameFrom(subjectNames)
+                )
+            },
+            editable = pendingTasks.map {
+                val state = quizState[it.id.value]
+                EditableTask(
+                    id = it.id.value,
+                    name = it.taskName,
+                    start = PlanTaskScheduler.toMinutes(it.startTime),
+                    end = PlanTaskScheduler.toMinutes(it.endTime),
+                    subjectId = it.subjectId?.value,
+                    quizStarted = state != null,
+                    quizFinalized = state == true,
+                    aiGenerated = it.origin == PlanTaskOrigin.AI
+                )
+            },
+            otherBoardRanges = otherBoardRanges,
+            planSubjectsText = planSubjects.joinToString("\n") { it.line },
+            subjectIdsByName = planSubjects.associate { it.subjectName to it.subjectId },
+            pendingExisting = pendingTasks.map {
+                ExistingPendingTask(
+                    it.id.value, it.taskName,
+                    PlanTaskScheduler.toMinutes(it.startTime), PlanTaskScheduler.toMinutes(it.endTime),
+                    aiGenerated = it.origin == PlanTaskOrigin.AI
+                )
+            },
+            completedRanges = completedTasks.map {
+                PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime)
+            },
+            grade = grade,
+            schoolId = schoolId,
+            classNumber = classNumber,
+            routine = userRoutine(userId),
+            studyStyleSummary = studyStyleSummary,
+            planBoardSummary = planBoardSummaryOf(board.title, board.startDate, board.endDate, board.examDate, planDate),
+            history = history,
+            sessionId = session?.id?.value,
+            needsSessionTitle = session?.title == null,
+            planBoardId = board.id.value,
+            planBoardIsManual = isManualPlanBoard(board.examDate),
+            planBoardStartDate = board.startDate,
+            planBoardEndDate = board.endDate,
+            pendingPostponedFrom = pendingTasks.associate { it.id.value to it.postponedFromDate },
+            days = days,
+            quizState = quizStateOf(editablePendingIds),
+            planDaysText = planDaysText(days.values.sortedBy { it.date }, planDate, today, board.endDate)
+        )
     }
 
     /**
@@ -740,6 +778,35 @@ internal fun sameTasks(tasks: List<AiChatTask>, current: List<AiChatCurrentTask>
         current.map { it.task_name.trim() to it.estimated_minutes }.sortedBy { "${it.first}:${it.second}" }
 
 internal const val POSTPONE_NOTHING_REPLY = "미룰 할일을 찾지 못했어요. 미루고 싶은 할일 이름을 말씀해 주세요."
+
+/** 미루기와 할일 고치기를 한 메시지에 함께 말했을 때 무엇을 할지 되묻는 질문. AI 가 알아들은 내용을 그대로 보여준다 */
+internal fun postponeAndEditQuestion(postpone: AiChatPostpone, edits: List<AiChatEdit>): String {
+    val names = postpone.task_names.joinToString(", ") { "'${it.trim()}'" }
+    val toDate = postpone.to_date?.trim()?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    val postponeText = "$names ${toDate?.let { "${formatDay(it)}로" } ?: "다음 날로"} 미루기"
+    val editText = edits.joinToString(", ") { editSummary(it) }
+    return "할일 미루기와 할일 바꾸기를 함께 말씀하셔서 먼저 확인할게요. ① $postponeText ② $editText — 하나만 할까요, 둘 다 할까요?"
+}
+
+private fun editSummary(edit: AiChatEdit): String {
+    val name = "'${edit.task_name?.trim().orEmpty()}'"
+    val day = edit.date?.trim()?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.let { "${formatDay(it)} " }.orEmpty()
+    return when (edit.type.trim().lowercase()) {
+        "add" -> "$day$name 추가"
+        "resize" -> "$day$name ${edit.minutes}분으로 바꾸기"
+        "delete" -> "$day$name 빼기"
+        "move" -> "$day$name ${edit.start_time}로 옮기기"
+        else -> "$day$name 바꾸기"
+    }
+}
+
+/** 미루기 결과에 이어서 한 할일 고치기 결과를 합친다. 같은 날이 두 번 바뀌었으면 나중(고치기) 결과로 */
+private fun ChatMessageResponse.then(next: ChatMessageResponse): ChatMessageResponse = copy(
+    reply = "$reply ${next.reply}",
+    planChanged = planChanged || next.planChanged,
+    updatedTasks = next.updatedTasks ?: updatedTasks,
+    updatedDays = (updatedDays.orEmpty() + next.updatedDays.orEmpty()).associateBy { it.date }.values.toList().takeIf { it.isNotEmpty() }
+)
 
 internal fun postponeBlockedReply(taskNames: List<String>): String =
     "${taskNames.joinToString(", ") { "'$it'" }}은(는) 어제 미룬 할일이라 이틀 연속으로는 미룰 수 없어요. 오늘 꼭 해봐요!"

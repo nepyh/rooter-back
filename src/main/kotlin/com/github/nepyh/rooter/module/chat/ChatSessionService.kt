@@ -9,16 +9,12 @@ import com.github.nepyh.rooter.module.chat.model.ChatSessionTable
 import com.github.nepyh.rooter.module.chat.model.ChatTurnFeedback
 import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
-import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
-import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.user.model.UserRow
-import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.inList
-import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.core.less
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.select
@@ -95,33 +91,22 @@ class ChatSessionService {
         ids
     }
 
-    /**
-     * 같은 대화에서 바로 뒤([after]) 또는 바로 앞 메시지. 세션이 있으면 같은 세션,
-     * 세션이 없는 예전 대화면 같은 날 계획의 세션 없는 대화 안에서 찾는다
-     */
+    /** 같은 세션에서 바로 뒤([after]) 또는 바로 앞 메시지 */
     private fun neighborOf(turn: ChatTurnRow, after: Boolean): ChatTurnRow? {
-        val sameConversation: Op<Boolean> = turn.sessionKey?.let { ChatTurnTable.sessionId eq it }
-            ?: turn.dailyPlanKey?.let { (ChatTurnTable.dailyPlanId eq it) and ChatTurnTable.sessionId.isNull() }
-            ?: return null
         val position = if (after) ChatTurnTable.id greater turn.id.value else ChatTurnTable.id less turn.id.value
-        return ChatTurnRow.find { sameConversation and position }
+        return ChatTurnRow.find { (ChatTurnTable.sessionId eq turn.sessionKey) and position }
             .orderBy(ChatTurnTable.id to if (after) SortOrder.ASC else SortOrder.DESC)
             .limit(1)
             .firstOrNull()
     }
 
-    /**
-     * 본인 메시지. 세션이 있으면 세션 주인으로, 세션 없는 예전 대화면 그 메시지가 본 날 계획의 플랜보드 주인으로 판단한다.
-     * 계획 없이 나눈 대화(#351)는 항상 세션이 있다. 트랜잭션 안에서 부른다
-     */
+    /** 본인 메시지. 소유는 그 메시지가 속한 세션의 주인으로 판단한다 (계획 없이 나눈 대화(#351)도 같은 기준). 트랜잭션 안에서 부른다 */
     private fun requireOwnedTurn(userId: Int, turnId: Int): ChatTurnRow {
-        val turn = ChatTurnRow.findById(turnId) ?: throw ChatTurnNotFoundException()
-        val owned = turn.sessionKey?.let { ChatSessionRow[it].user.id.value == userId }
-            ?: (ChatTurnTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
-                .select(ChatTurnTable.id)
-                .where { (ChatTurnTable.id eq turnId) and (PlanBoardTable.userId eq userId) }
-                .any()
+        val owned = (ChatTurnTable innerJoin ChatSessionTable)
+            .select(ChatTurnTable.id)
+            .where { (ChatTurnTable.id eq turnId) and (ChatSessionTable.userId eq userId) }
+            .any()
         if (!owned) throw ChatTurnNotFoundException()
-        return turn
+        return ChatTurnRow[turnId]
     }
 }

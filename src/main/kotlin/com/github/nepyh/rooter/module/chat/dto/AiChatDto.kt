@@ -72,7 +72,8 @@ data class AiChatResult(
     val postpone: AiChatPostpone? = null, // 할일을 다른 날로 미뤄달라는 요청일 때만
     val edits: List<AiChatEdit> = emptyList(), // 그날 할일을 줄이기·추가·삭제·특정 시각으로 옮기기 요청일 때만
     val other_busy_days: List<AiChatBusyDay> = emptyList(), // TARGET_DATE 말고 다른 날에도 생긴 일정일 때만 (#334)
-    val session_title: String? = null // 세션 첫 메시지일 때만 — 대화 주제를 짧게 (#342)
+    val session_title: String? = null, // 세션 첫 메시지일 때만 — 대화 주제를 짧게 (#342)
+    val needs_clarification: Boolean = false // 요청이 애매해 계획을 건드리지 않고 reply_message 로 되물을 때만
 )
 
 /** 프롬프트에 <CHAT_HISTORY_JSON> 으로 그대로 실어 보내기 위한 대화 턴 wire 포맷. */
