@@ -13,7 +13,7 @@ data class ChatMessageRequest(
 @Serializable
 data class ChatTurnResponse(
     val id: Int,
-    val sessionId: Int?,
+    val sessionId: Int,
     val dailyPlanId: Int, // 이 메시지로 보고 고친 날의 계획
     val role: String,
     val content: String,
