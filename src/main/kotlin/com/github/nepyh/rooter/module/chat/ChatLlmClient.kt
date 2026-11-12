@@ -82,6 +82,34 @@ open class ChatLlmClient(private val appConfig: AppConfig) {
             .getOrNull()
     }
 
+    /**
+     * 보고 있는 계획이 없을 때의 대화 (#351) — 교과서 질문·잡담에만 답하고 계획은 바꾸지 않는다.
+     * 응답은 [AiChatResult] 의 reply_message·session_title 만 채워진다
+     */
+    open suspend fun chatWithoutPlan(
+        grade: Int,
+        studyStyleSummary: String,
+        today: String,
+        chatHistoryJson: String,
+        userMessage: String,
+        needsSessionTitle: Boolean = false
+    ): AiChatResult? {
+        val prompt = PromptLoader.load(
+            "prompts/chat-no-plan.md",
+            "GRADE" to grade.toString(),
+            "STUDY_STYLE_SUMMARY" to studyStyleSummary,
+            "TODAY" to today,
+            "CHAT_HISTORY_JSON" to chatHistoryJson,
+            "USER_MESSAGE" to userMessage,
+            "SESSION_TITLE_NEEDED" to if (needsSessionTitle) "예" else "아니오"
+        )
+
+        val content = requestChatCompletion(prompt) ?: return null
+        return runCatching { json.decodeFromString<AiChatResult>(content) }
+            .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
+            .getOrNull()
+    }
+
     private suspend fun requestChatCompletion(prompt: String): String? {
         val response = runCatching {
             val httpResponse = client.post("${appConfig.llmBaseUrl}/chat/completions") {
