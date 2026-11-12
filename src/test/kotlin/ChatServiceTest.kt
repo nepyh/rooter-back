@@ -10,6 +10,7 @@ import com.github.nepyh.rooter.module.chat.exception.ChatValidationException
 import com.github.nepyh.rooter.module.chat.model.ChatTurnFeedback
 import io.kotest.assertions.throwables.shouldThrow
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import com.github.nepyh.rooter.module.chat.CLARIFY_SUFFIX
 import com.github.nepyh.rooter.module.chat.PLAN_NOT_APPLIED_REPLY
 import com.github.nepyh.rooter.module.chat.POSTPONE_NOTHING_REPLY
 import com.github.nepyh.rooter.module.chat.dto.AiChatBusyDay
@@ -437,6 +438,111 @@ class ChatServiceTest : StringSpec({
             listOf(conceptId, problemId).map { PlanTaskRow[it].postponedFromDate } shouldBe listOf(tuesday, tuesday)
         }
         llm.lastToday shouldBe "2026-09-01 (화요일)\n이번 주: 2026-08-31(월) ~ 2026-09-06(일)\n다음 주: 2026-09-07(월) ~ 2026-09-13(일)"
+    }
+
+    // ---- 애매한 요청 되묻기 ----
+
+    "미루기와 할일 추가가 한 메시지에 섞이면 바꾸지 않고 되묻고, '둘 다'라고 답하면 미룬 뒤 비운 자리에 추가까지 한다" {
+        val wednesday = tuesday.plusDays(1)
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        val conceptId = seedTask(dailyPlanId, "개념 정리", LocalTime.of(19, 0), LocalTime.of(20, 0), completed = false)
+        // AI 가 되묻지 않고 미루기·추가를 함께 채워 보낸 경우 (예전엔 미루기만 하고 추가는 버려졌다)
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "미루고 추가할게요", plan_changed = true,
+                postpone = AiChatPostpone(task_names = listOf("개념 정리"), to_date = wednesday.toString()),
+                edits = listOf(AiChatEdit("add", "과학 개념 정리", minutes = 30, start_time = "19:00"))
+            )
+        )
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+
+        val asked = service.sendMessage(userId, dailyPlanId, "일정을 미뤄주고 과학 일정 추가해줘")
+
+        asked.planChanged shouldBe false
+        asked.updatedTasks shouldBe null
+        asked.reply shouldBe "할일 미루기와 할일 바꾸기를 함께 말씀하셔서 먼저 확인할게요. " +
+            "① '개념 정리' 9월 30일(수)로 미루기 ② '과학 개념 정리' 추가 — 하나만 할까요, 둘 다 할까요? $CLARIFY_SUFFIX"
+        transaction(db) {
+            PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.map { it.taskName } shouldBe listOf("개념 정리")
+        }
+
+        // 같은 세션에서 "둘 다" — AI 는 앞 메시지와 합쳐 다시 둘 다 채운다
+        val done = service.sendMessage(userId, dailyPlanId, "둘 다 해줘")
+
+        llm.lastChatHistoryJson!! shouldContain CLARIFY_SUFFIX
+        done.planChanged shouldBe true
+        // 미룬 뒤 다시 읽은 계획 기준이라 비워진 19:00 에 바로 들어간다
+        done.updatedTasks!!.map { "${it.taskName} ${it.startTime}~${it.endTime}" } shouldBe listOf("과학 개념 정리 19:00~19:30")
+        done.movedTasks!!.map { it.taskName } shouldBe listOf("개념 정리")
+        done.reply shouldContain "'개념 정리' 할일을 9월 30일(수)"
+        done.reply shouldContain "과학 개념 정리"
+        transaction(db) {
+            PlanTaskRow[conceptId].dailyPlan.planDate shouldBe wednesday
+        }
+    }
+
+    "AI 가 애매하다고 되물으면 같이 보낸 변경이 있어도 계획은 그대로 두고 질문만 한다" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        seedTask(dailyPlanId, "수학 문제 풀기", LocalTime.of(19, 0), LocalTime.of(20, 0), completed = false)
+        val llm = FakeChatLlmClient(
+            AiChatResult(
+                reply_message = "과학 할일을 새로 추가할까요, 아니면 수학을 과학으로 바꿀까요?",
+                needs_clarification = true,
+                edits = listOf(AiChatEdit("delete", "수학 문제 풀기"))
+            )
+        )
+
+        val response = ChatService(llm, schoolDataFetcher, otherDayClock).sendMessage(userId, dailyPlanId, "과학 일정 좀 바꿔줘")
+
+        response.planChanged shouldBe false
+        response.reply shouldBe "과학 할일을 새로 추가할까요, 아니면 수학을 과학으로 바꿀까요? $CLARIFY_SUFFIX"
+        response.assistantTurnId shouldNotBe null
+        transaction(db) {
+            PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.map { it.taskName } shouldBe listOf("수학 문제 풀기")
+        }
+    }
+
+    "되묻기에 하나만 고르면 고른 것만 반영한다" {
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        seedTask(dailyPlanId, "개념 정리", LocalTime.of(19, 0), LocalTime.of(20, 0), completed = false)
+        val llm = FakeChatLlmClient(AiChatResult(reply_message = "어떤 걸 할까요?", needs_clarification = true))
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+        service.sendMessage(userId, dailyPlanId, "일정을 미뤄주고 과학 일정 추가해줘")
+
+        llm.result = AiChatResult(
+            reply_message = "과학만 추가할게요", plan_changed = true,
+            edits = listOf(AiChatEdit("add", "과학 개념 정리", minutes = 30, start_time = "20:10"))
+        )
+        val response = service.sendMessage(userId, dailyPlanId, "과학 추가만 해줘")
+
+        response.planChanged shouldBe true
+        response.movedTasks shouldBe null
+        response.updatedTasks!!.map { "${it.taskName} ${it.startTime}~${it.endTime}" } shouldBe listOf(
+            "개념 정리 19:00~20:00", "과학 개념 정리 20:10~20:40"
+        )
+    }
+
+    "되묻기의 답에 AI 가 또 되물으면 같이 채운 미루기·고치기가 있어도 반영하지 않고 다시 묻는다" {
+        val (userId, dailyPlanId) = seedDailyPlan(boardEnd = tuesday.plusDays(7))
+        val conceptId = seedTask(dailyPlanId, "개념 정리", LocalTime.of(19, 0), LocalTime.of(20, 0), completed = false)
+        val llm = FakeChatLlmClient(AiChatResult(reply_message = "어떤 걸 할까요?", needs_clarification = true))
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+        service.sendMessage(userId, dailyPlanId, "일정을 미뤄주고 과학 일정 추가해줘")
+
+        llm.result = AiChatResult(
+            reply_message = "미루기만 할까요, 추가만 할까요?",
+            needs_clarification = true,
+            postpone = AiChatPostpone(task_names = listOf("개념 정리")),
+            edits = listOf(AiChatEdit("add", "과학 개념 정리", minutes = 30))
+        )
+        val response = service.sendMessage(userId, dailyPlanId, "음 잘 모르겠어")
+
+        response.planChanged shouldBe false
+        response.reply shouldBe "미루기만 할까요, 추가만 할까요? $CLARIFY_SUFFIX"
+        transaction(db) {
+            PlanTaskRow[conceptId].dailyPlan.id.value shouldBe dailyPlanId
+            PlanTaskRow.find { PlanTaskTable.dailyPlanId eq dailyPlanId }.map { it.taskName } shouldBe listOf("개념 정리")
+        }
     }
 
     // ---- 할일 직접 편집 (#306) ----
