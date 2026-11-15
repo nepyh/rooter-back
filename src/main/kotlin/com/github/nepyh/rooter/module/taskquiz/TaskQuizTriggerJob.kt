@@ -49,6 +49,7 @@ class TaskQuizTriggerJob(
 ) : SchedulerJob {
 
     override val jobType: String = "task_quiz_trigger"
+    override val monitorSlug: String = "task-quiz-trigger"
 
     private val json = Json { ignoreUnknownKeys = true }
 

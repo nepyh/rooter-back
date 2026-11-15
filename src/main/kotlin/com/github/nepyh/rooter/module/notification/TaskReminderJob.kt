@@ -41,6 +41,7 @@ class TaskReminderJob(
 ) : SchedulerJob {
 
     override val jobType: String = "task_reminder"
+    override val monitorSlug: String = "task-reminder"
 
     private val json = Json { ignoreUnknownKeys = true }
 
