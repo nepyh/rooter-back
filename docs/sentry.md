@@ -65,24 +65,28 @@ io.sentry.Sentry.flush(2000)
 이 절차를 수행하기 전에는 실제 프로젝트 연결을 검증했다고 판단하지 않습니다.
 설정 파일 해석 등 SDK 초기화 이전에 발생한 오류는 Sentry로 수집할 수 없으므로 기존 서버 로그를 확인합니다.
 
-## 5. 스케줄러 잡 모니터링 (Crons)
+## 5. 스케줄러 모니터링 (Crons)
 
-`task-quiz-trigger`·`task-reminder`·`feedback-replan` 세 잡은 틱(기본 60초)마다 Sentry Crons 에 check-in 을 보냅니다.
-틱을 시작할 때 `in_progress`, 끝나면 `ok`(파생·실행이 모두 성공) 또는 `error`(하나라도 실패)로 닫습니다.
-잡에 `monitorSlug` 를 정한 것만 보내고, 예제 잡은 보내지 않습니다.
+스케줄러가 틱 간격(기본 60초)마다 Sentry Crons 의 **`scheduler` 모니터 하나**에 heartbeat 를 보냅니다.
+무료 플랜은 cron 모니터가 1개라서, 잡마다 따로 보내지 않고 스케줄러 전체 상태를 한 번에 보냅니다.
 
-- 모니터는 첫 check-in 이 올 때 자동으로 만들어집니다. Sentry 에서 따로 만들 필요가 없습니다.
-- 일정은 cron 이 아니라 **간격 1분**입니다. 잡이 틱 루프로 계속 돌기 때문입니다.
-- 여유 5분: 틱 간격은 앞 틱이 끝난 뒤 쉬는 시간이라, 실제 주기가 실행 시간만큼 늘어납니다.
-- 최대 실행 30분: 한 틱이 이보다 오래 걸리면(LLM 호출이 멈춤 등) 시간 초과로 봅니다.
+- 대상은 `monitored = true` 인 잡입니다: `task_quiz_trigger`·`task_reminder`·`feedback_replan`. 예제 잡은 빠집니다.
+- 대상 잡이 모두 정상이면 `ok`, 하나라도 아래에 해당하면 `error` 입니다.
+  - 잡 루프가 죽음 (#317)
+  - 마지막 틱이 실패함 (파생이나 실행 중 하나라도 예외)
+  - 한 틱이 30분 넘게 끝나지 않음 (LLM 호출이 멈춤 등)
+- 서버나 스케줄러가 통째로 멈추면 heartbeat 가 끊겨 **누락**으로 잡힙니다.
+- `error` 일 때 어느 잡이 왜 문제인지는 서버 로그의 `스케줄러 heartbeat ERROR: [...]` 에 남습니다. 예외 자체는 기존대로 오류 이벤트로 수집됩니다.
+
+모니터 설정은 heartbeat 마다 같이 보내서, 첫 heartbeat 가 올 때 Sentry 에 모니터가 자동으로 만들어집니다.
+
+- 일정은 cron 이 아니라 **간격 1분**입니다. 스케줄러가 루프로 계속 돌기 때문입니다.
+- 여유 5분: heartbeat 가 이만큼 늦어도 누락으로 보지 않습니다.
 - 연속 3번 실패하거나 빠져야 이슈를 만듭니다. 배포로 컨테이너가 바뀔 때 한두 번 빠지는 것은 넘깁니다.
-  종료로 끊긴 틱은 `ok` 로 닫아서 배포마다 시간 초과가 쌓이지 않게 합니다.
-- **루프가 죽으면(#317) check-in 이 끊겨 누락으로 알림이 옵니다.** 오류 이벤트는 한 번만 남지만 누락은 계속 잡힙니다.
 
-check-in 에는 모니터 이름, 상태, 실행 시간, environment, release, 모니터 설정만 들어갑니다.
+heartbeat 에는 모니터 이름, 상태, environment, release, 모니터 설정만 들어갑니다.
 SDK 가 붙이는 trace id 외에 scope 의 사용자·태그·요청 정보는 싣지 않습니다.
-Sentry 요금제마다 cron 모니터 개수 제한이 있으니 모니터 3개를 쓸 수 있는지 확인합니다.
-알림 받을 곳은 Sentry 의 **Crons → 각 모니터 → Alerts** 에서 정합니다.
+알림 받을 곳은 Sentry 의 **Crons → scheduler → Alerts** 에서 정합니다.
 
 ## 수집 정보와 로컬 검증
 
@@ -96,8 +100,8 @@ SDK가 scope를 병합한 뒤에도 허용 필드만 새 이벤트로 복사합�
 ```
 
 이 테스트는 빈 DSN, 잘못된 DSN, 4xx·취소 제외, HTTP 500·도메인 502의 단일 수집,
-스케줄러 오류 수집과 직렬화된 이벤트의 민감정보 제외, 스케줄러 check-in 의 내용(모니터 설정·상태·실행 시간)과
-scope 정보 제외를 검증합니다. 틱마다 check-in 을 여닫는 순서는 `SchedulerEngineTest` 가 검증합니다.
+스케줄러 오류 수집과 직렬화된 이벤트의 민감정보 제외, 스케줄러 heartbeat 의 내용(모니터 이름·상태·모니터 설정)과
+scope 정보 제외를 검증합니다. 잡 상태에 따라 heartbeat 가 OK·ERROR 가 되는지는 `SchedulerEngineTest` 가 검증합니다.
 
 참고: [Java SDK 설정](https://docs.sentry.io/platforms/java/configuration/options/),
 [전송 데이터 필터링](https://docs.sentry.io/platforms/java/configuration/filtering/)
