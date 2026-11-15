@@ -1,5 +1,10 @@
 package com.github.nepyh.rooter.common.monitoring
 
+import io.sentry.CheckIn
+import io.sentry.CheckInStatus
+import io.sentry.MonitorConfig
+import io.sentry.MonitorSchedule
+import io.sentry.MonitorScheduleUnit
 import io.sentry.Sentry
 import io.sentry.SentryEvent
 import io.sentry.SentryLevel
@@ -61,6 +66,22 @@ object ErrorMonitoring {
         }
     }
 
+    /**
+     * 스케줄러 heartbeat 를 Sentry Crons 에 보낸다 (OK·ERROR 한 건). 무료 플랜은 모니터가 1개라 잡마다가 아니라 스케줄러 전체로 하나다.
+     * 모니터 설정(간격 [intervalMinutes]분·여유·연속 실패 기준)을 함께 보내 Sentry 에 모니터가 없으면 만들고 있으면 갱신한다.
+     * 보내는 것은 모니터 이름·상태·environment·release·설정뿐이다. 꺼져 있거나 실패해도 잡 실행에는 영향이 없다.
+     */
+    fun checkIn(monitorSlug: String, ok: Boolean, intervalMinutes: Int) {
+        if (!Sentry.isEnabled()) return
+        try {
+            Sentry.captureCheckIn(CheckIn(monitorSlug, if (ok) CheckInStatus.OK else CheckInStatus.ERROR).apply {
+                monitorConfig = schedulerMonitorConfig(intervalMinutes)
+            })
+        } catch (_: Exception) {
+            logger.warn("Sentry check-in 을 전달하지 못했습니다.")
+        }
+    }
+
     fun close() = Sentry.close()
 
     internal fun options(config: MonitoringConfig) = SentryOptions().apply {
@@ -95,6 +116,23 @@ object ErrorMonitoring {
         }
     }
 }
+
+/**
+ * 스케줄러 모니터 설정. 스케줄러는 cron 이 아니라 루프로 계속 돌아서 간격(interval) 일정으로 둔다.
+ * - 여유 [CHECKIN_MARGIN_MINUTES]분: heartbeat 가 이만큼 늦어도 누락으로 보지 않는다
+ * - 연속 [FAILURE_ISSUE_THRESHOLD]번 실패·누락해야 이슈를 만든다 — 배포로 컨테이너가 바뀔 때 한두 번 빠지는 것은 넘긴다
+ * 서버나 스케줄러가 통째로 멈추면 heartbeat 가 끊겨 누락으로 잡힌다.
+ */
+internal fun schedulerMonitorConfig(intervalMinutes: Int) = MonitorConfig(
+    MonitorSchedule.interval(intervalMinutes.coerceAtLeast(1), MonitorScheduleUnit.MINUTE)
+).apply {
+    checkinMargin = CHECKIN_MARGIN_MINUTES
+    failureIssueThreshold = FAILURE_ISSUE_THRESHOLD
+    recoveryThreshold = 1L
+}
+
+private const val CHECKIN_MARGIN_MINUTES = 5L
+private const val FAILURE_ISSUE_THRESHOLD = 3L
 
 /** SDK 가 scope 를 합친 뒤에도 허용 필드만 새 객체로 복사한다. SQL·메시지·headers 등을 지우는 denylist 가 아니다. */
 internal fun sanitizedEvent(event: SentryEvent, config: MonitoringConfig): SentryEvent? {

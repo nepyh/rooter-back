@@ -5,6 +5,7 @@ import com.github.nepyh.rooter.module.scheduler.DueJob
 import com.github.nepyh.rooter.module.scheduler.JobRunRepo
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
 import com.github.nepyh.rooter.module.scheduler.SchedulerJob
+import com.github.nepyh.rooter.module.scheduler.SentryJobMonitor
 import com.github.nepyh.rooter.module.school.exception.NiceApiException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
@@ -171,11 +172,47 @@ class ErrorMonitoringTest : StringSpec({
         shouldThrow<CancellationException> { engine(CancellationException("shutdown")).runTick() }
         transport.events.size shouldBe 1
     }
+
+    "스케줄러 heartbeat 는 모니터 하나(scheduler)에 상태·모니터 설정만 보내고 scope 의 사용자·요청 정보는 싣지 않는다" {
+        val secret = "private-student-123"
+        Sentry.configureScope { scope ->
+            scope.user = User().apply { id = secret; email = "$secret@example.com" }
+            scope.setTag("student", secret)
+            scope.setExtra("payload", secret)
+        }
+
+        SentryJobMonitor.heartbeat(ok = true, intervalMinutes = 1)
+        SentryJobMonitor.heartbeat(ok = false, intervalMinutes = 1)
+
+        transport.checkIns.size shouldBe 2
+        transport.checkIns.none { it.contains(secret) } shouldBe true
+        val (ok, error) = transport.checkIns.map { Json.parseToJsonElement(it).jsonObject }
+        ok["monitor_slug"]!!.jsonPrimitive.content shouldBe "scheduler"
+        error["monitor_slug"]!!.jsonPrimitive.content shouldBe "scheduler"
+        ok["status"]!!.jsonPrimitive.content shouldBe "ok"
+        error["status"]!!.jsonPrimitive.content shouldBe "error"
+        ok["environment"]!!.jsonPrimitive.content shouldBe "test"
+        ok["release"]!!.jsonPrimitive.content shouldBe "test-commit"
+        val monitorConfig = ok["monitor_config"]!!.jsonObject
+        monitorConfig["schedule"]!!.jsonObject["type"]!!.jsonPrimitive.content shouldBe "interval"
+        monitorConfig["schedule"]!!.jsonObject["value"]!!.jsonPrimitive.content shouldBe "1"
+        monitorConfig["schedule"]!!.jsonObject["unit"]!!.jsonPrimitive.content shouldBe "minute"
+        monitorConfig["checkin_margin"]!!.jsonPrimitive.content shouldBe "5"
+        monitorConfig["failure_issue_threshold"]!!.jsonPrimitive.content shouldBe "3"
+        transport.events.size shouldBe 0
+    }
+
+    "DSN 이 없으면 heartbeat 를 보내지 않는다" {
+        ErrorMonitoring.initialize(config.copy(dsn = ""))
+        SentryJobMonitor.heartbeat(ok = true, intervalMinutes = 1)
+        transport.checkIns.size shouldBe 0
+    }
 })
 
 /** SDK 가 직렬화한 이벤트만 메모리에 저장한다. 네트워크 전송은 하지 않는다. */
 private class MemoryTransport(private val options: SentryOptions) : ITransport {
     val events = CopyOnWriteArrayList<String>()
+    val checkIns = CopyOnWriteArrayList<String>()
     val headers = CopyOnWriteArrayList<String>()
     val itemTypes = CopyOnWriteArrayList<SentryItemType>()
     private val limiter = RateLimiter(options)
@@ -186,6 +223,7 @@ private class MemoryTransport(private val options: SentryOptions) : ITransport {
             runCatching { item.data }.getOrNull()?.let { data ->
                 itemTypes += item.header.type
                 if (item.header.type == SentryItemType.Event) events += data.toString(Charsets.UTF_8)
+                if (item.header.type == SentryItemType.CheckIn) checkIns += data.toString(Charsets.UTF_8)
             }
         }
     }

@@ -33,6 +33,7 @@ class FeedbackReplanJob(
 ) : SchedulerJob {
 
     override val jobType: String = "feedback_replan"
+    override val monitored: Boolean = true
 
     private val json = Json { ignoreUnknownKeys = true }
 
