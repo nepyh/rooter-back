@@ -19,6 +19,10 @@ sealed class TaskQuizValidationException(
     class IncompleteAnswersException : TaskQuizValidationException(
         HttpStatusCode.BadRequest, "TASK_QUIZ_INCOMPLETE_ANSWERS", "아직 답하지 않은 문제가 있습니다."
     )
+    /** 할일 시작 시각(계획 날짜 + startTime) 전에는 퀴즈를 열거나 제출할 수 없다 (#353). PlanTask 의 TASK_NOT_STARTED 와 같은 code */
+    class TaskNotStartedException : TaskQuizValidationException(
+        HttpStatusCode.BadRequest, "TASK_NOT_STARTED", "아직 시작하지 않은 할 일입니다."
+    )
     class GenerationFailedException : TaskQuizValidationException(
         HttpStatusCode.BadGateway, "TASK_QUIZ_GENERATION_FAILED", "퀴즈를 만들지 못했습니다. 잠시 후 다시 시도해주세요."
     )

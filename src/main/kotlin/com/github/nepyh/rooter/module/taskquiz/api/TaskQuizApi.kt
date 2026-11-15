@@ -45,7 +45,8 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), " +
+                        "또는 할일 시작 시각(계획 날짜 + startTime, 한국 시간) 전이라 퀴즈를 열 수 없음 (code=TASK_NOT_STARTED) — 오늘 계획도 시작 시간 전이면 거부"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -106,7 +107,8 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 이미 채점이 끝난 퀴즈 (code=TASK_QUIZ_ALREADY_SUBMITTED), " +
-                        "이미 답한 문제 (code=TASK_QUIZ_QUESTION_ALREADY_ANSWERED), 또는 문제 구성과 맞지 않는 답안 (code=TASK_QUIZ_INVALID_ANSWER)"
+                        "이미 답한 문제 (code=TASK_QUIZ_QUESTION_ALREADY_ANSWERED), 문제 구성과 맞지 않는 답안 (code=TASK_QUIZ_INVALID_ANSWER), " +
+                        "또는 할일 시작 시각(계획 날짜 + startTime, 한국 시간) 전 (code=TASK_NOT_STARTED)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -143,7 +145,8 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 이미 채점된 퀴즈 (code=TASK_QUIZ_ALREADY_SUBMITTED), " +
-                        "또는 아직 답하지 않은 문제가 있음 (code=TASK_QUIZ_INCOMPLETE_ANSWERS)"
+                        "아직 답하지 않은 문제가 있음 (code=TASK_QUIZ_INCOMPLETE_ANSWERS), " +
+                        "또는 할일 시작 시각(계획 날짜 + startTime, 한국 시간) 전 (code=TASK_NOT_STARTED)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
