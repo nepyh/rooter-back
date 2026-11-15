@@ -197,6 +197,8 @@ class TaskQuizService(
      */
     fun answerQuestion(userId: Int, planTaskId: Int, questionId: Int, selectedChoiceId: Int): TaskQuizAnswerResponse = transaction {
         requireOwnedTask(userId, planTaskId)
+        // 시작 전에 만들어진 퀴즈라도 시작 전에 풀면 정답·풀이가 미리 보이고 오답이 복습으로 복사된다 (#353)
+        requireStartedTask(planTaskId)
 
         val attempt = latestAttemptOrThrow(planTaskId)
         if (attempt.passed != null) {
