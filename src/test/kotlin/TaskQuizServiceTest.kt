@@ -884,17 +884,23 @@ class TaskQuizServiceTest : StringSpec({
         attemptCount(taskId) shouldBe 1L
     }
 
-    "submitQuiz(#353): 이미 만들어진 퀴즈라도 시작 시각 전에는 제출할 수 없고 할일은 그대로 PENDING" {
+    "answerQuestion·submitQuiz(#353): 이미 만들어진 퀴즈라도 시작 시각 전에는 답하거나 제출할 수 없고 할일은 그대로 PENDING" {
         val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false) // day 16:00 시작
         val userId = lastUserId
         val early = TaskQuizService(FakeTaskQuizLlmClient(), koreaAt(day, 15, 0))
         early.generateAttempt(taskId, 1, "수학 문제집 풀기") // 시작 전에 만들어진 퀴즈 (검사 전 버전·시작 시간을 뒤로 옮긴 할일)
-        early.getCurrentQuiz(userId, taskId).questions.forEach { early.answerQuestion(userId, taskId, it.id, it.choice("A").id) }
+        val questions = early.getCurrentQuiz(userId, taskId).questions
 
+        shouldThrow<TaskQuizValidationException.TaskNotStartedException> {
+            early.answerQuestion(userId, taskId, questions.first().id, questions.first().choice("A").id)
+        }
+        transaction(db) { TaskQuizQuestionRow.findById(questions.first().id)!!.selectedChoiceId } shouldBe null
         shouldThrow<TaskQuizValidationException.TaskNotStartedException> { early.submitQuiz(userId, taskId) }
         transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.PENDING
 
-        TaskQuizService(FakeTaskQuizLlmClient(), koreaAt(day, 16, 0)).submitQuiz(userId, taskId).passed shouldBe true
+        val started = TaskQuizService(FakeTaskQuizLlmClient(), koreaAt(day, 16, 0))
+        questions.forEach { started.answerQuestion(userId, taskId, it.id, it.choice("A").id) }
+        started.submitQuiz(userId, taskId).passed shouldBe true
         transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.DONE
     }
 
