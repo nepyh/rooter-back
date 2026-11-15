@@ -51,7 +51,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M10 | 챗봇 재조정 | 10/11 | doing |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
-| M13 | 인프라·배포 | 10/13 | doing |
+| M13 | 인프라·배포 | 10/14 | doing |
 
 ## 블로커
 
@@ -277,6 +277,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 - [x] done RB-152 서버 Sentry 오류 수집 (#313 · PR #314 머지 (10-23) · `7c9fb63`) — DSN 선택 활성화, 5xx·기동·스케줄러 예외의 종류와 스택만 전송, 원문 메시지·요청·개인정보 제외. 환경변수·ECS 배선 및 메모리 transport 테스트 5개, 격리 PostgreSQL에서 전체 test/build 통과. 실제 프로젝트 수집 검증은 DSN 설정 후 별도 확인.
 - [x] done RB-156 브라우저에서 PATCH API 가 CORS preflight 403 으로 막히던 것 (#323 · PR #324 머지 (10-27)) — `install(CORS)` 허용 메서드에 `Patch` 가 없어 GitHub Pages Swagger Try it out 의 PATCH 5개(plan-tasks·plan-boards·plan-boards subjects·calendar events·users)가 실패. `allowMethod(HttpMethod.Patch)` 추가 (`e390c5c`) · 로컬 jar 실행 preflight PATCH 200·`Access-Control-Allow-Methods` 에 PATCH 포함 확인 · `./gradlew test` 360건 0 실패 · 앱(RN)은 CORS 무관이라 영향 없음 · DB 변경 없음
+- [ ] doing RB-174 스케줄러 잡 Sentry Crons check-in — 스케줄러 루프가 DB 오류 한 번에 죽어도(#317) Sentry 에는 오류 이벤트 한 번만 남아 놓치던 것. `task-quiz-trigger`·`task-reminder`·`feedback-replan` 이 틱마다 IN_PROGRESS → OK/ERROR check-in(`SchedulerJob.monitorSlug`, 없으면 안 보냄·예제 잡 제외), `SchedulerEngine.runJob` 이 성공 여부를 돌려줌, 모니터 설정은 간격 1분·여유 5분·최대 실행 30분·연속 3번 실패해야 이슈(`schedulerMonitorConfig`), 종료로 끊긴 틱은 OK 로 닫음, check-in 은 모니터 이름·상태·실행 시간·environment·release·설정만(scope 사용자·태그 제외), DSN 없으면 안 보냄. `JobMonitor`(기본 `SentryJobMonitor`)로 테스트에서 바꿔 끼움, `docs/sentry.md` 5절 · 새 환경변수 없음 · DB 변경 없음 · `./gradlew test` 472건 0 실패(3 skipped, 신규 5건) · 실제 Sentry 수신 확인은 배포 후
 
 ## 다음 후보 (우선순위)
 
