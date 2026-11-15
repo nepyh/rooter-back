@@ -1,4 +1,5 @@
 import com.github.nepyh.rooter.module.scheduler.DueJob
+import com.github.nepyh.rooter.module.scheduler.JobMonitor
 import com.github.nepyh.rooter.module.scheduler.JobRunRepo
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
 import com.github.nepyh.rooter.module.scheduler.SchedulerJob
@@ -16,6 +17,7 @@ import java.sql.DriverManager
 import java.sql.SQLException
 import java.time.Duration
 import java.time.OffsetDateTime
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
@@ -130,6 +132,90 @@ class SchedulerEngineTest : StringSpec({
             stuck.complete(Unit)
             scope.cancel()
         }
+    }
+
+    /** check-in 순서를 "start:slug:간격" · "finish:slug:ok" 로 쌓는 가짜 모니터 */
+    class RecordingMonitor : JobMonitor {
+        val calls = CopyOnWriteArrayList<String>()
+        override fun start(monitorSlug: String, intervalMinutes: Int): (Boolean) -> Unit {
+            calls += "start:$monitorSlug:$intervalMinutes"
+            return { ok -> calls += "finish:$monitorSlug:$ok" }
+        }
+    }
+
+    "runJob 은 파생·실행이 모두 성공하면 true, 파생이나 실행이 하나라도 실패하면 false 를 돌려준다" {
+        val engine = SchedulerEngine(emptyList(), JobRunRepo())
+        engine.runJob(jobOf("ok_job", mutableListOf(), "a", "b")) shouldBe true
+        engine.runJob(object : SchedulerJob {
+            override val jobType = "derive_fail"
+            override fun findDue(now: OffsetDateTime): List<DueJob> = error("파생 실패")
+            override suspend fun execute(due: DueJob) = Unit
+        }) shouldBe false
+        engine.runJob(object : SchedulerJob {
+            override val jobType = "exec_fail"
+            override fun findDue(now: OffsetDateTime) = listOf(DueJob("x", now), DueJob("y", now))
+            override suspend fun execute(due: DueJob) {
+                if (due.runKey == "x") error("실행 실패")
+            }
+        }) shouldBe false
+    }
+
+    "monitorSlug 가 있는 잡만 틱마다 check-in 을 열고 결과대로 닫는다 — 실패한 틱은 false, 없는 잡은 보내지 않는다" {
+        val monitor = RecordingMonitor()
+        val tick = AtomicInteger()
+        val monitored = object : SchedulerJob {
+            override val jobType = "monitored_job"
+            override val monitorSlug = "monitored-job"
+            // 두 번째 틱만 실행이 실패한다
+            override fun findDue(now: OffsetDateTime) = listOf(DueJob("m_${tick.getAndIncrement()}", now))
+            override suspend fun execute(due: DueJob) {
+                if (due.runKey == "m_1") error("실행 실패")
+            }
+        }
+        val plainRuns = AtomicInteger()
+        val plain = object : SchedulerJob {
+            override val jobType = "plain_job"
+            override fun findDue(now: OffsetDateTime) = listOf(DueJob("p_${plainRuns.getAndIncrement()}", now))
+            override suspend fun execute(due: DueJob) = Unit
+        }
+        val scope = CoroutineScope(SupervisorJob())
+
+        try {
+            SchedulerEngine(listOf(monitored, plain), JobRunRepo(), Duration.ofMillis(50), monitor).start(scope)
+            withTimeout(5_000) { while (monitor.calls.count { it.startsWith("finish") } < 3) delay(20) }
+        } finally {
+            scope.cancel()
+        }
+
+        monitor.calls.take(6) shouldBe listOf(
+            "start:monitored-job:1", "finish:monitored-job:true",
+            "start:monitored-job:1", "finish:monitored-job:false",
+            "start:monitored-job:1", "finish:monitored-job:true"
+        )
+        monitor.calls.none { it.contains("plain") } shouldBe true
+        (plainRuns.get() > 0) shouldBe true
+    }
+
+    "종료로 틱이 끊기면 열어 둔 check-in 을 성공으로 닫는다 (배포마다 시간 초과가 쌓이지 않게)" {
+        val monitor = RecordingMonitor()
+        val started = CompletableDeferred<Unit>()
+        val job = object : SchedulerJob {
+            override val jobType = "stopping_job"
+            override val monitorSlug = "stopping-job"
+            override fun findDue(now: OffsetDateTime) = listOf(DueJob("s", now))
+            override suspend fun execute(due: DueJob) {
+                started.complete(Unit)
+                CompletableDeferred<Unit>().await() // 끝나지 않는 실행
+            }
+        }
+        val scope = CoroutineScope(SupervisorJob())
+
+        SchedulerEngine(listOf(job), JobRunRepo(), Duration.ofMillis(50), monitor).start(scope)
+        withTimeout(5_000) { started.await() }
+        scope.cancel()
+        withTimeout(5_000) { while (monitor.calls.size < 2) delay(20) }
+
+        monitor.calls shouldBe listOf("start:stopping-job:1", "finish:stopping-job:true")
     }
 })
 

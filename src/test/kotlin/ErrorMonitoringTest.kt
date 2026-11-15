@@ -25,6 +25,7 @@ import io.sentry.SentryEnvelope
 import io.sentry.SentryItemType
 import io.sentry.SentryOptions
 import io.sentry.protocol.Request
+import io.sentry.protocol.SentryId
 import io.sentry.protocol.User
 import io.sentry.transport.ITransport
 import io.sentry.transport.RateLimiter
@@ -171,11 +172,52 @@ class ErrorMonitoringTest : StringSpec({
         shouldThrow<CancellationException> { engine(CancellationException("shutdown")).runTick() }
         transport.events.size shouldBe 1
     }
+
+    "스케줄러 check-in 은 모니터 이름·상태·실행 시간·모니터 설정만 보내고 scope 의 사용자·요청 정보는 싣지 않는다" {
+        val secret = "private-student-123"
+        Sentry.configureScope { scope ->
+            scope.user = User().apply { id = secret; email = "$secret@example.com" }
+            scope.setTag("student", secret)
+            scope.setExtra("payload", secret)
+        }
+
+        val id = ErrorMonitoring.checkInStarted("task-reminder", 1)
+        ErrorMonitoring.checkInFinished("task-reminder", id, ok = false, elapsed = Duration.ofMillis(1500))
+
+        transport.checkIns.size shouldBe 2
+        transport.checkIns.none { it.contains(secret) } shouldBe true
+        val started = Json.parseToJsonElement(transport.checkIns[0]).jsonObject
+        val finished = Json.parseToJsonElement(transport.checkIns[1]).jsonObject
+        started["monitor_slug"]!!.jsonPrimitive.content shouldBe "task-reminder"
+        started["status"]!!.jsonPrimitive.content shouldBe "in_progress"
+        started["environment"]!!.jsonPrimitive.content shouldBe "test"
+        started["release"]!!.jsonPrimitive.content shouldBe "test-commit"
+        val monitorConfig = started["monitor_config"]!!.jsonObject
+        monitorConfig["schedule"]!!.jsonObject["type"]!!.jsonPrimitive.content shouldBe "interval"
+        monitorConfig["schedule"]!!.jsonObject["value"]!!.jsonPrimitive.content shouldBe "1"
+        monitorConfig["schedule"]!!.jsonObject["unit"]!!.jsonPrimitive.content shouldBe "minute"
+        monitorConfig["checkin_margin"]!!.jsonPrimitive.content shouldBe "5"
+        monitorConfig["max_runtime"]!!.jsonPrimitive.content shouldBe "30"
+        monitorConfig["failure_issue_threshold"]!!.jsonPrimitive.content shouldBe "3"
+        finished["check_in_id"]!!.jsonPrimitive.content shouldBe started["check_in_id"]!!.jsonPrimitive.content
+        finished["status"]!!.jsonPrimitive.content shouldBe "error"
+        finished["duration"]!!.jsonPrimitive.content shouldBe "1.5"
+        transport.events.size shouldBe 0
+    }
+
+    "DSN 이 없으면 check-in 을 보내지 않고, 시작 check-in 이 없으면 닫지도 않는다" {
+        ErrorMonitoring.initialize(config.copy(dsn = ""))
+        ErrorMonitoring.checkInStarted("task-reminder", 1) shouldBe null
+        ErrorMonitoring.checkInFinished("task-reminder", null, ok = true, elapsed = Duration.ZERO)
+        ErrorMonitoring.checkInFinished("task-reminder", SentryId(), ok = true, elapsed = Duration.ZERO)
+        transport.checkIns.size shouldBe 0
+    }
 })
 
 /** SDK 가 직렬화한 이벤트만 메모리에 저장한다. 네트워크 전송은 하지 않는다. */
 private class MemoryTransport(private val options: SentryOptions) : ITransport {
     val events = CopyOnWriteArrayList<String>()
+    val checkIns = CopyOnWriteArrayList<String>()
     val headers = CopyOnWriteArrayList<String>()
     val itemTypes = CopyOnWriteArrayList<SentryItemType>()
     private val limiter = RateLimiter(options)
@@ -186,6 +228,7 @@ private class MemoryTransport(private val options: SentryOptions) : ITransport {
             runCatching { item.data }.getOrNull()?.let { data ->
                 itemTypes += item.header.type
                 if (item.header.type == SentryItemType.Event) events += data.toString(Charsets.UTF_8)
+                if (item.header.type == SentryItemType.CheckIn) checkIns += data.toString(Charsets.UTF_8)
             }
         }
     }
