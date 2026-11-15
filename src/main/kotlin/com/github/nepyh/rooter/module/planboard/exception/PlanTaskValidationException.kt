@@ -52,6 +52,12 @@ sealed class PlanTaskValidationException(
         "TASK_QUIZ_REQUIRED",
         "할일은 태스크 퀴즈를 통과해야 완료됩니다."
     )
+    /** 할일 시작 시각(계획 날짜 + startTime) 전에는 실패 처리할 수 없다 (#353). 태스크 퀴즈의 TASK_NOT_STARTED 와 같은 code */
+    class TaskNotStartedException : PlanTaskValidationException(
+        HttpStatusCode.BadRequest,
+        "TASK_NOT_STARTED",
+        "아직 시작하지 않은 할 일입니다."
+    )
     class InvalidTextbookException : PlanTaskValidationException(
         HttpStatusCode.BadRequest,
         "INVALID_TEXTBOOK",

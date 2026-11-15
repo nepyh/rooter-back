@@ -1,6 +1,7 @@
 package com.github.nepyh.rooter.module.taskquiz
 
 import com.github.nepyh.rooter.common.APP_ZONE
+import com.github.nepyh.rooter.common.isReachedInAppZone
 import com.github.nepyh.rooter.common.matchQuizChapter
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.todayInAppZone
@@ -131,10 +132,12 @@ class TaskQuizService(
      * - 아직 퀴즈가 없으면 1차를 지금 만든다 (예전엔 종료 시각 전이면 404 였음)
      * - 직전 차수에서 떨어졌고 재시도 대기(RETRY_DELAY_MINUTES)가 지났으면 스케줄러를 기다리지 않고 다음 차수를 만든다
      * - 그 외(풀던 퀴즈, 대기 중, 통과, 3회 소진)는 예전처럼 가장 최근 차수를 그대로 돌려준다
+     * - 할일 시작 시각(계획 날짜 + startTime) 전이면 퀴즈를 만들지 않고 TASK_NOT_STARTED (#353) — 공부하기 전에 미리 풀어 완료하지 못하게
      */
     suspend fun openQuiz(userId: Int, planTaskId: Int): TaskQuizResponse {
         val (taskName, latest) = newSuspendedTransaction {
             requireOwnedTask(userId, planTaskId)
+            requireStartedTask(planTaskId)
             val latest = TaskQuizAttemptRow.find { TaskQuizAttemptTable.planTaskId eq planTaskId }
                 .orderBy(TaskQuizAttemptTable.attemptNumber to SortOrder.DESC)
                 .firstOrNull()
@@ -246,6 +249,8 @@ class TaskQuizService(
     /** 채점은 항상 answerQuestion 으로 DB에 저장해 둔 답만 본다 — 클라이언트가 이 호출에 보내는 값은 없다. */
     fun submitQuiz(userId: Int, planTaskId: Int): TaskQuizSubmitResponse = transaction {
         requireOwnedTask(userId, planTaskId)
+        // 시작 전에 열어 둔 퀴즈(이 검사 전 버전·시작 시간을 뒤로 옮긴 할일)를 시작 전에 제출하는 것도 막는다 (#353)
+        requireStartedTask(planTaskId)
 
         val attempt = latestAttemptOrThrow(planTaskId)
         if (attempt.passed != null) {
@@ -379,6 +384,14 @@ class TaskQuizService(
                 subjectId = row.subjectId?.value,
                 subjectName = row.subjectNameFrom(subjectNames)
             )
+        }
+    }
+
+    /** 할일 시작 시각(계획 날짜 + startTime, 서비스 기준 시간대) 전이면 [TaskQuizValidationException.TaskNotStartedException]. 트랜잭션 안에서 부른다 */
+    private fun requireStartedTask(planTaskId: Int) {
+        val task = PlanTaskRow[planTaskId]
+        if (!isReachedInAppZone(task.dailyPlan.planDate, task.startTime, clock)) {
+            throw TaskQuizValidationException.TaskNotStartedException()
         }
     }
 
