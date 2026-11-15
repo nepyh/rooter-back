@@ -134,12 +134,33 @@ class SchedulerEngineTest : StringSpec({
         }
     }
 
-    /** check-in 순서를 "start:slug:간격" · "finish:slug:ok" 로 쌓는 가짜 모니터 */
+    /** 보낸 heartbeat 를 "ok:간격" 으로 쌓는 가짜 모니터 */
     class RecordingMonitor : JobMonitor {
-        val calls = CopyOnWriteArrayList<String>()
-        override fun start(monitorSlug: String, intervalMinutes: Int): (Boolean) -> Unit {
-            calls += "start:$monitorSlug:$intervalMinutes"
-            return { ok -> calls += "finish:$monitorSlug:$ok" }
+        val beats = CopyOnWriteArrayList<String>()
+        override fun heartbeat(ok: Boolean, intervalMinutes: Int) {
+            beats += "$ok:$intervalMinutes"
+        }
+    }
+
+    /** 틱마다 새 runKey 를 내고, [fail] 이 true 를 돌려주는 동안 실행이 실패하는 잡 */
+    fun monitoredJob(jobType: String, monitored: Boolean = true, fail: () -> Boolean = { false }) = object : SchedulerJob {
+        private val tick = AtomicInteger()
+        override val jobType = jobType
+        override val monitored = monitored
+        override fun findDue(now: OffsetDateTime) = listOf(DueJob("${jobType}_${tick.getAndIncrement()}", now))
+        override suspend fun execute(due: DueJob) {
+            if (fail()) error("실행 실패")
+        }
+    }
+
+    /** 엔진을 돌리며 [until] 이 될 때까지 기다린 뒤 멈춘다 */
+    suspend fun runEngine(engine: SchedulerEngine, until: suspend () -> Boolean) {
+        val scope = CoroutineScope(SupervisorJob())
+        try {
+            engine.start(scope)
+            withTimeout(5_000) { while (!until()) delay(20) }
+        } finally {
+            scope.cancel()
         }
     }
 
@@ -160,63 +181,71 @@ class SchedulerEngineTest : StringSpec({
         }) shouldBe false
     }
 
-    "monitorSlug 가 있는 잡만 틱마다 check-in 을 열고 결과대로 닫는다 — 실패한 틱은 false, 없는 잡은 보내지 않는다" {
+    "heartbeat 는 잡마다가 아니라 스케줄러 전체로 하나 — 모니터 대상 잡이 모두 정상이면 OK, 마지막 틱이 실패하면 ERROR, 다시 성공하면 OK" {
         val monitor = RecordingMonitor()
-        val tick = AtomicInteger()
-        val monitored = object : SchedulerJob {
-            override val jobType = "monitored_job"
-            override val monitorSlug = "monitored-job"
-            // 두 번째 틱만 실행이 실패한다
-            override fun findDue(now: OffsetDateTime) = listOf(DueJob("m_${tick.getAndIncrement()}", now))
-            override suspend fun execute(due: DueJob) {
-                if (due.runKey == "m_1") error("실행 실패")
+        val failing = java.util.concurrent.atomic.AtomicBoolean(false)
+        // 모니터 대상이 아닌 잡은 매번 실패해도 heartbeat 에 영향이 없다
+        val jobs = listOf(monitoredJob("a_job"), monitoredJob("b_job") { failing.get() }, monitoredJob("example_job", monitored = false) { true })
+
+        runEngine(SchedulerEngine(jobs, JobRunRepo(), Duration.ofMillis(50), monitor)) {
+            when {
+                monitor.beats.size >= 3 && !failing.get() && "false:1" !in monitor.beats -> failing.set(true)
+                "false:1" in monitor.beats && failing.get() -> failing.set(false)
             }
+            "false:1" in monitor.beats && monitor.beats.last() == "true:1"
         }
-        val plainRuns = AtomicInteger()
-        val plain = object : SchedulerJob {
-            override val jobType = "plain_job"
-            override fun findDue(now: OffsetDateTime) = listOf(DueJob("p_${plainRuns.getAndIncrement()}", now))
-            override suspend fun execute(due: DueJob) = Unit
+
+        monitor.beats.first() shouldBe "true:1"
+        monitor.beats.all { it == "true:1" || it == "false:1" } shouldBe true
+    }
+
+    "잡 루프가 멈추면 heartbeat 는 계속 ERROR 로 간다 (#317)" {
+        val monitor = RecordingMonitor()
+        val dying = object : SchedulerJob {
+            override val jobType = "dying_job"
+            override val monitored = true
+            override fun findDue(now: OffsetDateTime) = listOf(DueJob("d", now))
+            // runJob 이 잡지 않는 Error 로 루프를 끝낸다 (운영에선 DB 오류가 claim 에서 터지는 경우)
+            override suspend fun execute(due: DueJob) = throw AssertionError("루프를 끝내는 오류")
         }
-        val scope = CoroutineScope(SupervisorJob())
+
+        runEngine(SchedulerEngine(listOf(dying, monitoredJob("alive_job")), JobRunRepo(), Duration.ofMillis(50), monitor)) {
+            monitor.beats.count { it == "false:1" } >= 3
+        }
+
+        monitor.beats.takeLast(3) shouldBe listOf("false:1", "false:1", "false:1")
+    }
+
+    "한 틱이 stallAfter 넘게 끝나지 않으면 heartbeat 가 ERROR, 모니터 대상 잡이 없으면 heartbeat 를 보내지 않는다" {
+        val monitor = RecordingMonitor()
+        val stuck = CompletableDeferred<Unit>()
+        val stalling = object : SchedulerJob {
+            override val jobType = "stalling_job"
+            override val monitored = true
+            override fun findDue(now: OffsetDateTime) = listOf(DueJob("s", now))
+            override suspend fun execute(due: DueJob) = stuck.await() // 끝나지 않는 LLM 호출
+        }
 
         try {
-            SchedulerEngine(listOf(monitored, plain), JobRunRepo(), Duration.ofMillis(50), monitor).start(scope)
-            withTimeout(5_000) { while (monitor.calls.count { it.startsWith("finish") } < 3) delay(20) }
-        } finally {
-            scope.cancel()
-        }
-
-        monitor.calls.take(6) shouldBe listOf(
-            "start:monitored-job:1", "finish:monitored-job:true",
-            "start:monitored-job:1", "finish:monitored-job:false",
-            "start:monitored-job:1", "finish:monitored-job:true"
-        )
-        monitor.calls.none { it.contains("plain") } shouldBe true
-        (plainRuns.get() > 0) shouldBe true
-    }
-
-    "종료로 틱이 끊기면 열어 둔 check-in 을 성공으로 닫는다 (배포마다 시간 초과가 쌓이지 않게)" {
-        val monitor = RecordingMonitor()
-        val started = CompletableDeferred<Unit>()
-        val job = object : SchedulerJob {
-            override val jobType = "stopping_job"
-            override val monitorSlug = "stopping-job"
-            override fun findDue(now: OffsetDateTime) = listOf(DueJob("s", now))
-            override suspend fun execute(due: DueJob) {
-                started.complete(Unit)
-                CompletableDeferred<Unit>().await() // 끝나지 않는 실행
+            runEngine(SchedulerEngine(listOf(stalling), JobRunRepo(), Duration.ofMillis(50), monitor, stallAfter = Duration.ofMillis(200))) {
+                "false:1" in monitor.beats
             }
+        } finally {
+            stuck.complete(Unit)
         }
-        val scope = CoroutineScope(SupervisorJob())
+        monitor.beats.first() shouldBe "true:1"
 
-        SchedulerEngine(listOf(job), JobRunRepo(), Duration.ofMillis(50), monitor).start(scope)
-        withTimeout(5_000) { started.await() }
-        scope.cancel()
-        withTimeout(5_000) { while (monitor.calls.size < 2) delay(20) }
-
-        monitor.calls shouldBe listOf("start:stopping-job:1", "finish:stopping-job:true")
+        val silent = RecordingMonitor()
+        val ran = AtomicInteger()
+        val plain = object : SchedulerJob {
+            override val jobType = "plain_job"
+            override fun findDue(now: OffsetDateTime) = listOf(DueJob("p_${ran.getAndIncrement()}", now))
+            override suspend fun execute(due: DueJob) = Unit
+        }
+        runEngine(SchedulerEngine(listOf(plain), JobRunRepo(), Duration.ofMillis(50), silent)) { ran.get() >= 3 }
+        silent.beats shouldBe emptyList()
     }
+
 })
 
 private fun ensureTestDatabase(url: String, user: String, password: String) {

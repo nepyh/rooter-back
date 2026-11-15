@@ -5,6 +5,7 @@ import com.github.nepyh.rooter.module.scheduler.DueJob
 import com.github.nepyh.rooter.module.scheduler.JobRunRepo
 import com.github.nepyh.rooter.module.scheduler.SchedulerEngine
 import com.github.nepyh.rooter.module.scheduler.SchedulerJob
+import com.github.nepyh.rooter.module.scheduler.SentryJobMonitor
 import com.github.nepyh.rooter.module.school.exception.NiceApiException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
@@ -25,7 +26,6 @@ import io.sentry.SentryEnvelope
 import io.sentry.SentryItemType
 import io.sentry.SentryOptions
 import io.sentry.protocol.Request
-import io.sentry.protocol.SentryId
 import io.sentry.protocol.User
 import io.sentry.transport.ITransport
 import io.sentry.transport.RateLimiter
@@ -173,7 +173,7 @@ class ErrorMonitoringTest : StringSpec({
         transport.events.size shouldBe 1
     }
 
-    "스케줄러 check-in 은 모니터 이름·상태·실행 시간·모니터 설정만 보내고 scope 의 사용자·요청 정보는 싣지 않는다" {
+    "스케줄러 heartbeat 는 모니터 하나(scheduler)에 상태·모니터 설정만 보내고 scope 의 사용자·요청 정보는 싣지 않는다" {
         val secret = "private-student-123"
         Sentry.configureScope { scope ->
             scope.user = User().apply { id = secret; email = "$secret@example.com" }
@@ -181,35 +181,30 @@ class ErrorMonitoringTest : StringSpec({
             scope.setExtra("payload", secret)
         }
 
-        val id = ErrorMonitoring.checkInStarted("task-reminder", 1)
-        ErrorMonitoring.checkInFinished("task-reminder", id, ok = false, elapsed = Duration.ofMillis(1500))
+        SentryJobMonitor.heartbeat(ok = true, intervalMinutes = 1)
+        SentryJobMonitor.heartbeat(ok = false, intervalMinutes = 1)
 
         transport.checkIns.size shouldBe 2
         transport.checkIns.none { it.contains(secret) } shouldBe true
-        val started = Json.parseToJsonElement(transport.checkIns[0]).jsonObject
-        val finished = Json.parseToJsonElement(transport.checkIns[1]).jsonObject
-        started["monitor_slug"]!!.jsonPrimitive.content shouldBe "task-reminder"
-        started["status"]!!.jsonPrimitive.content shouldBe "in_progress"
-        started["environment"]!!.jsonPrimitive.content shouldBe "test"
-        started["release"]!!.jsonPrimitive.content shouldBe "test-commit"
-        val monitorConfig = started["monitor_config"]!!.jsonObject
+        val (ok, error) = transport.checkIns.map { Json.parseToJsonElement(it).jsonObject }
+        ok["monitor_slug"]!!.jsonPrimitive.content shouldBe "scheduler"
+        error["monitor_slug"]!!.jsonPrimitive.content shouldBe "scheduler"
+        ok["status"]!!.jsonPrimitive.content shouldBe "ok"
+        error["status"]!!.jsonPrimitive.content shouldBe "error"
+        ok["environment"]!!.jsonPrimitive.content shouldBe "test"
+        ok["release"]!!.jsonPrimitive.content shouldBe "test-commit"
+        val monitorConfig = ok["monitor_config"]!!.jsonObject
         monitorConfig["schedule"]!!.jsonObject["type"]!!.jsonPrimitive.content shouldBe "interval"
         monitorConfig["schedule"]!!.jsonObject["value"]!!.jsonPrimitive.content shouldBe "1"
         monitorConfig["schedule"]!!.jsonObject["unit"]!!.jsonPrimitive.content shouldBe "minute"
         monitorConfig["checkin_margin"]!!.jsonPrimitive.content shouldBe "5"
-        monitorConfig["max_runtime"]!!.jsonPrimitive.content shouldBe "30"
         monitorConfig["failure_issue_threshold"]!!.jsonPrimitive.content shouldBe "3"
-        finished["check_in_id"]!!.jsonPrimitive.content shouldBe started["check_in_id"]!!.jsonPrimitive.content
-        finished["status"]!!.jsonPrimitive.content shouldBe "error"
-        finished["duration"]!!.jsonPrimitive.content shouldBe "1.5"
         transport.events.size shouldBe 0
     }
 
-    "DSN 이 없으면 check-in 을 보내지 않고, 시작 check-in 이 없으면 닫지도 않는다" {
+    "DSN 이 없으면 heartbeat 를 보내지 않는다" {
         ErrorMonitoring.initialize(config.copy(dsn = ""))
-        ErrorMonitoring.checkInStarted("task-reminder", 1) shouldBe null
-        ErrorMonitoring.checkInFinished("task-reminder", null, ok = true, elapsed = Duration.ZERO)
-        ErrorMonitoring.checkInFinished("task-reminder", SentryId(), ok = true, elapsed = Duration.ZERO)
+        SentryJobMonitor.heartbeat(ok = true, intervalMinutes = 1)
         transport.checkIns.size shouldBe 0
     }
 })
