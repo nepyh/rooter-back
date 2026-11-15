@@ -24,10 +24,10 @@ interface SchedulerJob {
     val jobType: String
 
     /**
-     * Sentry Crons 모니터 이름 (소문자·숫자·하이픈). 정하면 틱마다 check-in 을 보내 루프가 멈추거나 실패하면 알림을 받는다.
-     * null 이면 보내지 않는다 (예제 잡 등).
+     * 스케줄러 heartbeat(Sentry Crons)에 이 잡의 상태를 넣을지. true 면 이 잡의 루프가 죽거나, 마지막 틱이 실패하거나,
+     * 한 틱이 오래 멈추면 heartbeat 가 ERROR 가 된다. 예제 잡처럼 운영에 의미 없는 잡은 false.
      */
-    val monitorSlug: String? get() = null
+    val monitored: Boolean get() = false
 
     /** 지금 실행해야 할 작업 지시 목록을 도메인 데이터에서 파생한다. */
     fun findDue(now: OffsetDateTime): List<DueJob>

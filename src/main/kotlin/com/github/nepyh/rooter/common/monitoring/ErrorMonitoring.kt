@@ -10,12 +10,10 @@ import io.sentry.SentryEvent
 import io.sentry.SentryLevel
 import io.sentry.SentryOptions
 import io.sentry.protocol.SentryException
-import io.sentry.protocol.SentryId
 import io.sentry.protocol.SentryStackFrame
 import io.sentry.protocol.SentryStackTrace
 import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
-import java.time.Duration
 import java.util.Collections
 import java.util.IdentityHashMap
 
@@ -69,28 +67,15 @@ object ErrorMonitoring {
     }
 
     /**
-     * 스케줄러 잡 한 틱의 시작을 Sentry Crons 에 알린다 (IN_PROGRESS). 끝나면 받은 id 로 [checkInFinished] 를 부른다.
-     * 모니터 설정(간격 [intervalMinutes]분·여유·최대 실행 시간)을 함께 보내 Sentry 에 모니터가 없으면 만들고 있으면 갱신한다.
-     * 보내는 것은 모니터 이름·상태·실행 시간·environment·release 뿐이다. 꺼져 있거나 실패하면 null — 잡 실행에는 영향이 없다.
+     * 스케줄러 heartbeat 를 Sentry Crons 에 보낸다 (OK·ERROR 한 건). 무료 플랜은 모니터가 1개라 잡마다가 아니라 스케줄러 전체로 하나다.
+     * 모니터 설정(간격 [intervalMinutes]분·여유·연속 실패 기준)을 함께 보내 Sentry 에 모니터가 없으면 만들고 있으면 갱신한다.
+     * 보내는 것은 모니터 이름·상태·environment·release·설정뿐이다. 꺼져 있거나 실패해도 잡 실행에는 영향이 없다.
      */
-    fun checkInStarted(monitorSlug: String, intervalMinutes: Int): SentryId? {
-        if (!Sentry.isEnabled()) return null
-        return try {
-            Sentry.captureCheckIn(CheckIn(monitorSlug, CheckInStatus.IN_PROGRESS).apply {
-                monitorConfig = schedulerMonitorConfig(intervalMinutes)
-            }).takeIf { it != SentryId.EMPTY_ID }
-        } catch (_: Exception) {
-            logger.warn("Sentry check-in 을 전달하지 못했습니다.")
-            null
-        }
-    }
-
-    /** [checkInStarted] 로 연 틱을 OK·ERROR 로 닫는다. 시작 check-in 이 없었으면(null) 아무것도 하지 않는다 */
-    fun checkInFinished(monitorSlug: String, checkInId: SentryId?, ok: Boolean, elapsed: Duration) {
-        if (checkInId == null || !Sentry.isEnabled()) return
+    fun checkIn(monitorSlug: String, ok: Boolean, intervalMinutes: Int) {
+        if (!Sentry.isEnabled()) return
         try {
-            Sentry.captureCheckIn(CheckIn(checkInId, monitorSlug, if (ok) CheckInStatus.OK else CheckInStatus.ERROR).apply {
-                duration = elapsed.toMillis() / 1000.0
+            Sentry.captureCheckIn(CheckIn(monitorSlug, if (ok) CheckInStatus.OK else CheckInStatus.ERROR).apply {
+                monitorConfig = schedulerMonitorConfig(intervalMinutes)
             })
         } catch (_: Exception) {
             logger.warn("Sentry check-in 을 전달하지 못했습니다.")
@@ -133,23 +118,20 @@ object ErrorMonitoring {
 }
 
 /**
- * 스케줄러 잡 모니터 설정. 잡은 cron 이 아니라 틱 루프로 계속 돌아서 간격(interval) 일정으로 둔다.
- * - 여유 [CHECKIN_MARGIN_MINUTES]분: 틱 간격은 "앞 틱이 끝난 뒤 쉬는 시간"이라 실제 주기는 실행 시간만큼 늘어난다
- * - 최대 실행 [MAX_RUNTIME_MINUTES]분: 한 틱이 이보다 오래 걸리면(LLM 호출이 멈춤 등) 시간 초과로 본다
+ * 스케줄러 모니터 설정. 스케줄러는 cron 이 아니라 루프로 계속 돌아서 간격(interval) 일정으로 둔다.
+ * - 여유 [CHECKIN_MARGIN_MINUTES]분: heartbeat 가 이만큼 늦어도 누락으로 보지 않는다
  * - 연속 [FAILURE_ISSUE_THRESHOLD]번 실패·누락해야 이슈를 만든다 — 배포로 컨테이너가 바뀔 때 한두 번 빠지는 것은 넘긴다
- * 루프가 죽으면(#317) check-in 이 끊겨 누락으로 잡힌다.
+ * 서버나 스케줄러가 통째로 멈추면 heartbeat 가 끊겨 누락으로 잡힌다.
  */
 internal fun schedulerMonitorConfig(intervalMinutes: Int) = MonitorConfig(
     MonitorSchedule.interval(intervalMinutes.coerceAtLeast(1), MonitorScheduleUnit.MINUTE)
 ).apply {
     checkinMargin = CHECKIN_MARGIN_MINUTES
-    maxRuntime = MAX_RUNTIME_MINUTES
     failureIssueThreshold = FAILURE_ISSUE_THRESHOLD
     recoveryThreshold = 1L
 }
 
 private const val CHECKIN_MARGIN_MINUTES = 5L
-private const val MAX_RUNTIME_MINUTES = 30L
 private const val FAILURE_ISSUE_THRESHOLD = 3L
 
 /** SDK 가 scope 를 합친 뒤에도 허용 필드만 새 객체로 복사한다. SQL·메시지·headers 등을 지우는 denylist 가 아니다. */
