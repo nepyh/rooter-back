@@ -8,6 +8,7 @@
 
 > **기준 시점** — 아래 내용은 **2026-10-04** 기준으로 머지된 PR·브랜치·이슈와 운영(prod)·개발(dev) 서버 확인 결과를 근거로 채웠다.
 > (첫 작성 2026-09-17, 09-17 이후 머지된 PR 52건과 운영 작업을 반영)
+> **11-16 재확인** — 머지된 PR 의 `doing` 5건(RB-167·172·173·174·175)을 `done` 으로 정리하고, 요약 표 진행 수를 항목 기준으로 다시 셌다(M7·M8·M9 가 어긋나 있었음).
 > **11-10 재확인** — GitHub 기준으로 머지된 PR 의 `doing` 23건을 `done` 으로 정리하고, 항목이 없던 PR #284·#331 을 RB-169·RB-170 으로 추가했다.
 > 마일스톤 묶음과 진행 판정은 조정 대상이다. 상태를 바꿀 때는 아래 갱신 규칙을 따른다.
 
@@ -40,22 +41,22 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | # | 마일스톤 | 진행 | 상태 |
 |---|---|---|---|
 | M1 | 플랜보드 코어 | 18/19 | doing |
-| M2 | 컨벤션·구조 정비 | 5/7 | doing |
+| M2 | 컨벤션·구조 정비 | 6/7 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 8/10 | doing |
-| M5 | 사용자 기능 | 10/13 | doing |
+| M5 | 사용자 기능 | 11/13 | doing |
 | M6 | 파일 저장·S3 | 4/5 | doing |
-| M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 6/8 | doing |
-| M8 | AI 계획 생성·스케줄링 | 11/18 | doing |
-| M9 | 퀴즈 고도화 | 14/19 | doing |
-| M10 | 챗봇 재조정 | 10/11 | doing |
+| M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 7/8 | doing |
+| M8 | AI 계획 생성·스케줄링 | 17/19 | doing |
+| M9 | 퀴즈 고도화 | 18/19 | doing |
+| M10 | 챗봇 재조정 | 11/11 | done |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
-| M13 | 인프라·배포 | 10/14 | doing |
+| M13 | 인프라·배포 | 11/14 | doing |
 
 ## 블로커
 
-- **RB-167 DDL 이 코드보다 먼저 머지됨** — rooter-ddl PR #49 가 11-10 에 머지됐는데 rooter-back PR #348 은 아직 open. 운영 DB 에 #49 가 적용됐다면 지금 `main` 은 학생 프로필을 두 번째 등록할 때 `uq_student_profiles_user` 위반으로 500. **#348 을 바로 머지**하고 운영 DB 적용 여부를 확인한다.
+- ~~RB-167 DDL 이 코드보다 먼저 머지됨~~ — **해소**: PR #348 머지 (11-12). 운영 DB 에 rooter-ddl #49 가 적용됐는지는 아직 확인 안 함
 - RB-152 실제 Sentry 수집 확인은 서버 프로젝트 생성과 DSN 설정 후 진행한다. 로컬 자동 테스트는 외부로 전송하지 않는다.
 
 - **RB-014 planboard 네이밍 통일** — `rooter-ddl` #10 open. DDL `schema.sql` 에 구 표기(`plan_boards`, `plan_board_id`)가 그대로 남아 있어 코드만 바꾸면 배포 시 터진다. **DDL 먼저.**
@@ -107,7 +108,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] blocked RB-014 planboard 네이밍 통일 (`plan_boards` → `planboards`) — `rooter-ddl` #10 open
 - [x] done RB-015 code 없이 나가던 에러 응답을 `ErrorResponse` 로 통일, 핸들러 try-catch 제거 — PR #172 (09-28)
 - [x] done RB-016 테스트 격리 — `CatalogServiceTest` 가 `chapters` 를 직접 만들지 않아 새 DB 에서 실패하던 것 수정 — PR #236 (10-04, develop)
-- [ ] doing RB-167 스키마 정규화 1단계 + 학생 프로필 중복 등록 버그 (#347 · PR #348 open · rooter-ddl #48 / PR #49 머지됨 (11-10, **코드보다 먼저 머지** — 운영 DB 적용 여부 미확인)) — 3NF 점검 결과 데이터 이전 없이 되는 것만: `plan_tasks.is_completed`·`is_failed` 삭제(코드 미사용), `chat_turns.session_id` not null, `student_profiles.user_id` unique, `plan_subjects` 범위 단원·`school_textbook_adoptions` 과목을 교과서와 복합 FK. 프로필 `POST /users/{id}/profile` 은 다시 보내면 덮어쓰기(id 유지, 201 그대로 — 전에는 2행이 쌓여 `singleOrNull` 로 프로필 null). `./gradlew test` 454건 0 실패(3 skipped) · 로컬 DB 에 main 스키마 → 새 스키마 psqldef 적용, 재실행 차이 0, 어긋난 단원·과목·중복 프로필이 각각 DB 에서 막힘 확인 · **코드 먼저 머지 → 운영 DB 사전 확인 조회 전부 0 → rooter-ddl 머지·적용** (DB 를 좁히는 변경이라 평소와 반대). 남은 후보: `daily_feedback.daily_plan_id`(예전 행 정리 후 삭제), `level_test_attempts.reference_grade_label`, 퀴즈 4벌 통합
+- [x] done RB-167 스키마 정규화 1단계 + 학생 프로필 중복 등록 버그 (#347 · PR #348 머지 (11-12) · rooter-ddl #48 / PR #49 머지됨 (11-10, 코드보다 먼저 머지 — 운영 DB 적용 여부 미확인)) — 3NF 점검 결과 데이터 이전 없이 되는 것만: `plan_tasks.is_completed`·`is_failed` 삭제(코드 미사용), `chat_turns.session_id` not null, `student_profiles.user_id` unique, `plan_subjects` 범위 단원·`school_textbook_adoptions` 과목을 교과서와 복합 FK. 프로필 `POST /users/{id}/profile` 은 다시 보내면 덮어쓰기(id 유지, 201 그대로 — 전에는 2행이 쌓여 `singleOrNull` 로 프로필 null). `./gradlew test` 454건 0 실패(3 skipped) · 로컬 DB 에 main 스키마 → 새 스키마 psqldef 적용, 재실행 차이 0, 어긋난 단원·과목·중복 프로필이 각각 DB 에서 막힘 확인 · **코드 먼저 머지 → 운영 DB 사전 확인 조회 전부 0 → rooter-ddl 머지·적용** (DB 를 좁히는 변경이라 평소와 반대). 남은 후보: `daily_feedback.daily_plan_id`(예전 행 정리 후 삭제), `level_test_attempts.reference_grade_label`, 퀴즈 4벌 통합 · PR #348 머지 (11-12, `e4bca09`)
 
 ## M3. AI 기능 포팅 (ai-poc)
 
@@ -152,7 +153,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-155 약관·개인정보 동의 이력 (#287, 앱스토어 제출용) — 가입 시 동의를 버전·시각까지 남기고 약관이 바뀌면 재동의를 받는다. 조항은 `code`+`version` 쌍으로 식별하고 DB 에는 문자열로만 저장(카탈로그 테이블·FK 없음) — 조항 추가가 DDL·배포 블로커가 되지 않게. `GET /agreements`(인증 없음, code·required·title·version·url), `POST /users` 의 `agreements` 배열(선택 필드 — 구버전 앱 400 방지, 필수 전부 agreed=true·현재 버전 일치여야 하고 유저 생성과 같은 트랜잭션에서 저장), `POST/GET /users/{id}/agreements`(재동의·철회 append, 본인만), 로그인·내 정보 응답의 `pendingAgreements`(필수 중 행 없음·거부·버전 불일치). `required` 는 동의 시점 스냅샷이고 이력은 append-only. 문서 본문은 `nepyh/rooter-legal` 의 버전별 고정 URL 이 정본이고 conf 의 `agreements` 가 version·url 을 들고 있다(code 가 enum 과 어긋나면 기동 실패) · DB 변경 있음 · `./gradlew test` 360건 0 실패(3 skipped, 신규 15건 `UserAgreementServiceTest`) · **DDL 선행: rooter-ddl #40 / PR #41 (`user_agreements`) → 운영 DB 적용 → 그다음 머지** · 실패 code: UNKNOWN_AGREEMENT_CODE / DUPLICATED_AGREEMENT_CODE / AGREEMENT_VERSION_MISMATCH / REQUIRED_AGREEMENT_MISSING / EMPTY_AGREEMENTS · 이슈 #287, PR #322 머지 (10-26) (`e719d5f`)
 - [x] done RB-139 회원 탈퇴 `DELETE /users/{id}` (앱스토어 제출 필수) — 본인만, `users` 행 삭제로 하위 기록은 DDL cascade(rooter-ddl 스키마에서 users 에서 닿는 FK 25개 전부 CASCADE·막는 FK 0 확인), 아바타 S3 오브젝트 삭제(실패해도 탈퇴 성공), 이후 토큰은 유저가 없어 401 · `./gradlew test` 240건 0 실패 · DDL 변경 없음 · 남은 것: 애플 로그인 토큰 철회(`.p8` 키 필요)·약관 동의 기록 · PR #286 머지 (10-21)
 - [x] done RB-157 가입 뒤 필수 약관 철회 허용 (#325 · PR #326 머지 (10-27)) — 프론트 "약관 철회하기" 가 필수 약관(TERMS·PRIVACY) `agreed=false` 에 400 `REQUIRED_AGREEMENT_MISSING` 으로 항상 실패. 철회를 막을지는 프론트가 정하도록 `POST /users/{id}/agreements` 는 필수 철회도 새 행으로 남기고 `pendingAgreements` 로 돌려줌, 가입의 필수 검증은 그대로 (`0045c40`·`417f98b`) · `./gradlew test` 362건 0 실패(신규 2건) · 에러 code 추가 없음 · DB 변경 없음
-- [ ] doing RB-175 약관·개인정보 처리방침 링크 404 (#357) — `GET /agreements` 의 url 이 `rooter-legal` 에 없는 `2026-11-01` 버전을 가리켜 가입 동의 화면·약관 동의 내역의 "보기"가 404. rooter-legal 이 10-27 에 문서를 `2026-10-27`(문서 안 버전·시행일도 같음, 처리방침은 16조 → 15조로 교체)로 바꿨는데 conf 만 그대로였던 것. `dev.conf`·`dev-s3.conf`·`prod.conf` 의 TERMS·PRIVACY `version`·`url` 을 둘 다 `2026-10-27` 로 — 동의 기록이 실제 게시 문서를 가리키게. `2026-11-01` 로 동의한 기존 회원은 버전 불일치로 `pendingAgreements` 에 들어가 다음 로그인에 재동의(프론트 `useAgreementGate` 시트) · 코드·API·에러 code 변경 없음 · DB 변경 없음 · `./gradlew test` 473건 0 실패(3 skipped) · 두 url 200 확인 · PR #358
+- [x] done RB-175 약관·개인정보 처리방침 링크 404 (#357) — `GET /agreements` 의 url 이 `rooter-legal` 에 없는 `2026-11-01` 버전을 가리켜 가입 동의 화면·약관 동의 내역의 "보기"가 404. rooter-legal 이 10-27 에 문서를 `2026-10-27`(문서 안 버전·시행일도 같음, 처리방침은 16조 → 15조로 교체)로 바꿨는데 conf 만 그대로였던 것. `dev.conf`·`dev-s3.conf`·`prod.conf` 의 TERMS·PRIVACY `version`·`url` 을 둘 다 `2026-10-27` 로 — 동의 기록이 실제 게시 문서를 가리키게. `2026-11-01` 로 동의한 기존 회원은 버전 불일치로 `pendingAgreements` 에 들어가 다음 로그인에 재동의(프론트 `useAgreementGate` 시트) · 코드·API·에러 code 변경 없음 · DB 변경 없음 · `./gradlew test` 473건 0 실패(3 skipped) · 두 url 200 확인 · PR #358 · PR #358 머지 (11-16, `3520826`)
 
 ## M6. 파일 저장·S3
 
@@ -224,7 +225,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-137 퀴즈 히스토리 목록 조회 — `GET /quiz-history` 차수 단위 최신순(id 커서 50개)·todo/missed/done 필터(자동 생성된 채 안 푼 퀴즈는 계획 날짜 자정이 지나면 missed, 풀면 done), 항목에 제목(`plan_tasks.task_name`)·과목(문항 단원 → 교과서 → 과목, 실패 시 할일 이름 폴백)·시간 3종(생성/응시 예정/완료)·점수, 제출 시각(`submitted_at`) 기록 — 이슈 #275, PR #277 머지 (10-20) (`a3bf5ee`) · `./gradlew test` 퀴즈·복습 6개 스펙 71건 0 실패 · 조회 전용(LLM 없음) · **DDL 선행: rooter-ddl #34 (PR #35 머지) → 운영 DB 에 `submitted_at` 컬럼 적용 → 이 PR 머지** (main 머지가 곧 운영 배포라 컬럼 없이 나가면 퀴즈 제출 실패) · 일일 퀴즈·상세 조회는 범위 밖
 - [x] done RB-138 퀴즈 히스토리 상세 조회 — `GET /quiz-history/{quizId}` 문항별 내가 고른 답·정답·문항 풀이(`explanation`)·오답 보기별 틀린 이유(`reason`, 답변 API 와 같은 이름), 상태는 목록과 같은 TODO/MISSED/DONE, 채점 전 차수는 정답·풀이 null 로 숨김, 본인 차수만(아니면 404) — 이슈 #276, PR #278 머지 (10-20) (`68fb2dd`) · `./gradlew test` 퀴즈·복습 6개 스펙 74건 0 실패 → RB-137 MISSED 반영 후 태스크 퀴즈 3개 스펙 51건 0 실패 · 조회 전용 · RB-137(목록) 위에 얹은 브랜치
 - [x] done RB-150 할일 퀴즈 문항이 5개 이상이면 수학 할일에 과학 문제가 섞이던 것 (#308) — `quizContextOf` 가 보드의 모든 과목 범위를 프롬프트에 넘겨 AI 가 문항 수를 채우려고 다른 과목으로 넘어감. 할일 과목(`plan_tasks.subject_id`, 없으면 이름으로 추정)의 범위만 넘기고 못 정하면 전체 범위, 프롬프트에 "같은 과목에서만 출제" 규칙 추가 (`2ad9c0c`·`fbcb9ad`) · `./gradlew test` 320건 0 실패(신규 3건, 수정 전 코드에서는 2건 실패 확인) · 실제 DeepSeek(deepseek-flash, 7문항, 조건별 5회): 수정 전 "수학 문제집 30쪽 풀기" 5회 모두 4·5번째 문항부터 과학(35문항 중 18개) → 수정 후 70문항 중 0개, 프롬프트 규칙만(전체 범위)으로도 35문항 중 0개 · 이슈 #308, PR #309 머지 (10-22) · DB 변경 없음
-- [ ] doing RB-173 시작 전인 할 일을 퀴즈로 미리 완료할 수 있던 것 (#353) — `TaskQuizService.openQuiz`·`answerQuestion`·`submitQuiz`·`PlanTaskService` 의 PENDING → FAILED 가 소유권·상태 전이만 보고 시각은 안 봐서, 내일 할일·오늘 시작 전 할일도 퀴즈 통과로 바로 `DONE`·실패 처리됨. 시작 시각 = 계획 날짜 + `startTime`(한국 시간, `isReachedInAppZone`)이 되기 전이면 400 `TASK_NOT_STARTED`(퀴즈 열기·답변·제출, 실패 처리 — 같은 code — 답변은 코드리뷰 반영: 시작 전에 만들어진 퀴즈를 풀면 정답·풀이가 미리 보이고 오답이 복습으로 복사됨), 정각부터 허용. 이름·시간 수정·삭제는 시작 전에도 허용. `PlanTaskService` 에 주입 `clock` 추가, Swagger 400 설명 반영 · 새 code `TASK_NOT_STARTED` · DB 변경 없음 · `./gradlew test` 467건 0 실패(3 skipped, 신규 4건) · PR #354
+- [x] done RB-173 시작 전인 할 일을 퀴즈로 미리 완료할 수 있던 것 (#353) — `TaskQuizService.openQuiz`·`answerQuestion`·`submitQuiz`·`PlanTaskService` 의 PENDING → FAILED 가 소유권·상태 전이만 보고 시각은 안 봐서, 내일 할일·오늘 시작 전 할일도 퀴즈 통과로 바로 `DONE`·실패 처리됨. 시작 시각 = 계획 날짜 + `startTime`(한국 시간, `isReachedInAppZone`)이 되기 전이면 400 `TASK_NOT_STARTED`(퀴즈 열기·답변·제출, 실패 처리 — 같은 code — 답변은 코드리뷰 반영: 시작 전에 만들어진 퀴즈를 풀면 정답·풀이가 미리 보이고 오답이 복습으로 복사됨), 정각부터 허용. 이름·시간 수정·삭제는 시작 전에도 허용. `PlanTaskService` 에 주입 `clock` 추가, Swagger 400 설명 반영 · 새 code `TASK_NOT_STARTED` · DB 변경 없음 · `./gradlew test` 467건 0 실패(3 skipped, 신규 4건) · PR #354 · PR #354 머지 (11-15, `9cbfb14`) · 프론트 rooter-front #260 에 보충 코멘트
 
 ## M10. 챗봇 재조정
 
@@ -240,7 +241,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-163 챗봇이 플랜보드 기간 전체 계획을 보고 다른 날 할일도 고치기·추가·삭제·미루기 (#337, RB-162 위에 쌓음) — 지금까지 AI 는 대화한 날 할일만 봐서 "목요일 수학 줄여줘"·"이번 주 너무 빡세"·"목요일에 뭐 해?" 를 못 했음. 프롬프트 `<PLAN_DAYS>`(기간 전체 날짜별 할일·시각·분·과목·상태, 지난 날은 수정 불가 표시, 최대 62일), `edits[].date`·`postpone.from_date` 추가, `editTasks` 를 날짜별로 판단·저장(계획 없던 날은 `insertIgnore` 로 생성), 다른 날 결과는 `updatedDays`. 오늘~플랜보드 끝만 수정. API·DDL 변경 없음 · 실제 DeepSeek 9문장 × 2회 18/18 의도대로(다른 날 줄이기·빼기·주말 추가·주 단위 줄이기·다른 날 미루기·다른 날 질문·지난 날 거절·다른 날 학원·오늘+다른 날 함께) · `./gradlew test` 426건 통과 0 실패(신규 `ChatServiceTest` 5건) — 이슈 #337, PR #338 은 닫고 PR #335 에 합침 · **PR #335 에 합쳐 머지 `e033dc0` (11-02)** (PR #338 은 base 브랜치에 들어가 merged 표시)
 - [x] done RB-166 챗봇 세션(유저 전체 목록·제목)·답변 좋아요/싫어요·메시지 삭제·교과서 질문 답변 (#342, 프론트 요청) — PR #343 merged · rooter-ddl #45 / PR #46 merged · 세션 전체 삭제 #344 / PR #345 머지 (11-03) · `chat_sessions` 신규 + `chat_turns.session_id`·`feedback`. 메시지 보내기는 선택 `sessionId`(없으면 그날 마지막 대화 세션, 없으면 새로 — 예전 앱 호환)이고 AI 히스토리는 그 세션 대화만, 제목은 세션 첫 메시지의 같은 LLM 응답 `session_title`(추가 호출 없음, 없으면 첫 메시지 앞 30자). 응답에 `sessionId`·`sessionTitle`·`userTurnId`·`assistantTurnId`, 이력 항목에 `id`·`sessionId`·`dailyPlanId`·`feedback`. `GET`·`POST /chat/sessions`·`DELETE /chat/sessions/{id}`·`DELETE /chat/sessions`(전체, `deletedSessionCount`)·`GET /chat/sessions/{id}/turns`·`PUT /chat/turns/{id}/feedback`(챗봇 답변만, null 취소)·`DELETE /chat/turns/{id}`(질문·답 한 쌍, 계획은 안 되돌림). 프롬프트에 교과서·개념 질문 처리(학년·`PLAN_SUBJECTS` 단원 기준, 5~10문장, 계획 그대로). 새 code: CHAT_SESSION_NOT_FOUND·CHAT_TURN_NOT_FOUND(404)·CHAT_FEEDBACK_NOT_ALLOWED(400) · `./gradlew test` 453건 0 실패(3 skipped, 신규 8건) · rooter-ddl `schema.sql` psqldef dry-run 후 로컬 DB 적용, 기존 대화 이전 SQL(날짜별 계획당 세션 1개, 재실행 안전) 검증, 그 DB 로 앱 띄워 실제 DeepSeek 로 교과서 질문·세션 기억 분리·제목·좋아요·쌍 삭제·남의 세션 404 확인 · **DDL 선행: rooter-ddl PR 머지 → 운영 DB 적용 + 이전 SQL → 그다음 머지** · `session_id not null` 은 rooter-ddl PR #49 로 머지(11-10, RB-167)
 - [x] done RB-171 챗봇이 애매한 요청은 바꾸지 않고 되묻기 — PR #350 머지 (11-12) · "일정 미뤄주고 과학 일정 추가해줘"처럼 미루기와 할일 고치기가 한 메시지에 섞이면 미루기만 하고 추가는 조용히 버려지던 것. AI 응답에 `needs_clarification` 을 추가해 동작·대상 할일·날짜를 정할 수 없으면 계획을 건드리지 않고 되묻고(프롬프트 11번), AI 가 미루기·고치기를 함께 채워도 서버가 둘 다 보류하고 알아들은 내용을 보여주며 되묻는다. 되묻는 답변은 `CLARIFY_SUFFIX` 문장으로 끝나고 다음 메시지가 그 답이면 다시 묻지 않으며, "둘 다"면 미루기 → 다시 읽은 계획으로 할일 고치기 순으로 둘 다 반영(`loadContext` 분리). AI 가 되물으면 같이 채운 미루기·고치기는 되묻기의 답이어도 반영하지 않음(코드리뷰). "둘 다" 답에는 미루는 할일의 edit 날짜를 미룰 날로, 앞 메시지의 다른 날 일정도 함께 채우도록 프롬프트 보강. 이슈 #349 · API·DTO·에러 code 변경 없음 · DB 변경 없음 · `./gradlew test` 457건 0 실패(3 skipped, 신규 4건) · 실제 DeepSeek(deepseek-flash) 6개 메시지 × 2회: 섞인 요청·"과학 일정 좀 바꿔줘" 4/4 되물음, 분명한 미루기·추가 4/4 바로 반영, 되묻기 뒤 "둘 다" 2/2 미루기+추가·"과학 추가만" 2/2 추가만(모두 needs_clarification=false) · RB-167~170 은 열린 PR #346·#348 이 사용 중이라 171
-- [ ] doing RB-172 계획이 없어도 챗봇과 대화 (#351) — 메시지 보내기가 `POST /daily-plans/{dailyPlanId}/chat/message` 뿐이고 `chat_turns.daily_plan_id` 가 not null 이라 계획 없는 학생은 교과서 질문·잡담도 못 하던 것. `POST /chat/message`(body·응답은 기존과 같음, `sessionId` 없으면 새 세션, `planChanged` 항상 false) + 계획 없는 전용 프롬프트 `chat-no-plan.md`(교과서 질문·잡담만, 계획 바꾸기·시험일 질문엔 플랜보드가 없으면 계획을 먼저 만들라고, 있으면 그 날짜 계획을 열고 말하라고 안내). AI 가 계획 필드를 채워 오면 답변도 "바꿨어요"일 수 있어 고정 안내(`NO_PLAN_BOARD_REPLY`·`NO_PLAN_OPEN_REPLY`)로 바꿈. 코드리뷰로 `PromptLoader` 를 한 번에 치환하게 고침(학생 메시지 안의 `{{USER_MESSAGE}}` 같은 글자가 다시 치환되던 것, 기존 프롬프트 전부 해당). 저장되는 대화는 `dailyPlanId` null → `ChatTurnResponse.dailyPlanId` nullable. 메시지 소유 확인은 세션 주인 기준(세션 없는 예전 대화만 플랜보드 주인) · 새 code 없음 · `./gradlew test` 458건 0 실패(3 skipped, 신규 5건) · 실제 DeepSeek(deepseek-flash) 플랜보드 없음/있음 × 4개 메시지 × 2회 16/16 JSON 정상: 교과서 질문 설명, 미루기·학원 일정·시험일은 없으면 계획 먼저 만들기·있으면 그 날짜 계획 열기 안내 · rooter-ddl PR #51(`daily_plan_id` not null 제거, psqldef 로컬 검증) · **DDL 선행: rooter-ddl #51 머지 → 운영 DB 적용 → 그다음 머지**
+- [x] done RB-172 계획이 없어도 챗봇과 대화 (#351) — 메시지 보내기가 `POST /daily-plans/{dailyPlanId}/chat/message` 뿐이고 `chat_turns.daily_plan_id` 가 not null 이라 계획 없는 학생은 교과서 질문·잡담도 못 하던 것. `POST /chat/message`(body·응답은 기존과 같음, `sessionId` 없으면 새 세션, `planChanged` 항상 false) + 계획 없는 전용 프롬프트 `chat-no-plan.md`(교과서 질문·잡담만, 계획 바꾸기·시험일 질문엔 플랜보드가 없으면 계획을 먼저 만들라고, 있으면 그 날짜 계획을 열고 말하라고 안내). AI 가 계획 필드를 채워 오면 답변도 "바꿨어요"일 수 있어 고정 안내(`NO_PLAN_BOARD_REPLY`·`NO_PLAN_OPEN_REPLY`)로 바꿈. 코드리뷰로 `PromptLoader` 를 한 번에 치환하게 고침(학생 메시지 안의 `{{USER_MESSAGE}}` 같은 글자가 다시 치환되던 것, 기존 프롬프트 전부 해당). 저장되는 대화는 `dailyPlanId` null → `ChatTurnResponse.dailyPlanId` nullable. 메시지 소유 확인은 세션 주인 기준(세션 없는 예전 대화만 플랜보드 주인) · 새 code 없음 · `./gradlew test` 458건 0 실패(3 skipped, 신규 5건) · 실제 DeepSeek(deepseek-flash) 플랜보드 없음/있음 × 4개 메시지 × 2회 16/16 JSON 정상: 교과서 질문 설명, 미루기·학원 일정·시험일은 없으면 계획 먼저 만들기·있으면 그 날짜 계획 열기 안내 · rooter-ddl PR #51(`daily_plan_id` not null 제거, psqldef 로컬 검증) · **DDL 선행: rooter-ddl #51 머지 → 운영 DB 적용 → 그다음 머지** · rooter-ddl #51 머지 (11-12 09:04) 뒤 PR #352 머지 (11-12, `95e3a2d`)
 
 ## M11. 교과서 카탈로그
 
@@ -278,7 +279,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 
 - [x] done RB-152 서버 Sentry 오류 수집 (#313 · PR #314 머지 (10-23) · `7c9fb63`) — DSN 선택 활성화, 5xx·기동·스케줄러 예외의 종류와 스택만 전송, 원문 메시지·요청·개인정보 제외. 환경변수·ECS 배선 및 메모리 transport 테스트 5개, 격리 PostgreSQL에서 전체 test/build 통과. 실제 프로젝트 수집 검증은 DSN 설정 후 별도 확인.
 - [x] done RB-156 브라우저에서 PATCH API 가 CORS preflight 403 으로 막히던 것 (#323 · PR #324 머지 (10-27)) — `install(CORS)` 허용 메서드에 `Patch` 가 없어 GitHub Pages Swagger Try it out 의 PATCH 5개(plan-tasks·plan-boards·plan-boards subjects·calendar events·users)가 실패. `allowMethod(HttpMethod.Patch)` 추가 (`e390c5c`) · 로컬 jar 실행 preflight PATCH 200·`Access-Control-Allow-Methods` 에 PATCH 포함 확인 · `./gradlew test` 360건 0 실패 · 앱(RN)은 CORS 무관이라 영향 없음 · DB 변경 없음
-- [ ] doing RB-174 스케줄러 Sentry Crons heartbeat (#355) — 스케줄러 루프가 DB 오류 한 번에 죽어도(#317) Sentry 에는 오류 이벤트 한 번만 남아 놓치던 것. 무료 플랜은 cron 모니터가 1개라 잡마다가 아니라 **`scheduler` 모니터 하나**에 틱 간격(1분)마다 heartbeat: `monitored` 잡(`task_quiz_trigger`·`task_reminder`·`feedback_replan`, 예제 잡 제외)이 모두 정상이면 OK, 루프가 죽었거나·마지막 틱이 실패했거나·한 틱이 30분 넘게 진행 중이면 ERROR(어느 잡인지는 서버 로그), 스케줄러가 통째로 멈추면 누락. `SchedulerEngine.runJob` 이 성공 여부를 돌려줌, 모니터 설정은 간격 1분·여유 5분·연속 3번 실패해야 이슈(`schedulerMonitorConfig`), heartbeat 는 모니터 이름·상태·environment·release·설정만(scope 사용자·태그 제외), DSN 없으면 안 보냄. `JobMonitor`(기본 `SentryJobMonitor`)로 테스트에서 바꿔 끼움, `docs/sentry.md` 5절 · 새 환경변수 없음 · DB 변경 없음 · `./gradlew test` 473건 0 실패(3 skipped, 신규 6건) · PR #356 · 실제 Sentry 수신 확인은 배포 후
+- [x] done RB-174 스케줄러 Sentry Crons heartbeat (#355) — 스케줄러 루프가 DB 오류 한 번에 죽어도(#317) Sentry 에는 오류 이벤트 한 번만 남아 놓치던 것. 무료 플랜은 cron 모니터가 1개라 잡마다가 아니라 **`scheduler` 모니터 하나**에 틱 간격(1분)마다 heartbeat: `monitored` 잡(`task_quiz_trigger`·`task_reminder`·`feedback_replan`, 예제 잡 제외)이 모두 정상이면 OK, 루프가 죽었거나·마지막 틱이 실패했거나·한 틱이 30분 넘게 진행 중이면 ERROR(어느 잡인지는 서버 로그), 스케줄러가 통째로 멈추면 누락. `SchedulerEngine.runJob` 이 성공 여부를 돌려줌, 모니터 설정은 간격 1분·여유 5분·연속 3번 실패해야 이슈(`schedulerMonitorConfig`), heartbeat 는 모니터 이름·상태·environment·release·설정만(scope 사용자·태그 제외), DSN 없으면 안 보냄. `JobMonitor`(기본 `SentryJobMonitor`)로 테스트에서 바꿔 끼움, `docs/sentry.md` 5절 · 새 환경변수 없음 · DB 변경 없음 · `./gradlew test` 473건 0 실패(3 skipped, 신규 6건) · PR #356 · 실제 Sentry 수신 확인은 배포 후 · PR #356 머지 (11-15, `95ce030`)
 
 ## 다음 후보 (우선순위)
 
