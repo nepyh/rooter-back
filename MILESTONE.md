@@ -52,7 +52,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M10 | 챗봇 재조정 | 11/11 | done |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
-| M13 | 인프라·배포 | 11/14 | doing |
+| M13 | 인프라·배포 | 11/15 | doing |
 
 ## 블로커
 
@@ -281,6 +281,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-152 서버 Sentry 오류 수집 (#313 · PR #314 머지 (10-23) · `7c9fb63`) — DSN 선택 활성화, 5xx·기동·스케줄러 예외의 종류와 스택만 전송, 원문 메시지·요청·개인정보 제외. 환경변수·ECS 배선 및 메모리 transport 테스트 5개, 격리 PostgreSQL에서 전체 test/build 통과. 실제 프로젝트 수집 검증은 DSN 설정 후 별도 확인.
 - [x] done RB-156 브라우저에서 PATCH API 가 CORS preflight 403 으로 막히던 것 (#323 · PR #324 머지 (10-27)) — `install(CORS)` 허용 메서드에 `Patch` 가 없어 GitHub Pages Swagger Try it out 의 PATCH 5개(plan-tasks·plan-boards·plan-boards subjects·calendar events·users)가 실패. `allowMethod(HttpMethod.Patch)` 추가 (`e390c5c`) · 로컬 jar 실행 preflight PATCH 200·`Access-Control-Allow-Methods` 에 PATCH 포함 확인 · `./gradlew test` 360건 0 실패 · 앱(RN)은 CORS 무관이라 영향 없음 · DB 변경 없음
 - [x] done RB-174 스케줄러 Sentry Crons heartbeat (#355) — 스케줄러 루프가 DB 오류 한 번에 죽어도(#317) Sentry 에는 오류 이벤트 한 번만 남아 놓치던 것. 무료 플랜은 cron 모니터가 1개라 잡마다가 아니라 **`scheduler` 모니터 하나**에 틱 간격(1분)마다 heartbeat: `monitored` 잡(`task_quiz_trigger`·`task_reminder`·`feedback_replan`, 예제 잡 제외)이 모두 정상이면 OK, 루프가 죽었거나·마지막 틱이 실패했거나·한 틱이 30분 넘게 진행 중이면 ERROR(어느 잡인지는 서버 로그), 스케줄러가 통째로 멈추면 누락. `SchedulerEngine.runJob` 이 성공 여부를 돌려줌, 모니터 설정은 간격 1분·여유 5분·연속 3번 실패해야 이슈(`schedulerMonitorConfig`), heartbeat 는 모니터 이름·상태·environment·release·설정만(scope 사용자·태그 제외), DSN 없으면 안 보냄. `JobMonitor`(기본 `SentryJobMonitor`)로 테스트에서 바꿔 끼움, `docs/sentry.md` 5절 · 새 환경변수 없음 · DB 변경 없음 · `./gradlew test` 473건 0 실패(3 skipped, 신규 6건) · PR #356 · 실제 Sentry 수신 확인은 배포 후 · PR #356 머지 (11-15, `95ce030`)
+- [ ] doing RB-177 Sentry 성능 추적(요청 트랜잭션 + DB 쿼리 span) (#360) — 오류만 수집해서 응답이 느려도 API·쿼리 중 어디가 원인인지 몰랐던 것, nGrinder 부하 테스트(#361)에서 병목을 볼 수단. `SENTRY_TRACES_SAMPLE_RATE`(0~1, 기본 0 = 끔) 4단계 배선(예제·compose·dev/prod/dev-s3 conf·`AppConfig`), Ktor 요청 트랜잭션 플러그인 `RequestTracing.kt`(이름은 라우트 템플릿 `GET /api/plan-tasks/{taskId}`, 응답이 나간 뒤 `ResponseSent` 에서 닫아 예외로 끝난 4xx 도 StatusPages 응답 코드로 기록, `/api/health`·`OPTIONS`·매칭 안 된 경로 제외, `SentryContext` 로 코루틴 scope 전달), `sentry-jdbc`(P6Spy)로 DataSource 를 감싸 쿼리 span(SQL 문만, 바인딩 값 없음, `spy.properties` 로 P6Spy 로그 끔), `sanitizedTransaction` 허용 필드 복사(라우트 이름·op·SQL·시각·상태·응답 코드·environment·release 만, 스레드·DB 접속 정보·사용자·헤더 제외, SQL 리터럴도 `?`), `docs/sentry.md` 6절 · 외부 호출(LLM·NICE·Expo) span 은 뒤로 · 운영 ECS 에는 비율 미주입(꺼짐 유지) · DB 변경 없음 · `./gradlew test` 481건 중 S3 3건(AWS 자격증명 없음, 무관)만 실패, 신규 `RequestTracingTest` 5건 · 로컬 jar + 가짜 수집 서버로 Exposed 로그인 쿼리 span·이메일/비밀번호 값 미포함 확인
 
 ## 다음 후보 (우선순위)
 
