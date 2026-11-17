@@ -21,6 +21,12 @@ data class ChangePasswordRequest(
     val newPassword: String
 )
 
+/** 비밀번호 변경 첫 단계에서 현재 비밀번호만 맞춰 본다 (#364) */
+@Serializable
+data class VerifyPasswordRequest(
+    val currentPassword: String
+)
+
 @Serializable
 data class PasswordUpdateResponse(
     val message: String,

@@ -8,6 +8,7 @@ import com.github.nepyh.rooter.module.user.dto.AgreementsUpdateRequest
 import com.github.nepyh.rooter.module.user.dto.AgreementsUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.AvatarUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
+import com.github.nepyh.rooter.module.user.dto.VerifyPasswordRequest
 import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.CommuteTimeRequest
 import com.github.nepyh.rooter.module.user.dto.CommuteTimeResponse
@@ -428,6 +429,57 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
                 }
                 HttpStatusCode.NotFound {
                     description = "존재하지 않는 유저"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        post("{id}/password/verify") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val principalUserId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+            if (principalUserId != id) {
+                return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("FORBIDDEN", "본인 정보만 확인할 수 있습니다."))
+            }
+            val request = call.receive<VerifyPasswordRequest>()
+            authService.verifyPassword(id, request)
+            call.respond(HttpStatusCode.NoContent)
+        }.describe {
+            tag("User")
+            summary = "현재 비밀번호 확인"
+            description = "비밀번호 변경 첫 단계(현재 비밀번호 입력)에서 현재 비밀번호가 맞는지만 확인. 아무것도 바꾸지 않고 토큰도 그대로. 본인만 가능. " +
+                "맞으면 204, 틀리면 401 WRONG_CURRENT_PASSWORD (로그아웃 대상인 code=UNAUTHORIZED 와 구분). " +
+                "PUT /users/{id}/password 도 현재 비밀번호를 다시 확인하므로 이 단계를 건너뛰어도 안전함. " +
+                "소셜 로그인 계정은 비밀번호가 없어 항상 WRONG_CURRENT_PASSWORD"
+            parameters {
+                path("id") {
+                    description = "유저 ID"
+                    required = true
+                    schema = jsonSchema<Int>()
+                }
+            }
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<VerifyPasswordRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.NoContent {
+                    description = "현재 비밀번호가 맞음"
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 body 가 없거나 currentPassword 가 빠짐 (code=INVALID_REQUEST_BODY)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음 (code=UNAUTHORIZED), 또는 현재 비밀번호 불일치 (code=WRONG_CURRENT_PASSWORD)"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 계정이 아님 (code=FORBIDDEN)"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 유저 (code=USER_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"

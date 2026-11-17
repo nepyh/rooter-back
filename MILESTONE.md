@@ -44,7 +44,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M2 | 컨벤션·구조 정비 | 6/7 | doing |
 | M3 | AI 기능 포팅 (ai-poc) | 6/7 | doing |
 | M4 | school·NICE 연동 | 8/10 | doing |
-| M5 | 사용자 기능 | 11/13 | doing |
+| M5 | 사용자 기능 | 11/14 | doing |
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 7/8 | doing |
 | M8 | AI 계획 생성·스케줄링 | 17/19 | doing |
@@ -154,6 +154,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-139 회원 탈퇴 `DELETE /users/{id}` (앱스토어 제출 필수) — 본인만, `users` 행 삭제로 하위 기록은 DDL cascade(rooter-ddl 스키마에서 users 에서 닿는 FK 25개 전부 CASCADE·막는 FK 0 확인), 아바타 S3 오브젝트 삭제(실패해도 탈퇴 성공), 이후 토큰은 유저가 없어 401 · `./gradlew test` 240건 0 실패 · DDL 변경 없음 · 남은 것: 애플 로그인 토큰 철회(`.p8` 키 필요)·약관 동의 기록 · PR #286 머지 (10-21)
 - [x] done RB-157 가입 뒤 필수 약관 철회 허용 (#325 · PR #326 머지 (10-27)) — 프론트 "약관 철회하기" 가 필수 약관(TERMS·PRIVACY) `agreed=false` 에 400 `REQUIRED_AGREEMENT_MISSING` 으로 항상 실패. 철회를 막을지는 프론트가 정하도록 `POST /users/{id}/agreements` 는 필수 철회도 새 행으로 남기고 `pendingAgreements` 로 돌려줌, 가입의 필수 검증은 그대로 (`0045c40`·`417f98b`) · `./gradlew test` 362건 0 실패(신규 2건) · 에러 code 추가 없음 · DB 변경 없음
 - [x] done RB-175 약관·개인정보 처리방침 링크 404 (#357) — `GET /agreements` 의 url 이 `rooter-legal` 에 없는 `2026-11-01` 버전을 가리켜 가입 동의 화면·약관 동의 내역의 "보기"가 404. rooter-legal 이 10-27 에 문서를 `2026-10-27`(문서 안 버전·시행일도 같음, 처리방침은 16조 → 15조로 교체)로 바꿨는데 conf 만 그대로였던 것. `dev.conf`·`dev-s3.conf`·`prod.conf` 의 TERMS·PRIVACY `version`·`url` 을 둘 다 `2026-10-27` 로 — 동의 기록이 실제 게시 문서를 가리키게. `2026-11-01` 로 동의한 기존 회원은 버전 불일치로 `pendingAgreements` 에 들어가 다음 로그인에 재동의(프론트 `useAgreementGate` 시트) · 코드·API·에러 code 변경 없음 · DB 변경 없음 · `./gradlew test` 473건 0 실패(3 skipped) · 두 url 200 확인 · PR #358 · PR #358 머지 (11-16, `3520826`)
+- [ ] doing RB-176 비밀번호 변경 전 현재 비밀번호 확인 API (#364) — 비밀번호 변경 ① 현재 비밀번호 단계에서 확인할 API 가 없어, 틀린 비밀번호를 ② 새 비밀번호까지 입력한 뒤 `PUT /users/{id}/password` 의 `WRONG_CURRENT_PASSWORD` 로만 알 수 있던 것. `POST /users/{id}/password/verify` (`{currentPassword}`, 본인만): 맞으면 204, 틀리면 401 `WRONG_CURRENT_PASSWORD`(기존 code 재사용 — 프론트 로그아웃 처리는 `UNAUTHORIZED` 만이라 겹치지 않음). 아무것도 바꾸지 않음(tokenVersion·토큰·푸시 토큰 그대로). `AuthService.requireCurrentPassword` 로 변경과 같은 검사를 공유하고, 변경 API 의 검사는 그대로 둠. 반복 시도 제한은 넣지 않음 — 로그인에도 없고, 같은 검사를 하는 변경 API 로도 똑같이 시도할 수 있어 새 공격 경로가 아님(본인 JWT 필요). 제한은 로그인·변경과 함께 #365 로 따로. 코드리뷰: Swagger 400 `INVALID_REQUEST_BODY`·404 `USER_NOT_FOUND` 추가, 401 이 `UNAUTHORIZED`·`WRONG_CURRENT_PASSWORD` 둘인 것은 `PUT` 과 맞추려고 그대로, 소셜 전용 계정이 항상 "틀림"인 것은 #366 · 새 code 없음 · DB 변경 없음 · `./gradlew test` 476건 0 실패(3 skipped, 신규 3건) · 프론트 rooter-front #280 · PR #367
 
 ## M6. 파일 저장·S3
 
