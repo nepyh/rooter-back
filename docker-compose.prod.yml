@@ -23,6 +23,7 @@ services:
       - SENTRY_DSN=${SENTRY_DSN:-}
       - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
       - SENTRY_RELEASE=${SENTRY_RELEASE:-}
+      - SENTRY_TRACES_SAMPLE_RATE=${SENTRY_TRACES_SAMPLE_RATE:-0}
 
       # Expo 푸시 액세스 토큰 — Enhanced Security for Push 를 켰을 때만 필요, 비어 있으면 토큰 없이 발송
       - EXPO_ACCESS_TOKEN=${EXPO_ACCESS_TOKEN:-}
