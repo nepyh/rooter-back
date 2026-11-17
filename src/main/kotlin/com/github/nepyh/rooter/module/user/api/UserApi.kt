@@ -470,7 +470,7 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
                     description = "현재 비밀번호가 맞음"
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID (code=INVALID_ID)"
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 body 가 없거나 currentPassword 가 빠짐 (code=INVALID_REQUEST_BODY)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음 (code=UNAUTHORIZED), 또는 현재 비밀번호 불일치 (code=WRONG_CURRENT_PASSWORD)"
@@ -479,7 +479,7 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
                     description = "본인 계정이 아님 (code=FORBIDDEN)"
                 }
                 HttpStatusCode.NotFound {
-                    description = "존재하지 않는 유저"
+                    description = "존재하지 않는 유저 (code=USER_NOT_FOUND)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
