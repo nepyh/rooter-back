@@ -4,6 +4,7 @@ import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.github.nepyh.rooter.module.notification.DeviceTokenService
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
+import com.github.nepyh.rooter.module.user.dto.VerifyPasswordRequest
 import com.github.nepyh.rooter.module.user.dto.PasswordUpdateResponse
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginResponse
@@ -88,11 +89,7 @@ class AuthService(
      * 푸시 토큰도 전부 지운다 — 잃어버린 폰에 알림이 가지 않게. 요청한 기기는 새 JWT 로 푸시 토큰을 다시 등록해야 한다.
      */
     fun changePassword(userId: Int, request: ChangePasswordRequest): PasswordUpdateResponse {
-        val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
-
-        if (!BCrypt.checkpw(request.currentPassword, user.password)) {
-            throw UserValidationException.WrongCurrentPasswordException()
-        }
+        requireCurrentPassword(userId, request.currentPassword)
 
         val passwordRegex = Regex("^(?=.*[A-Za-z])(?=.*\\d).{8,}$")
         if (!passwordRegex.matches(request.newPassword)) {
@@ -109,6 +106,22 @@ class AuthService(
             message = "비밀번호가 변경되었습니다.",
             token = issueToken(updatedUser).token
         )
+    }
+
+    /**
+     * 비밀번호 변경 첫 단계(현재 비밀번호 입력)에서 맞는지만 확인한다 (#364). 아무것도 바꾸지 않는다.
+     * 앱이 이 단계를 건너뛰어도 [changePassword] 가 같은 검사를 다시 한다.
+     */
+    fun verifyPassword(userId: Int, request: VerifyPasswordRequest) {
+        requireCurrentPassword(userId, request.currentPassword)
+    }
+
+    /** 현재 비밀번호가 틀리면 [UserValidationException.WrongCurrentPasswordException] */
+    private fun requireCurrentPassword(userId: Int, currentPassword: String) {
+        val user = userRepo.findUserById(userId) ?: throw UserNotFoundException()
+        if (!BCrypt.checkpw(currentPassword, user.password)) {
+            throw UserValidationException.WrongCurrentPasswordException()
+        }
     }
 
     fun logout(userId: Int): UserLogoutResponse {
