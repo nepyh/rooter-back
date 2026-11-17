@@ -9,6 +9,11 @@ import io.sentry.Sentry
 import io.sentry.SentryEvent
 import io.sentry.SentryLevel
 import io.sentry.SentryOptions
+import io.sentry.SpanContext
+import io.sentry.protocol.SentrySpan
+import io.sentry.protocol.SentryTransaction
+import io.sentry.protocol.TransactionInfo
+import io.sentry.protocol.TransactionNameSource
 import io.sentry.protocol.SentryException
 import io.sentry.protocol.SentryStackFrame
 import io.sentry.protocol.SentryStackTrace
@@ -17,7 +22,13 @@ import org.slf4j.LoggerFactory
 import java.util.Collections
 import java.util.IdentityHashMap
 
-data class MonitoringConfig(val dsn: String, val environment: String, val release: String)
+/** [tracesSampleRate] 는 요청 트랜잭션을 보낼 비율(0~1). 0 이면 성능 추적을 끈다. */
+data class MonitoringConfig(
+    val dsn: String,
+    val environment: String,
+    val release: String,
+    val tracesSampleRate: Double = 0.0,
+)
 
 enum class ErrorSource { HTTP, STARTUP, SCHEDULER, PUSH }
 
@@ -84,6 +95,10 @@ object ErrorMonitoring {
 
     fun close() = Sentry.close()
 
+    /** DSN 이 있고 샘플링 비율이 0 보다 커야 요청 트랜잭션과 쿼리 span 을 만든다. */
+    fun isTracingEnabled(): Boolean =
+        Sentry.isEnabled() && (Sentry.getCurrentScopes().options.tracesSampleRate ?: 0.0) > 0.0
+
     internal fun options(config: MonitoringConfig) = SentryOptions().apply {
         dsn = config.dsn.trim()
         isEnabled = config.dsn.isNotBlank()
@@ -103,12 +118,12 @@ object ErrorMonitoring {
         integrations.clear()
         maxBreadcrumbs = 0
         maxAttachmentSize = 0
-        tracesSampleRate = 0.0
+        tracesSampleRate = config.tracesSampleRate.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.0
         profilesSampleRate = 0.0
         profileSessionSampleRate = 0.0
         logs.isEnabled = false
         metrics.isEnabled = false
-        setBeforeSendTransaction { _, _ -> null }
+        setBeforeSendTransaction { transaction, _ -> sanitizedTransaction(transaction, config) }
         setBeforeSend { event, hint ->
             // 빈 첨부 파일도 파일명에 개인정보를 포함할 수 있다.
             hint.clearAttachments()
@@ -163,6 +178,55 @@ internal fun sanitizedEvent(event: SentryEvent, config: MonitoringConfig): Sentr
         }
     }
 }
+
+/**
+ * 트랜잭션도 허용 필드만 새 객체로 복사한다: 트랜잭션·span 이름(op·설명), 시각, 상태, 응답 코드, environment, release.
+ * 요청 헤더·body·IP·사용자·태그·breadcrumb·span data(스레드·DB 접속 정보)는 싣지 않는다.
+ * 이름이 라우트 템플릿 형식이 아니면(직접 만든 트랜잭션 등) 버린다.
+ */
+internal fun sanitizedTransaction(transaction: SentryTransaction, config: MonitoringConfig): SentryTransaction? {
+    val name = transaction.transaction?.takeIf { it.matches(TRANSACTION_NAME) && !it.endsWith(UNMATCHED_ROUTE) } ?: return null
+    val trace = transaction.contexts.trace ?: return null
+    val spans = transaction.spans.take(MAX_SPANS).map { span ->
+        SentrySpan(
+            span.startTimestamp, span.timestamp, span.traceId, span.spanId, span.parentSpanId,
+            safeCodeName(span.op) ?: "default", safeSpanDescription(span.op, span.description), span.status, safeCodeName(span.origin),
+            emptyMap(), emptyMap(), emptyMap()
+        )
+    }
+    return SentryTransaction(
+        name, transaction.startTimestamp, transaction.timestamp, spans, emptyMap(),
+        TransactionInfo(TransactionNameSource.ROUTE.apiName())
+    ).apply {
+        eventId = transaction.eventId
+        platform = "java"
+        environment = safeMetadata(config.environment)
+        release = safeMetadata(config.release)
+        contexts.setTrace(SpanContext(
+            trace.traceId, trace.spanId, trace.parentSpanId, safeCodeName(trace.operation) ?: "http.server", null,
+            trace.samplingDecision, trace.status, safeCodeName(trace.origin)
+        ).apply {
+            // SpanContext 가 만들 때 스레드 이름·id 를 자동으로 넣으므로 허용 키만 남긴다.
+            data.keys.retainAll(setOf("http.response.status_code"))
+            (trace.data["http.response.status_code"] as? Int)?.let { setData("http.response.status_code", it) }
+        })
+    }
+}
+
+/** 쿼리 span 은 SQL 문만 남긴다. 바인딩 값은 원래 없고(`?`), 혹시 SQL 에 직접 박힌 문자열·숫자 리터럴도 `?` 로 바꾼다. */
+internal fun safeSpanDescription(op: String?, description: String?): String? {
+    if (description == null) return null
+    if (op?.startsWith("db") == true) return sqlTemplate(description)
+    return description.takeIf { it.matches(Regex("[A-Za-z0-9_./{}?*<> :-]{1,200}")) }
+}
+
+internal fun sqlTemplate(sql: String): String = sql
+    .replace(Regex("'(?:[^']|'')*'"), "?")
+    .replace(Regex("""(?<![\w"$.])-?\d+(?:\.\d+)?(?![\w"])"""), "?")
+    .take(2000)
+
+private val TRANSACTION_NAME = Regex("(GET|POST|PUT|PATCH|DELETE|HEAD) /[A-Za-z0-9_./{}?*<>-]{0,200}")
+private const val MAX_SPANS = 1000
 
 private fun causeChain(cause: Throwable): List<Throwable> {
     val seen = Collections.newSetFromMap(IdentityHashMap<Throwable, Boolean>())
