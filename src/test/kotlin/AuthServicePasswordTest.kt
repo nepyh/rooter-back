@@ -11,6 +11,8 @@ import com.github.nepyh.rooter.module.user.ExposedUserRepo
 import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.ChangePasswordRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
+import com.github.nepyh.rooter.module.user.dto.VerifyPasswordRequest
+import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.model.UserRow
 import com.github.nepyh.rooter.module.user.model.UserTable
@@ -199,6 +201,38 @@ class AuthServicePasswordTest : StringSpec({
         tokenVersionOf(userId) shouldBe 0
         isValid(oldToken) shouldBe true
         authService.login(UserLoginRequest("pw7@test.com", "Passw0rd!")).token.shouldNotBeNull()
+    }
+
+    "verifyPassword: 현재 비밀번호가 맞으면 통과하고 tokenVersion·토큰·푸시 토큰·비밀번호는 그대로다" {
+        val userId = seedUser("vf1@test.com", "Passw0rd!")
+        val token = authService.login(UserLoginRequest("vf1@test.com", "Passw0rd!")).token
+        registerPushToken(userId, "ExponentPushToken[phone]")
+
+        authService.verifyPassword(userId, VerifyPasswordRequest("Passw0rd!"))
+
+        tokenVersionOf(userId) shouldBe 0
+        isValid(token) shouldBe true
+        pushTokensOf(userId) shouldContainExactly listOf("ExponentPushToken[phone]")
+        authService.login(UserLoginRequest("vf1@test.com", "Passw0rd!")).token.shouldNotBeNull()
+    }
+
+    "verifyPassword: 현재 비밀번호가 틀리면 WrongCurrentPasswordException 이고 토큰은 그대로 유효하다" {
+        val userId = seedUser("vf2@test.com", "Passw0rd!")
+        val token = authService.login(UserLoginRequest("vf2@test.com", "Passw0rd!")).token
+
+        shouldThrow<UserValidationException.WrongCurrentPasswordException> {
+            authService.verifyPassword(userId, VerifyPasswordRequest("wrong-pass1"))
+        }
+        shouldThrow<UserValidationException.WrongCurrentPasswordException> {
+            authService.verifyPassword(userId, VerifyPasswordRequest(""))
+        }
+        isValid(token) shouldBe true
+    }
+
+    "verifyPassword: 없는 유저면 UserNotFoundException" {
+        shouldThrow<UserNotFoundException> {
+            authService.verifyPassword(999_999, VerifyPasswordRequest("Passw0rd!"))
+        }
     }
 
     "logout: 푸시 토큰 삭제가 실패하면 tokenVersion 도 그대로다 (JWT 만 풀리는 상태 방지)" {
