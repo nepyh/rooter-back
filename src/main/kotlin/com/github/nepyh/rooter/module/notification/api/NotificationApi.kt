@@ -122,7 +122,7 @@ fun NotificationApi(
             summary = "알림함 목록"
             description = "본인 알림을 최신순으로 돌려준다. 푸시 설정을 꺼도 알림은 여기에 남는다. " +
                 "다음 페이지는 응답의 nextCursor 를 cursor 로 넘겨 받는다 (nextCursor=null 이면 마지막). " +
-                "type 으로 눌렀을 때 이동할 화면을 고르고, 이동 대상은 data 에 있다 (TASK_REMINDER → data.planTaskId, TEST → data 없음)"
+                "type 으로 눌렀을 때 이동할 화면을 고르고, 이동 대상은 data 에 있다 (TASK_REMINDER → data.planTaskId, DAILY_FEEDBACK_REMINDER → data.dailyPlanId (오늘 공부 설문 화면), TEST → data 없음)"
             parameters {
                 query("cursor") {
                     description = "앞 페이지 응답의 nextCursor. 생략하면 첫 페이지"
