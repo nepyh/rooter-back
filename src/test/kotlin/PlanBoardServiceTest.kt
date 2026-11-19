@@ -13,6 +13,8 @@ import com.github.nepyh.rooter.module.school.NiceApiClient
 import com.github.nepyh.rooter.module.school.SchoolDataFetcher
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
+import com.github.nepyh.rooter.module.calendar.CalendarService
+import com.github.nepyh.rooter.module.calendar.model.CalendarEventTable
 import com.github.nepyh.rooter.module.planboard.BusyTimeService
 import com.github.nepyh.rooter.module.planboard.PlanBoardService
 import com.github.nepyh.rooter.module.planboard.PlanTaskService
@@ -23,6 +25,7 @@ import com.github.nepyh.rooter.module.planboard.topicsForChunk
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectCreateRequest
+import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectReplaceRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
 import com.github.nepyh.rooter.module.planboard.exception.BusyTimeValidationException
@@ -62,6 +65,7 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
@@ -110,6 +114,7 @@ class PlanBoardServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS plan_subjects CASCADE")
             exec("DROP TABLE IF EXISTS plan_tasks CASCADE")
             exec("DROP TABLE IF EXISTS daily_plans CASCADE")
+            exec("DROP TABLE IF EXISTS calendar_events CASCADE")
             exec("DROP TABLE IF EXISTS plan_boards CASCADE")
             exec("DROP TABLE IF EXISTS chapters CASCADE")
             exec("DROP TABLE IF EXISTS textbooks CASCADE")
@@ -117,6 +122,8 @@ class PlanBoardServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS users CASCADE")
             SchemaUtils.create(
                 UserTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable,
+                // 보드별 캘린더 조회가 개인 일정도 함께 읽는다
+                CalendarEventTable,
                 // plan-generation 이 등급·프로필·불가 시간을 조회한다
                 LevelTestResultTable, StudentProfileTable, UnavailableTimeTable, StudyStyleAnswerTable,
                 // 태스크 완료 처리가 퀴즈로 확정된 태스크인지 조회한다
@@ -138,6 +145,7 @@ class PlanBoardServiceTest : StringSpec({
             PlanTaskTable.deleteAll()
             PlanSubjectTable.deleteAll()
             DailyPlanTable.deleteAll()
+            CalendarEventTable.deleteAll()
             PlanBoardTable.deleteAll()
             ChapterTable.deleteAll()
             TextbookTable.deleteAll()
@@ -148,6 +156,7 @@ class PlanBoardServiceTest : StringSpec({
 
     val planBoardService = PlanBoardService()
     val planTaskService = PlanTaskService()
+    val calendarService = CalendarService()
 
     fun seedUser(email: String): Int = transaction(db) {
         UserRow.new {
@@ -1260,6 +1269,277 @@ class PlanBoardServiceTest : StringSpec({
         val result = planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15))
 
         result.tasks.map { it.taskName } shouldBe listOf("보드A 태스크", "보드B 태스크")
+    }
+
+    // ---- 다중 보드: 보드 메타데이터 ----
+
+    "createBoard: 설명을 저장하고, 빈 문자열로 PATCH 하면 지워진다" {
+        val userId = seedUser("desc@test.com")
+        val boardId = planBoardService.createBoard(
+            userId,
+            PlanBoardCreateRequest("중간고사", "2026-07-01", "2026-07-31", description = "수학·영어 범위")
+        )
+
+        planBoardService.getAllBoards(userId).single().description shouldBe "수학·영어 범위"
+        planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(description = "기말 범위")).description shouldBe "기말 범위"
+        // null 은 "변경 없음"이라 지우기는 빈 문자열로 표현한다
+        planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(description = "   ")).description shouldBe null
+    }
+
+    "createBoard·updateBoard: 설명이 500자를 넘으면 INVALID_DESCRIPTION" {
+        val userId = seedUser("desc-long@test.com")
+        val tooLong = "가".repeat(501)
+
+        shouldThrow<PlanBoardValidationException.InvalidDescriptionException> {
+            planBoardService.createBoard(
+                userId,
+                PlanBoardCreateRequest("보드", "2026-07-01", "2026-07-31", description = tooLong)
+            )
+        }
+
+        val boardId = seedBoard(userId)
+        shouldThrow<PlanBoardValidationException.InvalidDescriptionException> {
+            planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(description = tooLong))
+        }
+    }
+
+    "updateBoard: 보관하면 기본 목록에서 빠지고 includeArchived=true 면 함께 온다" {
+        val userId = seedUser("archive@test.com")
+        val keep = seedBoard(userId)
+        val archived = seedBoard(userId)
+
+        planBoardService.updateBoard(userId, archived, PlanBoardUpdateRequest(isArchived = true))
+
+        planBoardService.getAllBoards(userId).map { it.id } shouldBe listOf(keep)
+        planBoardService.getAllBoards(userId, includeArchived = true).map { it.id }.toSet() shouldBe setOf(keep, archived)
+    }
+
+    "getAllBoards: 최근에 만든 보드가 앞에 온다" {
+        val userId = seedUser("order@test.com")
+        val old = transaction(db) {
+            PlanBoardRow.new {
+                user = UserRow[userId]
+                title = "오래된 보드"
+                startDate = LocalDate.of(2026, 7, 1)
+                endDate = LocalDate.of(2026, 7, 31)
+                createdAt = OffsetDateTime.now().minusDays(1)
+            }.id.value
+        }
+        val recent = planBoardService.createBoard(userId, PlanBoardCreateRequest("최근 보드", "2026-07-01", "2026-07-31"))
+
+        planBoardService.getAllBoards(userId).map { it.id } shouldBe listOf(recent, old)
+    }
+
+    "updateBoard: 수정하면 updatedAt 이 갱신된다" {
+        val userId = seedUser("updated-at@test.com")
+        val boardId = seedBoard(userId)
+        val before = planBoardService.getAllBoards(userId).single().updatedAt
+
+        val after = planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(title = "새 제목")).updatedAt
+
+        OffsetDateTime.parse(after).isAfter(OffsetDateTime.parse(before)) shouldBe true
+    }
+
+    // ---- 다중 보드: 보드 스코프 조회 ----
+
+    "getBoardWeeklyPlan: 그 보드 할일만 주고, 그 보드의 일일 계획이 있는 날은 dailyPlanId 를 채운다" {
+        val userId = seedUser("weekly-board@test.com")
+        val boardA = seedBoard(userId)
+        val boardB = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardA, planDate = "2026-07-15", taskName = "A 수학"))
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardB, planDate = "2026-07-15", taskName = "B 영어"))
+
+        val weekly = planTaskService.getBoardWeeklyPlan(userId, boardA, LocalDate.of(2026, 7, 15))
+
+        weekly.weekStart shouldBe "2026-07-13"
+        weekly.weekEnd shouldBe "2026-07-19"
+        weekly.days.size shouldBe 7
+        val day = weekly.days.single { it.planDate == "2026-07-15" }
+        day.tasks.map { it.taskName } shouldBe listOf("A 수학")
+        day.dailyPlanId shouldBe transaction(db) {
+            DailyPlanRow.find {
+                (DailyPlanTable.planBoardId eq EntityID(boardA, PlanBoardTable)) and
+                    (DailyPlanTable.planDate eq LocalDate.of(2026, 7, 15))
+            }.single().id.value
+        }
+        weekly.days.filter { it.tasks.isEmpty() }.forEach { it.dailyPlanId shouldBe null }
+    }
+
+    "getBoardWeeklyPlan: 없는 보드는 PlanBoardNotFoundException, 타인 보드는 PlanBoardForbiddenException" {
+        val ownerId = seedUser("weekly-owner@test.com")
+        val otherId = seedUser("weekly-other@test.com")
+        val boardId = seedBoard(ownerId)
+
+        shouldThrow<PlanBoardNotFoundException> {
+            planTaskService.getBoardWeeklyPlan(ownerId, 999, LocalDate.of(2026, 7, 15))
+        }
+        shouldThrow<PlanBoardForbiddenException> {
+            planTaskService.getBoardWeeklyPlan(otherId, boardId, LocalDate.of(2026, 7, 15))
+        }
+    }
+
+    "getRange: 보드를 주면 그 보드의 계획 시간과 시험만 집계한다" {
+        val userId = seedUser("calendar-scope@test.com")
+        val boardA = seedBoard(userId, examDate = LocalDate.of(2026, 7, 20))
+        val boardB = seedBoard(userId, examDate = LocalDate.of(2026, 7, 21))
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardA, planDate = "2026-07-15"))
+        planTaskService.createTask(
+            userId,
+            taskRequest(
+                planBoardId = boardB,
+                planDate = "2026-07-15",
+                taskName = "B 영어",
+                startTime = "20:00",
+                endTime = "21:00",
+                estimatedMinutes = 60
+            )
+        )
+
+        val all = calendarService.getRange(userId, LocalDate.of(2026, 7, 14), LocalDate.of(2026, 7, 21))
+        all.days.single { it.date == "2026-07-15" }.plannedMinutes shouldBe 180
+        all.exams.map { it.planBoardId }.toSet() shouldBe setOf(boardA, boardB)
+
+        val scoped = calendarService.getRange(userId, LocalDate.of(2026, 7, 14), LocalDate.of(2026, 7, 21), boardA)
+        scoped.days.single { it.date == "2026-07-15" }.plannedMinutes shouldBe 120
+        scoped.exams.map { it.planBoardId } shouldBe listOf(boardA)
+    }
+
+    "getDaySummary: 보드를 주면 그 보드 할일로만 달성률을 계산한다" {
+        val userId = seedUser("calendar-day@test.com")
+        val boardA = seedBoard(userId)
+        val boardB = seedBoard(userId)
+        planTaskService.createTask(userId, taskRequest(planBoardId = boardA, planDate = "2026-07-15"))
+        planTaskService.createTask(
+            userId,
+            taskRequest(
+                planBoardId = boardB,
+                planDate = "2026-07-15",
+                taskName = "B 영어",
+                startTime = "20:00",
+                endTime = "21:00",
+                estimatedMinutes = 60
+            )
+        )
+
+        calendarService.getDaySummary(userId, LocalDate.of(2026, 7, 15)).totalTasks shouldBe 2
+        calendarService.getDaySummary(userId, LocalDate.of(2026, 7, 15), boardA).totalTasks shouldBe 1
+    }
+
+    // ---- 대표 플랜 ----
+
+    "createBoard: 첫 보드는 자동으로 대표가 되고, 두 번째 보드는 대표가 아니다" {
+        val userId = seedUser("rep-first@test.com")
+        val first = planBoardService.createBoard(userId, PlanBoardCreateRequest("첫 플랜", "2026-07-01", "2026-07-31"))
+        val second = planBoardService.createBoard(userId, PlanBoardCreateRequest("둘째 플랜", "2026-07-01", "2026-07-31"))
+
+        planBoardService.getAllBoards(userId).associate { it.id to it.isRepresentative } shouldBe
+            mapOf(second to false, first to true)
+    }
+
+    "setRepresentative: 대표를 바꾸면 이전 대표는 내려가고 유저당 1개만 남는다" {
+        val userId = seedUser("rep-switch@test.com")
+        val first = seedBoard(userId)
+        val second = seedBoard(userId)
+
+        planBoardService.setRepresentative(userId, first)
+        planBoardService.setRepresentative(userId, second)
+
+        planBoardService.getAllBoards(userId).filter { it.isRepresentative }.map { it.id } shouldBe listOf(second)
+    }
+
+    "unsetRepresentative: 대표를 해제하면 아무 보드도 대표가 아니다 (두 번 불러도 성공)" {
+        val userId = seedUser("rep-unset@test.com")
+        val boardId = seedBoard(userId)
+        planBoardService.setRepresentative(userId, boardId)
+
+        planBoardService.unsetRepresentative(userId, boardId)
+        planBoardService.unsetRepresentative(userId, boardId)
+
+        planBoardService.getAllBoards(userId).none { it.isRepresentative } shouldBe true
+    }
+
+    "setRepresentative: 없는 보드는 PlanBoardNotFoundException, 타인 보드는 PlanBoardForbiddenException" {
+        val ownerId = seedUser("rep-owner@test.com")
+        val otherId = seedUser("rep-other@test.com")
+        val boardId = seedBoard(ownerId)
+
+        shouldThrow<PlanBoardNotFoundException> { planBoardService.setRepresentative(ownerId, 999) }
+        shouldThrow<PlanBoardForbiddenException> { planBoardService.setRepresentative(otherId, boardId) }
+    }
+
+    // ---- 교과서(과목 범위) 일괄 교체 ----
+
+    "replaceSubjects: 목록을 통째로 교체한다" {
+        val userId = seedUser("replace-subject@test.com")
+        val boardId = seedBoard(userId)
+        val mathSubject = seedSubject("수학")
+        val englishSubject = seedSubject("영어")
+        val mathBook = seedTextbook(mathSubject, "수학 교과서")
+        val englishBook = seedTextbook(englishSubject, "영어 교과서")
+        val mathStart = seedChapter(mathBook, 1)
+        val mathEnd = seedChapter(mathBook, 2)
+        val englishChapter = seedChapter(englishBook, 1)
+
+        planBoardService.addSubject(
+            userId, boardId,
+            PlanSubjectCreateRequest(textbookId = mathBook, startChapterId = mathStart, endChapterId = mathEnd)
+        )
+
+        val replaced = planBoardService.replaceSubjects(
+            userId, boardId,
+            PlanSubjectReplaceRequest(
+                listOf(
+                    PlanSubjectCreateRequest(textbookId = englishBook, startChapterId = englishChapter, endChapterId = englishChapter),
+                    PlanSubjectCreateRequest(textbookId = mathBook, startChapterId = mathStart, endChapterId = mathEnd)
+                )
+            )
+        )
+
+        replaced.map { it.textbookId } shouldBe listOf(englishBook, mathBook)
+        planBoardService.getSubjects(userId, boardId).map { it.textbookId }.toSet() shouldBe setOf(englishBook, mathBook)
+        planBoardService.getSubjects(userId, boardId).size shouldBe 2
+    }
+
+    "replaceSubjects: 빈 배열이면 이 보드의 과목 범위를 모두 지운다" {
+        val userId = seedUser("replace-empty@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("과학")
+        val textbookId = seedTextbook(subjectId)
+        val chapterId = seedChapter(textbookId, 1)
+        planBoardService.addSubject(
+            userId, boardId,
+            PlanSubjectCreateRequest(textbookId = textbookId, startChapterId = chapterId, endChapterId = chapterId)
+        )
+
+        planBoardService.replaceSubjects(userId, boardId, PlanSubjectReplaceRequest(emptyList()))
+
+        planBoardService.getSubjects(userId, boardId).shouldBeEmpty()
+    }
+
+    "replaceSubjects: 잘못된 교과서가 섞이면 아무것도 바꾸지 않는다" {
+        val userId = seedUser("replace-invalid@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("국어")
+        val textbookId = seedTextbook(subjectId)
+        val chapterId = seedChapter(textbookId, 1)
+        planBoardService.addSubject(
+            userId, boardId,
+            PlanSubjectCreateRequest(textbookId = textbookId, startChapterId = chapterId, endChapterId = chapterId)
+        )
+
+        shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
+            planBoardService.replaceSubjects(
+                userId, boardId,
+                PlanSubjectReplaceRequest(
+                    listOf(
+                        PlanSubjectCreateRequest(textbookId = textbookId, startChapterId = chapterId, endChapterId = chapterId),
+                        PlanSubjectCreateRequest(textbookId = 999_999, startChapterId = chapterId, endChapterId = chapterId)
+                    )
+                )
+            )
+        }
+
+        planBoardService.getSubjects(userId, boardId).map { it.textbookId } shouldBe listOf(textbookId)
     }
 
     fun dailyPlanIdOf(boardId: Int, date: LocalDate): Int = transaction(db) {

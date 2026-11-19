@@ -12,6 +12,11 @@ sealed class PlanBoardValidationException(
         "INVALID_TITLE",
         "제목은 1~100자여야 합니다."
     )
+    class InvalidDescriptionException : PlanBoardValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_DESCRIPTION",
+        "설명은 500자 이하여야 합니다."
+    )
     class InvalidDateFormatException : PlanBoardValidationException(
         HttpStatusCode.BadRequest,
         "INVALID_DATE_FORMAT",

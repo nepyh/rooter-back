@@ -4,6 +4,7 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectCreateRequest
+import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectReplaceRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
@@ -19,6 +20,7 @@ import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.user.model.UserRow
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -26,7 +28,10 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
 
-/** 과목 범위 등록에 필요한 엔티티 묶음 — DAO 로 그대로 연결할 수 있게 Row 타입으로 들고 다닌다. */
+/** 보드 설명 최대 길이 (DDL 은 text 라 제한이 없어 서비스에서 막는다) */
+private const val MAX_DESCRIPTION_LENGTH = 500
+
+/** 과목 범위 등록에 필요한 엔티티 묶음 — DAO 로 그대로 연결할 수 있게 Row 타입으로 들고 다인다. */
 private data class ResolvedTextbookSubject(
     val subject: SubjectRow,
     val textbook: TextbookRow,
@@ -35,21 +40,42 @@ private data class ResolvedTextbookSubject(
 )
 
 class PlanBoardService {
-    fun getAllBoards(userId: Int): List<PlanBoardResponse> = transaction {
+    /**
+     * 본인 보드 목록. 최근에 만든 보드가 앞에 온다 — 클라이언트가 목록의 첫 항목을 현재 보드 컨텍스트로 쓴다.
+     * [includeArchived] 가 false(기본)면 보관한 보드는 빠진다.
+     */
+    fun getAllBoards(userId: Int, includeArchived: Boolean = false): List<PlanBoardResponse> = transaction {
         val user = UserRow.findById(userId)
             ?: return@transaction emptyList()
 
-        PlanBoardRow.find { PlanBoardTable.userId eq user.id }
-            .map {
-                PlanBoardResponse(
-                    id = it.id.value,
-                    title = it.title,
-                    startDate = it.startDate.toString(),
-                    endDate = it.endDate.toString(),
-                    examDate = it.examDate?.toString(),
-                    createdAt = it.createdAt.toString()
-                )
-            }
+        PlanBoardRow.find {
+            if (includeArchived) PlanBoardTable.userId eq user.id
+            else (PlanBoardTable.userId eq user.id) and (PlanBoardTable.isArchived eq false)
+        }
+            .orderBy(PlanBoardTable.createdAt to SortOrder.DESC)
+            .map { it.toResponse() }
+    }
+
+    private fun PlanBoardRow.toResponse() = PlanBoardResponse(
+        id = id.value,
+        title = title,
+        description = description,
+        startDate = startDate.toString(),
+        endDate = endDate.toString(),
+        examDate = examDate?.toString(),
+        isArchived = isArchived,
+        isRepresentative = isRepresentative,
+        createdAt = createdAt.toString(),
+        updatedAt = updatedAt.toString()
+    )
+
+    /** PATCH 에서 null 은 "변경 없음"이라 설명을 지우는 표현이 따로 필요하다 — 빈 문자열/공백만 있는 문자열을 지우기로 본다. */
+    private fun normalizeDescription(description: String?): String? {
+        val trimmed = description?.trim().orEmpty()
+        if (trimmed.length > MAX_DESCRIPTION_LENGTH) {
+            throw PlanBoardValidationException.InvalidDescriptionException()
+        }
+        return trimmed.ifEmpty { null }
     }
 
     fun createBoard(userId: Int, request: PlanBoardCreateRequest): Int {
@@ -70,18 +96,50 @@ class PlanBoardService {
         }
 
         return transaction {
-            PlanBoardRow.new {
+            val board = PlanBoardRow.new {
                 user = UserRow[userId]
                 title = request.title
+                description = normalizeDescription(request.description)
                 this.startDate = startDate
                 this.endDate = endDate
                 this.examDate = examDate
                 createdAt = OffsetDateTime.now()
-            }.id.value
+            }
+            // 대표 플랜이 하나도 없으면 이 보드를 대표로 (홈 디데이가 비어 보이지 않게)
+            val hasRepresentative = PlanBoardRow.find {
+                (PlanBoardTable.userId eq userId) and (PlanBoardTable.isRepresentative eq true)
+            }.any()
+            if (!hasRepresentative) board.isRepresentative = true
+            board.id.value
         }
     }
 
-    /** title/startDate/endDate/examDate 중 전달된 필드만 수정 (null 은 변경 없음). 본인 보드만 가능 */
+    /**
+     * 대표 플랜 설정. 유저당 1개라(DDL 부분 유니크 인덱스) 같은 트랜잭션에서 기존 대표를 먼저 내린다.
+     * 홈 화면은 이 보드의 디데이를 보여준다.
+     */
+    fun setRepresentative(userId: Int, boardId: Int): PlanBoardResponse = transaction {
+        val board = requireOwnedBoard(userId, boardId)
+
+        PlanBoardRow.find {
+            (PlanBoardTable.userId eq userId) and (PlanBoardTable.isRepresentative eq true)
+        }.forEach { it.isRepresentative = false }
+
+        board.isRepresentative = true
+        board.updatedAt = OffsetDateTime.now()
+        board.toResponse()
+    }
+
+    /** 대표 플랜 해제. 대표가 아니면 아무 것도 하지 않는다 (멱등) */
+    fun unsetRepresentative(userId: Int, boardId: Int) = transaction {
+        val board = requireOwnedBoard(userId, boardId)
+        if (board.isRepresentative) {
+            board.isRepresentative = false
+            board.updatedAt = OffsetDateTime.now()
+        }
+    }
+
+    /** title/description/startDate/endDate/examDate/isArchived 중 전달된 필드만 수정 (null 은 변경 없음). 본인 보드만 가능 */
     fun updateBoard(userId: Int, boardId: Int, request: PlanBoardUpdateRequest): PlanBoardResponse = transaction {
         val board = PlanBoardRow.findById(boardId) ?: throw PlanBoardNotFoundException()
         if (board.user.id.value != userId) throw PlanBoardForbiddenException()
@@ -106,14 +164,11 @@ class PlanBoardService {
                 .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
         }
 
-        PlanBoardResponse(
-            id = board.id.value,
-            title = board.title,
-            startDate = board.startDate.toString(),
-            endDate = board.endDate.toString(),
-            examDate = board.examDate?.toString(),
-            createdAt = board.createdAt.toString()
-        )
+        request.description?.let { board.description = normalizeDescription(it) }
+        request.isArchived?.let { board.isArchived = it }
+        board.updatedAt = OffsetDateTime.now()
+
+        board.toResponse()
     }
 
     /** 보드를 삭제하면 과목 범위/일별 계획/태스크 등 하위 데이터가 전부 cascade 삭제됨 (DDL FK 기준). 본인 보드만 가능 */
@@ -224,5 +279,39 @@ class PlanBoardService {
             (PlanSubjectTable.id eq subjectId) and (PlanSubjectTable.planBoardId eq boardId)
         }.firstOrNull() ?: throw PlanSubjectNotFoundException()
         planSubject.delete()
+    }
+
+    /**
+     * 이 보드의 과목 범위(교과서 목록)를 통째로 교체한다 — 수정 화면에서 교과서를 한 번에 저장하는 경로.
+     * 빈 배열이면 전부 지운다. 검증을 먼저 전부 끝낸 뒤 지우고 넣기 때문에, 하나라도 잘못되면 아무 것도 바뀌지 않는다.
+     */
+    fun replaceSubjects(userId: Int, boardId: Int, request: PlanSubjectReplaceRequest): List<PlanSubjectResponse> = transaction {
+        val board = requireOwnedBoard(userId, boardId)
+        val resolved = request.subjects.map { resolveTextbookSubject(it) }
+
+        PlanSubjectRow.find { PlanSubjectTable.planBoardId eq board.id }.forEach { it.delete() }
+
+        resolved.mapIndexed { index, item ->
+            val input = request.subjects[index]
+            val planSubject = PlanSubjectRow.new {
+                planBoard = board
+                textbook = item.textbook
+                startChapter = item.startChapter
+                endChapter = item.endChapter
+                customRangeText = input.customRangeText
+            }
+
+            PlanSubjectResponse(
+                id = planSubject.id.value,
+                planBoardId = boardId,
+                subjectId = item.subject.id.value,
+                subjectName = item.subject.name,
+                textbookId = item.textbook.id.value,
+                textbookTitle = item.textbook.title,
+                startChapterId = item.startChapter.id.value,
+                endChapterId = item.endChapter.id.value,
+                customRangeText = input.customRangeText
+            )
+        }
     }
 }
