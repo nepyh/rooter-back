@@ -24,7 +24,7 @@ services:
     restart: unless-stopped
     depends_on:
       - controller
-    # 부하 대상 앱은 호스트의 8080 (docker-compose.dev.yml 의 app) — 스크립트에서 host.docker.internal 로 부른다
+    # 부하 대상 앱은 호스트에서 띄운 앱(8080, docs/load-test.md 2절의 jar) — 스크립트에서 host.docker.internal 로 부른다
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
