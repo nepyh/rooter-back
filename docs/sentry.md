@@ -88,6 +88,49 @@ heartbeat 에는 모니터 이름, 상태, environment, release, 모니터 설�
 SDK 가 붙이는 trace id 외에 scope 의 사용자·태그·요청 정보는 싣지 않습니다.
 알림 받을 곳은 Sentry 의 **Crons → scheduler → Alerts** 에서 정합니다.
 
+## 6. 성능 추적 (Tracing)
+
+요청마다 트랜잭션을 하나 만들고, 그 안에서 실행된 DB 쿼리를 span 으로 붙입니다.
+Sentry **Performance(Insights)** 에서 느린 API, 느린 쿼리, N+1 쿼리를 볼 수 있습니다.
+
+기본값은 꺼져 있습니다. 켜려면 `SENTRY_TRACES_SAMPLE_RATE` 에 0~1 사이 비율을 넣습니다.
+DSN 이 없거나 비율이 0 이면 요청 플러그인도, P6Spy 래핑도 설치하지 않습니다.
+
+```dotenv
+SENTRY_TRACES_SAMPLE_RATE=0.1   # 요청 10% 만 보낸다
+```
+
+- 무료 플랜 span 한도는 월 5M 입니다. 요청 하나에 span 이 10개쯤 생기므로 비율 1.0 이면 월 약 50만 요청까지입니다.
+  운영은 낮게 잡고, 로컬 부하 테스트에서만 1.0 으로 올립니다.
+- 운영 ECS 태스크 정의에는 이 값을 넣지 않았습니다. 넣기 전까지 운영은 꺼진 상태(0)입니다.
+
+### 보내는 것과 보내지 않는 것
+
+| 보냄 | 보내지 않음 |
+| --- | --- |
+| 트랜잭션 이름 = 라우트 템플릿 (`GET /api/plan-tasks/{taskId}`) | 실제 경로의 id, 쿼리스트링 |
+| HTTP 응답 코드, 소요 시간, 상태 | 요청 헤더·body·IP·쿠키, 사용자 |
+| 쿼리 span 의 SQL 문 (`WHERE users.email = ?`) | 바인딩 값, DB 호스트·이름·계정, 스레드 정보 |
+| environment, release | 태그, extra, breadcrumbs |
+
+- SQL 에 직접 박힌 문자열·숫자 리터럴도 `?` 로 바꿉니다 (`sqlTemplate`).
+- 헬스체크(`/api/health`), `OPTIONS`, 어느 라우트에도 맞지 않은 요청(404 스캔)은 보내지 않습니다.
+- 트랜잭션은 응답이 나간 뒤에 닫습니다. 예외로 끝난 요청도 StatusPages 가 정한 응답 코드(400·500)로 기록됩니다.
+- P6Spy 는 span 을 만들 때만 씁니다. 로그 모듈을 빼 두어서(`resources/spy.properties`) `spy.log` 나 SQL 로그를 남기지 않습니다.
+
+### 구조
+
+- `common/monitoring/RequestTracing.kt`: Ktor 공식 연동이 없어서 직접 만든 플러그인입니다.
+  `SentryContext` 로 코루틴이 스레드를 옮겨도 같은 트랜잭션에 쿼리 span 이 붙습니다.
+- `common/database/DatabaseManager.kt`: 추적이 켜져 있으면 Hikari DataSource 를 `P6DataSource` 로 감쌉니다 (`sentry-jdbc`).
+- `ErrorMonitoring.sanitizedTransaction`: 트랜잭션도 오류 이벤트처럼 허용 필드만 새 객체로 복사합니다.
+
+외부 호출(LLM·NICE·Expo) span 은 아직 없습니다. 쿼리 span 이 없는 긴 구간이 있으면 외부 호출을 의심합니다.
+
+```bash
+./gradlew test --tests '*RequestTracingTest'
+```
+
 ## 수집 정보와 로컬 검증
 
 전송하는 정보는 예외 클래스, 패키지, 파일명·함수명·줄 번호, 발생 시각, 환경·릴리스, 오류 발생 경계입니다.

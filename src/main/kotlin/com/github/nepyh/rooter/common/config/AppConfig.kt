@@ -45,6 +45,8 @@ data class AppConfig(
     val sentryDsn: String = "",
     val sentryEnvironment: String = "development",
     val sentryRelease: String = "",
+    // 요청 트랜잭션·쿼리 span 을 보낼 비율(0~1). 0 이면 성능 추적을 끈다.
+    val sentryTracesSampleRate: Double = 0.0,
 
     // Expo 푸시. "Enhanced Security for Push" 를 켰을 때만 필요하고, 비어 있으면 토큰 없이 보낸다
     val expoAccessToken: String = "",
@@ -106,6 +108,8 @@ data class AppConfig(
                 sentryEnvironment = config.propertyOrNull("sentry.environment")?.getString()
                     ?.takeIf { it.isNotBlank() } ?: envMode.name.lowercase(),
                 sentryRelease = config.propertyOrNull("sentry.release")?.getString().orEmpty(),
+                sentryTracesSampleRate = config.propertyOrNull("sentry.tracesSampleRate")?.getString()
+                    ?.trim()?.toDoubleOrNull() ?: 0.0,
                 expoAccessToken = config.propertyOrNull("push.expoAccessToken")?.getString().orEmpty(),
 
                 agreements = config.configList("agreements").map { item ->

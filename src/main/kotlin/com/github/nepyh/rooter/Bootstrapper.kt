@@ -4,6 +4,7 @@ import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.github.nepyh.rooter.common.monitoring.ErrorMonitoring
 import com.github.nepyh.rooter.common.monitoring.MonitoringConfig
+import com.github.nepyh.rooter.common.monitoring.installRequestTracing
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.installBlockingCallDispatcher
 import com.github.nepyh.rooter.common.auth.JwtValidator
@@ -28,7 +29,10 @@ import org.koin.logger.slf4jLogger
 
 fun Application.appEntryModule() {
     val appConfig = AppConfig.fromApplicationConfig(environment.config)
-    ErrorMonitoring.initialize(MonitoringConfig(appConfig.sentryDsn, appConfig.sentryEnvironment, appConfig.sentryRelease))
+    ErrorMonitoring.initialize(
+        MonitoringConfig(appConfig.sentryDsn, appConfig.sentryEnvironment, appConfig.sentryRelease, appConfig.sentryTracesSampleRate)
+    )
+    installRequestTracing()
     // DB 를 블로킹 호출하는 요청을 Netty call 스레드(1 vCPU 면 1개)에서 빼 IO 디스패처에서 처리한다
     installBlockingCallDispatcher()
 
@@ -86,7 +90,8 @@ fun Application.appEntryModule() {
             username = appConfig.dbUsername,
             password = appConfig.dbPassword,
             maxPoolSize = appConfig.dbMaxPoolSize
-        )
+        ),
+        traceQueries = ErrorMonitoring.isTracingEnabled()
     )
 
     configureAppModule()
