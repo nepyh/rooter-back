@@ -1,0 +1,32 @@
+# nGrinder controller·agent (로컬 부하 테스트 전용). 사용법은 docs/load-test.md
+#   docker compose -f loadtest/docker-compose.ngrinder.yml up -d
+#   controller 웹: http://localhost:8300 (admin / admin)
+# 이미지가 amd64 만 있어서 Apple Silicon 에서는 에뮬레이션으로 돈다.
+services:
+  controller:
+    image: ngrinder/controller:3.5.9-p1
+    platform: linux/amd64
+    container_name: ngrinder-controller
+    ports:
+      - "8300:80"
+      - "16001:16001"
+      - "12000-12009:12000-12009"
+    volumes:
+      - ngrinder-controller:/opt/ngrinder-controller
+
+  agent:
+    image: ngrinder/agent:3.5.9-p1
+    platform: linux/amd64
+    container_name: ngrinder-agent
+    command: ["controller:80", "-ch", "controller"]
+    # controller 가 뜨기 전에 붙으면 접속 실패로 끝나므로 다시 띄운다.
+    # 덜 뜬 controller 에서 받은 agent 파일이 깨지면(0바이트) 재시작해도 계속 꺼진다 → docs/load-test.md 문제 해결 참고
+    restart: unless-stopped
+    depends_on:
+      - controller
+    # 부하 대상 앱은 호스트에서 띄운 앱(8080, docs/load-test.md 2절의 jar) — 스크립트에서 host.docker.internal 로 부른다
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  ngrinder-controller:
