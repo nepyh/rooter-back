@@ -2,6 +2,7 @@ import com.github.nepyh.rooter.module.storage.FileStorage
 import com.github.nepyh.rooter.module.storage.UploadableFile
 import com.github.nepyh.rooter.module.user.ExposedUserRepo
 import com.github.nepyh.rooter.module.user.UserService
+import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
@@ -101,6 +102,20 @@ class UserInfoServiceTest : StringSpec({
         info.schoolId shouldBe "B107132131"
         info.grade shouldBe 1
         info.classNumber shouldBe 3
+    }
+
+    "createStudentProfile: 두 번 등록하면 새 행 없이 같은 프로필을 덮어쓰고 조회에도 바뀐 값이 나온다" {
+        val userId = seedUser("twice@test.com")
+
+        val first = userService.createStudentProfile(userId, StudentProfileRequest("B107132131", 1, 3))
+        val second = userService.createStudentProfile(userId, StudentProfileRequest("C107181084", 2, 5))
+
+        second.id shouldBe first.id
+        transaction(db) { StudentProfileRow.all().count() } shouldBe 1L
+        val info = userService.getUserInfo(userId)
+        info.schoolId shouldBe "C107181084"
+        info.grade shouldBe 2
+        info.classNumber shouldBe 5
     }
 
     "getUserInfo: 존재하지 않는 유저면 UserNotFoundException" {

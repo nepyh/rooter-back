@@ -200,15 +200,17 @@ class InMemoryUserRepo : UserRepo {
     override fun findUnavailableTimesByUserId(userId: Int): List<UnavailableTimeRow> =
         unavailableTimes.filter { it.userId == userId }.map { it.toRow() }
 
-    override fun insertStudentProfile(
+    override fun upsertStudentProfile(
         userId: Int,
         schoolId: String,
         grade: Int,
         classNumber: Int
     ): StudentProfileRow {
         users[userId] ?: throw UserNotFoundException()
+        val previous = profiles.firstOrNull { it.userId == userId }
+        profiles.removeAll { it.userId == userId }
         val stored = StoredProfile(
-            id = nextProfileId++,
+            id = previous?.id ?: nextProfileId++,
             userId = userId,
             schoolId = schoolId,
             grade = grade,

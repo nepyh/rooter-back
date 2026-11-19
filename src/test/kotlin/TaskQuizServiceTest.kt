@@ -1,3 +1,4 @@
+import com.github.nepyh.rooter.common.APP_ZONE
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.common.config.EnvironmentMode
@@ -854,6 +855,78 @@ class TaskQuizServiceTest : StringSpec({
         seedAttempt(taskId, 1, passed = false, createdAt = day.minusDays(2).atTime(16, 45).atZone(zone).toOffsetDateTime())
 
         dueKeys(day.atTime(23, 0).atZone(zone).toOffsetDateTime()) shouldBe emptyList()
+    }
+
+    /** 한국 시간 [date] [hour]:[minute] 에 멈춘 시계. 서버(UTC)와 시간대가 달라도 할일 시작 시각 판단이 한국 기준인지 보려고 UTC 로 둔다 */
+    fun koreaAt(date: LocalDate, hour: Int, minute: Int): Clock =
+        Clock.fixed(date.atTime(hour, minute).atZone(APP_ZONE).toInstant(), ZoneId.of("UTC"))
+
+    "openQuiz(#353): 계획 날짜가 아직 안 온 할일은 퀴즈를 만들지 않고 TASK_NOT_STARTED" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false) // day 16:00 시작
+        val service = TaskQuizService(FakeTaskQuizLlmClient(), koreaAt(day.minusDays(1), 20, 0))
+
+        shouldThrow<TaskQuizValidationException.TaskNotStartedException> { service.openQuiz(lastUserId, taskId) }
+            .code shouldBe "TASK_NOT_STARTED"
+        attemptCount(taskId) shouldBe 0L
+    }
+
+    "openQuiz(#353): 오늘 할일도 시작 시간 전이면 거부하고, 시작 시각 정각부터는 연다" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false) // day 16:00 시작
+        val userId = lastUserId
+
+        shouldThrow<TaskQuizValidationException.TaskNotStartedException> {
+            TaskQuizService(FakeTaskQuizLlmClient(), koreaAt(day, 15, 59)).openQuiz(userId, taskId)
+        }
+        attemptCount(taskId) shouldBe 0L
+
+        TaskQuizService(FakeTaskQuizLlmClient(), koreaAt(day, 16, 0)).openQuiz(userId, taskId).attemptNumber shouldBe 1
+        TaskQuizService(FakeTaskQuizLlmClient(), koreaAt(day, 16, 30)).openQuiz(userId, taskId).attemptNumber shouldBe 1
+        attemptCount(taskId) shouldBe 1L
+    }
+
+    "answerQuestion·submitQuiz(#353): 이미 만들어진 퀴즈라도 시작 시각 전에는 답하거나 제출할 수 없고 할일은 그대로 PENDING" {
+        val taskId = seedTask("수학 문제집 풀기", grade = null, withScope = false) // day 16:00 시작
+        val userId = lastUserId
+        val early = TaskQuizService(FakeTaskQuizLlmClient(), koreaAt(day, 15, 0))
+        early.generateAttempt(taskId, 1, "수학 문제집 풀기") // 시작 전에 만들어진 퀴즈 (검사 전 버전·시작 시간을 뒤로 옮긴 할일)
+        val questions = early.getCurrentQuiz(userId, taskId).questions
+
+        shouldThrow<TaskQuizValidationException.TaskNotStartedException> {
+            early.answerQuestion(userId, taskId, questions.first().id, questions.first().choice("A").id)
+        }
+        transaction(db) { TaskQuizQuestionRow.findById(questions.first().id)!!.selectedChoiceId } shouldBe null
+        shouldThrow<TaskQuizValidationException.TaskNotStartedException> { early.submitQuiz(userId, taskId) }
+        transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.PENDING
+
+        val started = TaskQuizService(FakeTaskQuizLlmClient(), koreaAt(day, 16, 0))
+        questions.forEach { started.answerQuestion(userId, taskId, it.id, it.choice("A").id) }
+        started.submitQuiz(userId, taskId).passed shouldBe true
+        transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.DONE
+    }
+
+    "updateTask(#353): 시작 전 할일은 실패 처리(PENDING → FAILED)만 막고, 이름·시간 수정과 삭제는 그대로 된다" {
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = false) // day 16:00 시작
+        val userId = lastUserId
+        val other = transaction(db) {
+            PlanTaskRow.new {
+                dailyPlan = PlanTaskRow[taskId].dailyPlan; taskName = "영어 단어"
+                startTime = LocalTime.of(18, 0); endTime = LocalTime.of(18, 30); estimatedMinutes = 30
+            }.id.value
+        }
+        val before = PlanTaskService(koreaAt(day, 15, 59))
+
+        shouldThrow<PlanTaskValidationException.TaskNotStartedException> {
+            before.updateTask(userId, taskId, PlanTaskUpdateRequest(status = PlanTaskStatus.FAILED))
+        }.code shouldBe "TASK_NOT_STARTED"
+        transaction(db) { PlanTaskRow[taskId].status } shouldBe PlanTaskStatus.PENDING
+        // 미래 계획을 미리 조정하는 건 정상 사용
+        before.updateTask(userId, taskId, PlanTaskUpdateRequest(taskName = "과학 문제집 31쪽", startTime = "15:00", endTime = "15:45"))
+            .startTime shouldBe "15:00"
+        before.deleteTask(userId, other)
+        transaction(db) { PlanTaskRow.findById(other) } shouldBe null
+
+        // 시작 시간을 15:00 으로 당겼으니 15:59 에는 이미 시작한 할일 — 실패 처리된다
+        before.updateTask(userId, taskId, PlanTaskUpdateRequest(status = PlanTaskStatus.FAILED)).status shouldBe PlanTaskStatus.FAILED
     }
 })
 

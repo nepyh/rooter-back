@@ -6,7 +6,7 @@ import org.jetbrains.exposed.v1.dao.IntEntity
 import org.jetbrains.exposed.v1.dao.IntEntityClass
 
 object StudentProfileTable : IntIdTable("student_profiles") {
-    val user = reference("user_id", UserTable)
+    val user = reference("user_id", UserTable).uniqueIndex() // 유저당 1개
     val schoolId = char("school_id", 10)
     val grade = integer("grade")
     val classNumber = integer("class_number")

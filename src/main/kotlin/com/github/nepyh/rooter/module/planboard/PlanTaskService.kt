@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.planboard
 
+import com.github.nepyh.rooter.common.isReachedInAppZone
 import com.github.nepyh.rooter.module.planboard.dto.DailyPlanResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
@@ -34,6 +35,7 @@ import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.time.Clock
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
@@ -41,7 +43,8 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 
-class PlanTaskService {
+/** [clock] 은 할일이 시작됐는지(#353) 판단할 때 쓴다. 테스트에서 시각을 고정한다 */
+class PlanTaskService(private val clock: Clock = Clock.systemUTC()) {
 
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
 
@@ -236,7 +239,7 @@ class PlanTaskService {
 
     /**
      * 사용자가 바꿀 수 있는 상태 전환만 허용한다. 지금과 같은 상태면 아무것도 하지 않는다.
-     * - PENDING → FAILED: 실패 처리
+     * - PENDING → FAILED: 실패 처리. 할일 시작 시각(계획 날짜 + startTime) 전이면 TASK_NOT_STARTED (#353)
      * - DONE → PENDING: 완료 취소. 태스크 퀴즈를 통과해 완료된 할일은 TASK_FINALIZED
      * - → DONE: 태스크 퀴즈 통과(TaskQuizService.submitQuiz)로만 되므로 TASK_QUIZ_REQUIRED (#259)
      * - FAILED → 그 외, DONE → FAILED: TASK_FINALIZED
@@ -248,6 +251,8 @@ class PlanTaskService {
             target == PlanTaskStatus.DONE -> throw PlanTaskValidationException.TaskQuizRequiredException()
             status == PlanTaskStatus.DONE && (target == PlanTaskStatus.FAILED || isFinalizedByQuiz(id.value)) ->
                 throw PlanTaskValidationException.TaskFinalizedException()
+            target == PlanTaskStatus.FAILED && !isReachedInAppZone(dailyPlan.planDate, startTime, clock) ->
+                throw PlanTaskValidationException.TaskNotStartedException()
         }
         status = target
     }

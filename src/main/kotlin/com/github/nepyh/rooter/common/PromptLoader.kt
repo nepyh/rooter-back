@@ -12,8 +12,11 @@ object PromptLoader {
             ?.use { it.readText() }
             ?: error("프롬프트 리소스를 찾을 수 없습니다: $resourcePath")
 
-        return replacements.fold(template) { text, (key, value) ->
-            text.replace("{{$key}}", value)
-        }
+        // 한 번에 치환한다 — 차례로 바꾸면 앞에서 넣은 값(학생 메시지·대화 이력) 안의 "{{USER_MESSAGE}}" 같은 글자가
+        // 뒤 단계에서 다시 치환된다. 넘기지 않은 자리표시자는 그대로 둔다
+        val values = replacements.toMap()
+        return PLACEHOLDER.replace(template) { match -> values[match.groupValues[1]] ?: match.value }
     }
+
+    private val PLACEHOLDER = Regex("""\{\{([A-Za-z0-9_]+)}}""")
 }

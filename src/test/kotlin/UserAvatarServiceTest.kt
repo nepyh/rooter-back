@@ -150,7 +150,7 @@ class UserAvatarServiceTest : StringSpec({
     "getUserInfo: 저장된 아바타 키로 avatarUrl 을 채운다" {
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("info@test.com", "tester", "x", avatarImageKey = "avatars/old.png").id.value
-        repo.insertStudentProfile(userId, schoolId = "C107181084", grade = 2, classNumber = 3)
+        repo.upsertStudentProfile(userId, schoolId = "C107181084", grade = 2, classNumber = 3)
         val userService = UserService(repo, RecordingFileStorage(), testAgreementCatalog)
 
         val response = userService.getUserInfo(userId)
@@ -161,7 +161,7 @@ class UserAvatarServiceTest : StringSpec({
     "getUserInfo: 아바타를 등록한 적이 없으면 avatarUrl 은 null" {
         val repo = InMemoryUserRepo()
         val userId = repo.insertUser("info-noavatar@test.com", "tester", "x").id.value
-        repo.insertStudentProfile(userId, schoolId = "C107181084", grade = 2, classNumber = 3)
+        repo.upsertStudentProfile(userId, schoolId = "C107181084", grade = 2, classNumber = 3)
         val userService = UserService(repo, RecordingFileStorage(), testAgreementCatalog)
 
         userService.getUserInfo(userId).avatarUrl shouldBe null

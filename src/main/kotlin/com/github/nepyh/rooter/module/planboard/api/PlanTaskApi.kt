@@ -189,6 +189,7 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                     description = "유효하지 않은 ID (code=INVALID_ID), 태스크 이름 오류 (code=INVALID_TASK_NAME), 시간 형식 오류 (code=INVALID_TIME_FORMAT), " +
                         "종료 시간이 시작 시간보다 빠르거나 같음 (code=INVALID_TIME_RANGE), 예상 소요 시간 오류 (code=INVALID_ESTIMATED_MINUTES), " +
                         "status 를 DONE 으로 변경 (code=TASK_QUIZ_REQUIRED), " +
+                        "시작 시각(계획 날짜 + startTime, 한국 시간) 전인 할일을 PENDING → FAILED (code=TASK_NOT_STARTED, 이름·시간 수정·삭제는 시작 전에도 허용), " +
                         "또는 결과가 확정된 태스크(실패 처리 · 퀴즈 통과 / 마지막 차수까지 불합격)의 status·시간·예상 시간 변경이나 DONE → FAILED " +
                         "(code=TASK_FINALIZED, 이름 변경·같은 값 재전송은 허용)"
                 }
