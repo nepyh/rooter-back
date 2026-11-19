@@ -9,5 +9,6 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class NotificationType {
     TASK_REMINDER, // 할일 시작 전 알림. data: planTaskId
+    DAILY_FEEDBACK_REMINDER, // 저녁 19~22시 30분마다 오늘 공부 설문 알림 (#374). data: dailyPlanId — 앱은 그날 설문 화면을 연다
     TEST // 테스트 알림 (POST /notifications/test). data 없음 — 앱은 알림함만 열면 된다
 }
