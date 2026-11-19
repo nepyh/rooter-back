@@ -24,6 +24,9 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.5.32")
     // Ktor/Logback 자동 연동 없이 명시한 오류 경계에서만 수집한다.
     implementation("io.sentry:sentry:8.61.1")
+    // 성능 추적: 코루틴이 스레드를 옮겨도 요청 트랜잭션을 잇고(SentryContext), JDBC 쿼리를 span 으로 남긴다(P6Spy)
+    implementation("io.sentry:sentry-kotlin-extensions:8.61.1")
+    implementation("io.sentry:sentry-jdbc:8.61.1")
 
     implementation("io.insert-koin:koin-ktor:$koinVersion")
     implementation("io.insert-koin:koin-logger-slf4j:$koinVersion")
