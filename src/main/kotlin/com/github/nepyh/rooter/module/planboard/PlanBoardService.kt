@@ -4,6 +4,7 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectCreateRequest
+import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectReplaceRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenException
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
@@ -63,6 +64,7 @@ class PlanBoardService {
         endDate = endDate.toString(),
         examDate = examDate?.toString(),
         isArchived = isArchived,
+        isRepresentative = isRepresentative,
         createdAt = createdAt.toString(),
         updatedAt = updatedAt.toString()
     )
@@ -94,7 +96,7 @@ class PlanBoardService {
         }
 
         return transaction {
-            PlanBoardRow.new {
+            val board = PlanBoardRow.new {
                 user = UserRow[userId]
                 title = request.title
                 description = normalizeDescription(request.description)
@@ -102,7 +104,38 @@ class PlanBoardService {
                 this.endDate = endDate
                 this.examDate = examDate
                 createdAt = OffsetDateTime.now()
-            }.id.value
+            }
+            // 대표 플랜이 하나도 없으면 이 보드를 대표로 (홈 디데이가 비어 보이지 않게)
+            val hasRepresentative = PlanBoardRow.find {
+                (PlanBoardTable.userId eq userId) and (PlanBoardTable.isRepresentative eq true)
+            }.any()
+            if (!hasRepresentative) board.isRepresentative = true
+            board.id.value
+        }
+    }
+
+    /**
+     * 대표 플랜 설정. 유저당 1개라(DDL 부분 유니크 인덱스) 같은 트랜잭션에서 기존 대표를 먼저 내린다.
+     * 홈 화면은 이 보드의 디데이를 보여준다.
+     */
+    fun setRepresentative(userId: Int, boardId: Int): PlanBoardResponse = transaction {
+        val board = requireOwnedBoard(userId, boardId)
+
+        PlanBoardRow.find {
+            (PlanBoardTable.userId eq userId) and (PlanBoardTable.isRepresentative eq true)
+        }.forEach { it.isRepresentative = false }
+
+        board.isRepresentative = true
+        board.updatedAt = OffsetDateTime.now()
+        board.toResponse()
+    }
+
+    /** 대표 플랜 해제. 대표가 아니면 아무 것도 하지 않는다 (멱등) */
+    fun unsetRepresentative(userId: Int, boardId: Int) = transaction {
+        val board = requireOwnedBoard(userId, boardId)
+        if (board.isRepresentative) {
+            board.isRepresentative = false
+            board.updatedAt = OffsetDateTime.now()
         }
     }
 
@@ -246,5 +279,39 @@ class PlanBoardService {
             (PlanSubjectTable.id eq subjectId) and (PlanSubjectTable.planBoardId eq boardId)
         }.firstOrNull() ?: throw PlanSubjectNotFoundException()
         planSubject.delete()
+    }
+
+    /**
+     * 이 보드의 과목 범위(교과서 목록)를 통째로 교체한다 — 수정 화면에서 교과서를 한 번에 저장하는 경로.
+     * 빈 배열이면 전부 지운다. 검증을 먼저 전부 끝낸 뒤 지우고 넣기 때문에, 하나라도 잘못되면 아무 것도 바뀌지 않는다.
+     */
+    fun replaceSubjects(userId: Int, boardId: Int, request: PlanSubjectReplaceRequest): List<PlanSubjectResponse> = transaction {
+        val board = requireOwnedBoard(userId, boardId)
+        val resolved = request.subjects.map { resolveTextbookSubject(it) }
+
+        PlanSubjectRow.find { PlanSubjectTable.planBoardId eq board.id }.forEach { it.delete() }
+
+        resolved.mapIndexed { index, item ->
+            val input = request.subjects[index]
+            val planSubject = PlanSubjectRow.new {
+                planBoard = board
+                textbook = item.textbook
+                startChapter = item.startChapter
+                endChapter = item.endChapter
+                customRangeText = input.customRangeText
+            }
+
+            PlanSubjectResponse(
+                id = planSubject.id.value,
+                planBoardId = boardId,
+                subjectId = item.subject.id.value,
+                subjectName = item.subject.name,
+                textbookId = item.textbook.id.value,
+                textbookTitle = item.textbook.title,
+                startChapterId = item.startChapter.id.value,
+                endChapterId = item.endChapter.id.value,
+                customRangeText = input.customRangeText
+            )
+        }
     }
 }

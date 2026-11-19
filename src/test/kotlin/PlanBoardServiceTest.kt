@@ -25,6 +25,7 @@ import com.github.nepyh.rooter.module.planboard.topicsForChunk
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectCreateRequest
+import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectReplaceRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskUpdateRequest
 import com.github.nepyh.rooter.module.planboard.exception.BusyTimeValidationException
@@ -1422,6 +1423,123 @@ class PlanBoardServiceTest : StringSpec({
 
         calendarService.getDaySummary(userId, LocalDate.of(2026, 7, 15)).totalTasks shouldBe 2
         calendarService.getDaySummary(userId, LocalDate.of(2026, 7, 15), boardA).totalTasks shouldBe 1
+    }
+
+    // ---- 대표 플랜 ----
+
+    "createBoard: 첫 보드는 자동으로 대표가 되고, 두 번째 보드는 대표가 아니다" {
+        val userId = seedUser("rep-first@test.com")
+        val first = planBoardService.createBoard(userId, PlanBoardCreateRequest("첫 플랜", "2026-07-01", "2026-07-31"))
+        val second = planBoardService.createBoard(userId, PlanBoardCreateRequest("둘째 플랜", "2026-07-01", "2026-07-31"))
+
+        planBoardService.getAllBoards(userId).associate { it.id to it.isRepresentative } shouldBe
+            mapOf(second to false, first to true)
+    }
+
+    "setRepresentative: 대표를 바꾸면 이전 대표는 내려가고 유저당 1개만 남는다" {
+        val userId = seedUser("rep-switch@test.com")
+        val first = seedBoard(userId)
+        val second = seedBoard(userId)
+
+        planBoardService.setRepresentative(userId, first)
+        planBoardService.setRepresentative(userId, second)
+
+        planBoardService.getAllBoards(userId).filter { it.isRepresentative }.map { it.id } shouldBe listOf(second)
+    }
+
+    "unsetRepresentative: 대표를 해제하면 아무 보드도 대표가 아니다 (두 번 불러도 성공)" {
+        val userId = seedUser("rep-unset@test.com")
+        val boardId = seedBoard(userId)
+        planBoardService.setRepresentative(userId, boardId)
+
+        planBoardService.unsetRepresentative(userId, boardId)
+        planBoardService.unsetRepresentative(userId, boardId)
+
+        planBoardService.getAllBoards(userId).none { it.isRepresentative } shouldBe true
+    }
+
+    "setRepresentative: 없는 보드는 PlanBoardNotFoundException, 타인 보드는 PlanBoardForbiddenException" {
+        val ownerId = seedUser("rep-owner@test.com")
+        val otherId = seedUser("rep-other@test.com")
+        val boardId = seedBoard(ownerId)
+
+        shouldThrow<PlanBoardNotFoundException> { planBoardService.setRepresentative(ownerId, 999) }
+        shouldThrow<PlanBoardForbiddenException> { planBoardService.setRepresentative(otherId, boardId) }
+    }
+
+    // ---- 교과서(과목 범위) 일괄 교체 ----
+
+    "replaceSubjects: 목록을 통째로 교체한다" {
+        val userId = seedUser("replace-subject@test.com")
+        val boardId = seedBoard(userId)
+        val mathSubject = seedSubject("수학")
+        val englishSubject = seedSubject("영어")
+        val mathBook = seedTextbook(mathSubject, "수학 교과서")
+        val englishBook = seedTextbook(englishSubject, "영어 교과서")
+        val mathStart = seedChapter(mathBook, 1)
+        val mathEnd = seedChapter(mathBook, 2)
+        val englishChapter = seedChapter(englishBook, 1)
+
+        planBoardService.addSubject(
+            userId, boardId,
+            PlanSubjectCreateRequest(textbookId = mathBook, startChapterId = mathStart, endChapterId = mathEnd)
+        )
+
+        val replaced = planBoardService.replaceSubjects(
+            userId, boardId,
+            PlanSubjectReplaceRequest(
+                listOf(
+                    PlanSubjectCreateRequest(textbookId = englishBook, startChapterId = englishChapter, endChapterId = englishChapter),
+                    PlanSubjectCreateRequest(textbookId = mathBook, startChapterId = mathStart, endChapterId = mathEnd)
+                )
+            )
+        )
+
+        replaced.map { it.textbookId } shouldBe listOf(englishBook, mathBook)
+        planBoardService.getSubjects(userId, boardId).map { it.textbookId }.toSet() shouldBe setOf(englishBook, mathBook)
+        planBoardService.getSubjects(userId, boardId).size shouldBe 2
+    }
+
+    "replaceSubjects: 빈 배열이면 이 보드의 과목 범위를 모두 지운다" {
+        val userId = seedUser("replace-empty@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("과학")
+        val textbookId = seedTextbook(subjectId)
+        val chapterId = seedChapter(textbookId, 1)
+        planBoardService.addSubject(
+            userId, boardId,
+            PlanSubjectCreateRequest(textbookId = textbookId, startChapterId = chapterId, endChapterId = chapterId)
+        )
+
+        planBoardService.replaceSubjects(userId, boardId, PlanSubjectReplaceRequest(emptyList()))
+
+        planBoardService.getSubjects(userId, boardId).shouldBeEmpty()
+    }
+
+    "replaceSubjects: 잘못된 교과서가 섞이면 아무것도 바꾸지 않는다" {
+        val userId = seedUser("replace-invalid@test.com")
+        val boardId = seedBoard(userId)
+        val subjectId = seedSubject("국어")
+        val textbookId = seedTextbook(subjectId)
+        val chapterId = seedChapter(textbookId, 1)
+        planBoardService.addSubject(
+            userId, boardId,
+            PlanSubjectCreateRequest(textbookId = textbookId, startChapterId = chapterId, endChapterId = chapterId)
+        )
+
+        shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
+            planBoardService.replaceSubjects(
+                userId, boardId,
+                PlanSubjectReplaceRequest(
+                    listOf(
+                        PlanSubjectCreateRequest(textbookId = textbookId, startChapterId = chapterId, endChapterId = chapterId),
+                        PlanSubjectCreateRequest(textbookId = 999_999, startChapterId = chapterId, endChapterId = chapterId)
+                    )
+                )
+            )
+        }
+
+        planBoardService.getSubjects(userId, boardId).map { it.textbookId } shouldBe listOf(textbookId)
     }
 
     fun dailyPlanIdOf(boardId: Int, date: LocalDate): Int = transaction(db) {

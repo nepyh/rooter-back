@@ -20,8 +20,15 @@ data class PlanBoardResponse(
     val endDate: String,
     val examDate: String?,
     val isArchived: Boolean, // 보관한 보드인지. 목록 조회는 기본으로 보관된 보드를 뺀다
+    val isRepresentative: Boolean, // 대표 플랜인지 (유저당 1개). 홈 화면이 이 보드의 디데이를 보여준다
     val createdAt: String,
     val updatedAt: String // 마지막 수정 시각 (제목·설명·기간·보관 변경 시 갱신)
+)
+
+@Serializable
+data class PlanSubjectReplaceRequest(
+    // 이 보드의 과목 범위를 통째로 교체한다. 빈 배열이면 전부 지운다 (수정 화면의 "교과서 저장")
+    val subjects: List<PlanSubjectCreateRequest> = emptyList()
 )
 
 @Serializable

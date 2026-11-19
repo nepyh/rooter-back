@@ -8,6 +8,7 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardUpdateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectCreateRequest
+import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectReplaceRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanSubjectResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -23,6 +24,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.openapi.describe
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.utils.io.ExperimentalKtorApi
 
 @OptIn(ExperimentalKtorApi::class)
@@ -165,6 +167,72 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
             }
         }
 
+        put("{boardId}/representative") {
+            val boardId = call.parameters["boardId"]?.toIntOrNull()
+                ?: return@put call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val response = planBoardService.setRepresentative(call.userId(), boardId)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("PlanBoard")
+            summary = "대표 플랜으로 설정"
+            description = "이 보드를 대표 플랜으로 지정한다. 대표 플랜은 유저당 1개라 기존 대표는 자동으로 내려간다. " +
+                "홈 화면은 대표 플랜의 디데이를 보여준다. 이미 대표인 보드를 다시 지정해도 성공(멱등)."
+            responses {
+                HttpStatusCode.OK {
+                    description = "설정 성공 (설정된 보드 정보)"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<PlanBoardResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 보드가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 보드"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        delete("{boardId}/representative") {
+            val boardId = call.parameters["boardId"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            planBoardService.unsetRepresentative(call.userId(), boardId)
+            call.respond(HttpStatusCode.NoContent)
+        }.describe {
+            tag("PlanBoard")
+            summary = "대표 플랜 해제"
+            description = "이 보드를 대표 플랜에서 내린다. 대표가 아닌 보드에 호출해도 성공(멱등). 대표가 없는 상태가 되면 홈 화면에 디데이가 표시되지 않는다."
+            responses {
+                HttpStatusCode.NoContent {
+                    description = "해제 성공"
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 보드가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 보드"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
         post("{boardId}/subjects") {
             val boardId = call.parameters["boardId"]?.toIntOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
@@ -186,6 +254,48 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                     description = "등록 성공"
                     ContentType.Application.Json {
                         schema = jsonSchema<PlanSubjectResponse>()
+                    }
+                }
+                HttpStatusCode.BadRequest {
+                    description = "유효하지 않은 ID (code=INVALID_ID), 또는 존재하지 않는 교과서/단원이거나 요청한 교과서의 단원이 아니거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
+                }
+                HttpStatusCode.Unauthorized {
+                    description = "인증되지 않음"
+                }
+                HttpStatusCode.Forbidden {
+                    description = "본인 보드가 아님"
+                }
+                HttpStatusCode.NotFound {
+                    description = "존재하지 않는 보드"
+                }
+                HttpStatusCode.InternalServerError {
+                    description = "서버 오류"
+                }
+            }
+        }
+
+        put("{boardId}/subjects") {
+            val boardId = call.parameters["boardId"]?.toIntOrNull()
+                ?: return@put call.respond(HttpStatusCode.BadRequest, ErrorResponse("INVALID_ID", "유효하지 않은 ID입니다."))
+            val request = call.receive<PlanSubjectReplaceRequest>()
+            val response = planBoardService.replaceSubjects(call.userId(), boardId, request)
+            call.respond(HttpStatusCode.OK, response)
+        }.describe {
+            tag("PlanBoard")
+            summary = "과목 범위(교과서 목록) 일괄 교체"
+            description = "이 보드의 과목 범위를 요청한 목록으로 통째로 교체한다 (수정 화면의 교과서 저장용). " +
+                "빈 배열이면 이 보드의 과목 범위를 모두 지운다. 검증을 먼저 전부 끝낸 뒤 교체하므로, " +
+                "하나라도 잘못된 교과서/단원이 섞이면 아무 것도 바뀌지 않는다. 본인 보드만 가능"
+            requestBody {
+                ContentType.Application.Json {
+                    schema = jsonSchema<PlanSubjectReplaceRequest>()
+                }
+            }
+            responses {
+                HttpStatusCode.OK {
+                    description = "교체 성공 (교체된 과목 범위 목록)"
+                    ContentType.Application.Json {
+                        schema = jsonSchema<List<PlanSubjectResponse>>()
                     }
                 }
                 HttpStatusCode.BadRequest {

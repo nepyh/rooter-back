@@ -21,6 +21,9 @@ object PlanBoardTable : IntIdTable("plan_boards") {
     val isCramMode = bool("is_cram_mode").default(false)
     // 보관한 보드. 목록에서 기본으로 빠지고 행은 남는다 (삭제는 daily_plans 까지 cascade 라 파괴적)
     val isArchived = bool("is_archived").default(false)
+    // 대표 플랜. 유저당 1개 — DDL 의 부분 유니크 인덱스(uq_plan_boards_representative)가 보장한다.
+    // 홈 화면이 이 보드의 디데이를 보여준다.
+    val isRepresentative = bool("is_representative").default(false)
     val createdAt = timestampWithTimeZone("created_at")
     // 제목·설명·기간·보관을 PATCH 하면 갱신한다 (DDL: timestamptz not null default current_timestamp)
     val updatedAt = timestampWithTimeZone("updated_at").defaultExpression(CurrentTimestampWithTimeZone)
@@ -37,6 +40,7 @@ class PlanBoardRow(id: EntityID<Int>) : IntEntity(id) {
     var examDate by PlanBoardTable.examDate
     var isCramMode by PlanBoardTable.isCramMode
     var isArchived by PlanBoardTable.isArchived
+    var isRepresentative by PlanBoardTable.isRepresentative
     var createdAt by PlanBoardTable.createdAt
     var updatedAt by PlanBoardTable.updatedAt
 }
