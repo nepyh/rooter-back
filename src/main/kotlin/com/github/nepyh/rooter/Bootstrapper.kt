@@ -5,6 +5,7 @@ import com.auth0.jwt.algorithms.Algorithm
 import com.github.nepyh.rooter.common.monitoring.ErrorMonitoring
 import com.github.nepyh.rooter.common.monitoring.MonitoringConfig
 import com.github.nepyh.rooter.common.ErrorResponse
+import com.github.nepyh.rooter.common.installBlockingCallDispatcher
 import com.github.nepyh.rooter.common.auth.JwtValidator
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
@@ -28,6 +29,8 @@ import org.koin.logger.slf4jLogger
 fun Application.appEntryModule() {
     val appConfig = AppConfig.fromApplicationConfig(environment.config)
     ErrorMonitoring.initialize(MonitoringConfig(appConfig.sentryDsn, appConfig.sentryEnvironment, appConfig.sentryRelease))
+    // DB 를 블로킹 호출하는 요청을 Netty call 스레드(1 vCPU 면 1개)에서 빼 IO 디스패처에서 처리한다
+    installBlockingCallDispatcher()
 
     install(Koin) {
         slf4jLogger()
