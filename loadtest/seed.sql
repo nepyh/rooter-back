@@ -3,7 +3,7 @@
 -- 마스터 데이터(과목·출판사·교과서)에 테스트용 행을 넣으므로 운영 DB 에서 실행하면 데이터가 오염된다.
 -- 그래서 -v local=1 을 직접 붙여야 하고, 컨테이너 안 소켓·localhost 접속이 아니면 멈춘다.
 -- 계정: loadtest1@rooter.test ~ loadtest{users}@rooter.test / 비밀번호 loadtest1234!
--- 학생마다 플랜보드 1개(오늘 기준 -14일 ~ +14일), 과목 4개, 하루 할일 4개, 캘린더 일정 3개.
+-- 학생마다 프로필(2학년 1반, 없는 학교 코드), 플랜보드 1개(오늘 기준 -14일 ~ +14일), 과목 4개, 하루 할일 4개, 캘린더 일정 3개.
 \set ON_ERROR_STOP on
 \if :{?local}
 \else
@@ -50,6 +50,13 @@ with pw as (select crypt('loadtest1234!', gen_salt('bf', 10)) as hash)
 insert into users (email, username, password, sleep_time, wake_time, commute_minutes)
 select 'loadtest' || n || '@rooter.test', 'lt' || n, pw.hash, '23:00', '07:00', 20
 from generate_series(1, :users) n cross join pw;
+
+-- 학생 프로필 (학교가 없으면 앱이 로그인 후 학교 선택 화면으로 보낸다)
+-- 학교 코드 7000000000 은 없는 학교라 NICE 가 빈 결과를 준다. 시나리오의 API 는 NICE 를 부르지 않지만,
+-- busy-times·계획 생성처럼 NICE 를 부르는 API 를 시나리오에 넣으면 첫 조회마다 외부 호출(약 1.6초)이 섞인다.
+insert into student_profiles (user_id, school_id, grade, class_number)
+select u.id, '7000000000', 2, 1
+from users u where u.email like 'loadtest%@rooter.test';
 
 insert into plan_boards (user_id, title, start_date, end_date, exam_date)
 select u.id, '기말고사 대비', current_date - 14, current_date + 14, current_date + 14

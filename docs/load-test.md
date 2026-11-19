@@ -7,7 +7,7 @@
 
 | 파일 | 내용 |
 | --- | --- |
-| `seed.sql` | 학생 계정 300명 + 플랜보드·할일·캘린더 일정. **로컬 DB 전용** (아래 1번) |
+| `seed.sql` | 학생 계정 300명 + 학생 프로필(학교·학년·반)·플랜보드·할일·캘린더 일정. **로컬 DB 전용** (아래 1번) |
 | `docker-compose.ngrinder.yml` | nGrinder controller(웹 UI `http://localhost:8300`, admin/admin) + agent |
 | `home-scenario.groovy` | 로그인 후 홈 화면이 부르는 GET 6개를 반복 |
 
