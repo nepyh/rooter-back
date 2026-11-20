@@ -303,6 +303,114 @@ class PlanBoardServiceTest : StringSpec({
         }
     }
 
+    // ---- 시험 마지막 날 examEndDate (#376) ----
+
+    "createBoard: 시험 마지막 날을 저장하고 목록 응답에 내준다, 없으면 null" {
+        val userId = seedUser("exam-end-create@test.com")
+        val multiDay = planBoardService.createBoard(
+            userId, PlanBoardCreateRequest("중간고사", "2026-11-01", "2026-11-23", examDate = "2026-11-24", examEndDate = "2026-11-27")
+        )
+        val oneDay = planBoardService.createBoard(
+            userId, PlanBoardCreateRequest("수행평가", "2026-11-01", "2026-11-09", examDate = "2026-11-10")
+        )
+
+        val boards = planBoardService.getAllBoards(userId).associateBy { it.id }
+        boards.getValue(multiDay).examDate shouldBe "2026-11-24"
+        boards.getValue(multiDay).examEndDate shouldBe "2026-11-27"
+        boards.getValue(oneDay).examEndDate shouldBe null
+    }
+
+    "createBoard: 시험 마지막 날이 첫날 없이 오거나 첫날보다 빠르면 InvalidDateRangeException, 같은 날은 된다" {
+        val userId = seedUser("exam-end-invalid@test.com")
+        shouldThrow<PlanBoardValidationException.InvalidDateRangeException> {
+            planBoardService.createBoard(userId, PlanBoardCreateRequest("보드", "2026-11-01", "2026-11-23", examEndDate = "2026-11-27"))
+        }
+        shouldThrow<PlanBoardValidationException.InvalidDateRangeException> {
+            planBoardService.createBoard(
+                userId, PlanBoardCreateRequest("보드", "2026-11-01", "2026-11-23", examDate = "2026-11-24", examEndDate = "2026-11-23")
+            )
+        }
+        shouldThrow<PlanBoardValidationException.InvalidDateFormatException> {
+            planBoardService.createBoard(
+                userId, PlanBoardCreateRequest("보드", "2026-11-01", "2026-11-23", examDate = "2026-11-24", examEndDate = "2026/11/27")
+            )
+        }
+        planBoardService.createBoard(
+            userId, PlanBoardCreateRequest("보드", "2026-11-01", "2026-11-23", examDate = "2026-11-24", examEndDate = "2026-11-24")
+        )
+    }
+
+    "updateBoard: 시험 마지막 날만 바꿀 수 있고, 첫날을 마지막 날 뒤로 옮기면 InvalidDateRangeException" {
+        val userId = seedUser("exam-end-update@test.com")
+        val boardId = seedBoard(userId, examDate = LocalDate.of(2026, 11, 24))
+
+        planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(examEndDate = "2026-11-27")).examEndDate shouldBe "2026-11-27"
+        // 다른 필드만 바꾸면 마지막 날은 그대로
+        planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(title = "새 제목")).examEndDate shouldBe "2026-11-27"
+
+        shouldThrow<PlanBoardValidationException.InvalidDateRangeException> {
+            planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(examDate = "2026-11-28"))
+        }
+        shouldThrow<PlanBoardValidationException.InvalidDateRangeException> {
+            planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(examEndDate = "2026-11-20"))
+        }
+        // 첫날과 마지막 날을 함께 옮기면 된다
+        val moved = planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(examDate = "2026-11-30", examEndDate = "2026-12-02"))
+        moved.examDate shouldBe "2026-11-30"
+        moved.examEndDate shouldBe "2026-12-02"
+    }
+
+    "updateBoard: 시험 첫날이 없는 보드에 마지막 날만 넣으면 InvalidDateRangeException" {
+        val userId = seedUser("exam-end-noexam@test.com")
+        val boardId = seedBoard(userId)
+
+        shouldThrow<PlanBoardValidationException.InvalidDateRangeException> {
+            planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(examEndDate = "2026-11-27"))
+        }
+    }
+
+    "calendar: 시험 기간이 조회 범위와 겹치면 첫날이 범위 앞이어도 exams 에 담고 examEndDate 를 내준다" {
+        val userId = seedUser("exam-end-calendar@test.com")
+        val multiDay = planBoardService.createBoard(
+            userId, PlanBoardCreateRequest("중간고사", "2026-11-01", "2026-11-23", examDate = "2026-11-24", examEndDate = "2026-12-02")
+        )
+        val oneDay = planBoardService.createBoard(
+            userId, PlanBoardCreateRequest("수행평가", "2026-11-01", "2026-11-23", examDate = "2026-11-25")
+        )
+
+        // 11월: 둘 다 / 12월: 기간이 12월까지 이어지는 시험만 / 10월: 없음
+        calendarService.getRange(userId, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 30))
+            .exams.map { it.planBoardId }.toSet() shouldBe setOf(multiDay, oneDay)
+        val december = calendarService.getRange(userId, LocalDate.of(2026, 12, 1), LocalDate.of(2026, 12, 31)).exams
+        december.map { it.planBoardId } shouldBe listOf(multiDay)
+        december.single().examDate shouldBe "2026-11-24"
+        december.single().examEndDate shouldBe "2026-12-02"
+        calendarService.getRange(userId, LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31)).exams shouldBe emptyList()
+    }
+
+    "plan-generation: 시험 마지막 날이 첫날보다 빠르면 AI 호출 전에 InvalidDateRangeException" {
+        val userId = seedUser("gen-exam-end@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val service = PlanGenerationService(
+            PlanGenerationLlmClient(dummyAppConfig()),
+            SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") })))
+        )
+
+        shouldThrow<PlanBoardValidationException.InvalidDateRangeException> {
+            service.generate(
+                userId,
+                PlanGenerationRequest(
+                    title = "시험 대비",
+                    subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)),
+                    startDate = "2026-07-01",
+                    examDate = "2026-07-10",
+                    examEndDate = "2026-07-09"
+                )
+            )
+        }
+    }
+
     "deleteBoard: 본인 보드가 아니면 PlanBoardForbiddenException" {
         val ownerId = seedUser("delete-owner@test.com")
         val otherId = seedUser("delete-other@test.com")

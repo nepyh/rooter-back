@@ -1012,6 +1012,15 @@ class ChatServiceTest : StringSpec({
         }
     }
 
+    "planBoardSummaryOf: 시험이 여러 날이면 시험 기간을 함께 적고, 하루짜리면 적지 않는다 (#376)" {
+        val day = LocalDate.of(2026, 11, 20)
+        val exam = LocalDate.of(2026, 11, 24)
+        planBoardSummaryOf("보드", day, day, exam, day, examEndDate = LocalDate.of(2026, 11, 27)).lines().last() shouldBe
+            "시험일: 2026-11-24 (D-4), 시험 기간: 2026-11-24 ~ 2026-11-27"
+        planBoardSummaryOf("보드", day, day, exam, day, examEndDate = exam).lines().last() shouldBe "시험일: 2026-11-24 (D-4)"
+        planBoardSummaryOf("보드", day, day, exam, day).lines().last() shouldBe "시험일: 2026-11-24 (D-4)"
+    }
+
     "planBoardSummaryOf: 시험 당일과 지난 시험일을 구분한다" {
         val day = LocalDate.of(2026, 10, 5)
         planBoardSummaryOf("보드", day, day, day, day).lines().last() shouldBe "시험일: 2026-10-05 (D-day(오늘))"
