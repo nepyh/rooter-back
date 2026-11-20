@@ -46,6 +46,7 @@ fun BoardCalendarApi(calendarService: CalendarService) = ApiRoute("plan-boards")
             tag("Calendar")
             summary = "플랜보드 기간별 캘린더 조회 (그 보드의 공부 시간 + 시험 D-Day + 개인 일정)"
             description = "start~end 범위에서 이 보드의 날짜별 예상 공부 시간 합과 이 보드의 시험 일정만 돌려준다. " +
+                "시험 일정은 시험 기간(examDate~examEndDate)이 범위와 겹치면 담긴다. " +
                 "개인 일정은 사용자 단위라 보드와 무관하게 함께 온다. 본인 보드만 가능"
             parameters {
                 path("boardId") {

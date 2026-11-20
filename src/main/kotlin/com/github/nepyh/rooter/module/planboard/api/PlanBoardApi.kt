@@ -86,7 +86,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "제목이 1~100자를 벗어남 (code=INVALID_TITLE), 설명이 500자를 넘음 (code=INVALID_DESCRIPTION), " +
-                        "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠름 (code=INVALID_DATE_RANGE)"
+                        "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠르거나 시험 마지막 날(examEndDate)이 시험 첫날(examDate) 없이 오거나 첫날보다 빠름 (code=INVALID_DATE_RANGE)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -103,7 +103,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
         }.describe {
             tag("PlanBoard")
             summary = "플랜보드 수정"
-            description = "title/description/startDate/endDate/examDate/isArchived 중 전달된 필드만 수정 (전달하지 않거나 null 인 필드는 변경 없음). " +
+            description = "title/description/startDate/endDate/examDate/examEndDate/isArchived 중 전달된 필드만 수정 (전달하지 않거나 null 인 필드는 변경 없음). " +
                 "description 에 빈 문자열을 보내면 설명이 지워진다. isArchived=true 면 보관(목록에서 빠짐), false 면 보관 해제. 본인 보드만 가능"
             requestBody {
                 ContentType.Application.Json {
@@ -119,7 +119,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 제목이 1~100자를 벗어남 (code=INVALID_TITLE), 설명이 500자를 넘음 (code=INVALID_DESCRIPTION), " +
-                        "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠름 (code=INVALID_DATE_RANGE)"
+                        "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠르거나 시험 마지막 날(examEndDate)이 시험 첫날(examDate) 없이 오거나 첫날보다 빠름 (code=INVALID_DATE_RANGE)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
