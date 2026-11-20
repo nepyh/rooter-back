@@ -25,7 +25,7 @@ sealed class PlanBoardValidationException(
     class InvalidDateRangeException : PlanBoardValidationException(
         HttpStatusCode.BadRequest,
         "INVALID_DATE_RANGE",
-        "종료일은 시작일보다 빠를 수 없습니다."
+        "종료일은 시작일보다 빠를 수 없습니다. (시험 마지막 날은 시험 첫날이 있어야 하고 첫날보다 빠를 수 없습니다.)"
     )
     class SubjectsRequiredException : PlanBoardValidationException(
         HttpStatusCode.BadRequest,
