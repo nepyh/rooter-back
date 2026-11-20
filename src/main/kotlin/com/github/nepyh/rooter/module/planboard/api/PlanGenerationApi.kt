@@ -31,7 +31,8 @@ fun PlanGenerationApi(planGenerationService: PlanGenerationService) = ApiRoute("
             description = "사용자가 직접 지정한 교과서/단원 범위(subjects)를 바탕으로 AI가 시험일까지의 일일 학습 계획을 생성. " +
                 "plan_board, plan_subjects, daily_plans, plan_tasks 를 한 번에 생성. 문서 업로드 없이 이미 DB에 있는 교과서/단원 데이터만 사용. " +
                 "할일 시간은 수면·등교·불가능 시간과 사용자의 기존 할일(다른 플랜보드 포함, 앞뒤 10분 쉬는 시간)을 피해서 잡음. " +
-                "각 할일에는 요청한 과목 중 하나가 subjectId·subjectName 으로 붙음 (AI 가 요청 과목으로 표기하지 못하면 null)"
+                "각 할일에는 요청한 과목 중 하나가 subjectId·subjectName 으로 붙음 (AI 가 요청 과목으로 표기하지 못하면 null). " +
+                "examEndDate(시험 마지막 날, 선택)는 저장·표시용이라 계획 기간은 시험 첫날(examDate) 전날까지 그대로다"
             requestBody {
                 ContentType.Application.Json {
                     schema = jsonSchema<PlanGenerationRequest>()
@@ -45,7 +46,8 @@ fun PlanGenerationApi(planGenerationService: PlanGenerationService) = ApiRoute("
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "제목/날짜/과목 범위 오류 (code: INVALID_TITLE, INVALID_DATE_FORMAT, INVALID_DATE_RANGE, " +
+                    description = "제목/날짜/과목 범위 오류 (code: INVALID_TITLE, INVALID_DATE_FORMAT, " +
+                        "INVALID_DATE_RANGE — 시험 첫날이 시작일 이전이거나, examEndDate 가 있는데 examDate 가 없거나 examDate 보다 빠름, " +
                         "SUBJECTS_REQUIRED, INVALID_SUBJECT_RANGE, MISSING_DATE_INFO)"
                 }
                 HttpStatusCode.Unauthorized {
