@@ -8,7 +8,7 @@
 
 > **기준 시점** — 아래 내용은 **2026-10-04** 기준으로 머지된 PR·브랜치·이슈와 운영(prod)·개발(dev) 서버 확인 결과를 근거로 채웠다.
 > (첫 작성 2026-09-17, 09-17 이후 머지된 PR 52건과 운영 작업을 반영)
-> **11-19 재확인** — 머지된 PR 의 `doing` 6건(RB-176·177·178·180·181·182)을 `done` 으로 정리. 부하 테스트 항목이 플랜보드 DDL 과 같은 RB-179 를 써서 RB-182 로 재번호했다.
+> **11-19 재확인** — 머지된 PR 의 `doing` 6건(RB-176·177·178·180·181·182)을 `done` 으로 정리하고 rooter-ddl PR #52 머지를 반영. 부하 테스트 항목이 플랜보드 DDL 과 같은 RB-179 를 써서 RB-182 로 재번호했다.
 > **11-16 재확인** — 머지된 PR 의 `doing` 5건(RB-167·172·173·174·175)을 `done` 으로 정리하고, 요약 표 진행 수를 항목 기준으로 다시 셌다(M7·M8·M9 가 어긋나 있었음).
 > **11-10 재확인** — GitHub 기준으로 머지된 PR 의 `doing` 23건을 `done` 으로 정리하고, 항목이 없던 PR #284·#331 을 RB-169·RB-170 으로 추가했다.
 > 마일스톤 묶음과 진행 판정은 조정 대상이다. 상태를 바꿀 때는 아래 갱신 규칙을 따른다.
@@ -58,7 +58,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 ## 블로커
 
 - ~~RB-167 DDL 이 코드보다 먼저 머지됨~~ — **해소**: PR #348 머지 (11-12). 운영 DB 에 rooter-ddl #49 가 적용됐는지는 아직 확인 안 함
-- **RB-181 rooter-ddl PR #52 (`is_representative`) 가 아직 open** — 코드(PR #346)는 11-19 머지·배포됐고 앱은 정상이라 운영 DB 에는 들어간 것으로 보인다. 정본 `schema.sql` 을 맞추려면 #52 머지 필요. 기존 유저 대표 플랜 백필 SQL(#52 본문) 실행 여부도 결정 필요
+- ~~RB-181 rooter-ddl PR #52 (`is_representative`) open~~ — **해소**: #52 머지 (11-19), 코드(PR #346)도 배포 후 앱 정상. 남은 것은 기존 유저 대표 플랜 백필 SQL(#52 본문) 실행 여부 결정
 - RB-152 실제 Sentry 수집 확인은 서버 프로젝트 생성과 DSN 설정 후 진행한다. 로컬 자동 테스트는 외부로 전송하지 않는다.
 
 - **RB-014 planboard 네이밍 통일** — `rooter-ddl` #10 open. DDL `schema.sql` 에 구 표기(`plan_boards`, `plan_board_id`)가 그대로 남아 있어 코드만 바꾸면 배포 시 터진다. **DDL 먼저.**
@@ -100,7 +100,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-170 AI 가 만든 할일은 삭제 금지 (#245) — `plan_tasks.origin`(USER·AI, rooter-ddl PR #44 머지)으로 생성 출처를 저장하고 `DELETE /plan-tasks/{taskId}`·챗봇 삭제에서 AI 할일은 400 `AI_TASK_NOT_DELETABLE`. 직접 추가·챗봇이 만든 할일만 삭제, 시간 변경·재조정은 그대로 — PR #331 머지 (11-01, `86643fb`)
 - [x] done RB-179 플랜보드 메타데이터 컬럼(`description`·`is_archived`·`updated_at`) DDL 추가 — 한 유저가 여러 플랜보드를 이름·설명으로 구분하는 작업의 1단계. `plan_boards` 에 `description`(text null)·`is_archived`(boolean not null default false, 보관한 보드는 목록에서 빠지고 행은 남는다)·`updated_at`(timestamptz not null default current_timestamp) — rooter-ddl PR #50 머지 (11-10) · 운영 DB 적용 후 RB-180 머지
 - [x] done RB-180 다중 보드 백엔드 지원 (보드 메타데이터 API + 보드 스코프 조회 경로) — 보드 컨텍스트는 클라이언트가 목록에서 고르고 서버는 path 로 받는다. `GET /plan-boards` 는 최근 생성 순(클라가 첫 항목을 현재 보드로 씀)이고 기본으로 보관 보드를 빼며 `includeArchived=true` 로 포함, `POST/PATCH` 에 `description`·`isArchived`(빈 문자열 = 설명 지우기, 500자 초과 400 `INVALID_DESCRIPTION`), 응답에 `description`·`isArchived`·`updatedAt`. 신규 경로 `GET /plan-boards/{boardId}/weekly`(그 주 dailyPlanId 까지 채움), `GET /plan-boards/{boardId}/calendar?start=&end=`·`/{boardId}/calendar/{date}`(그 보드 계획·시험만 집계, 개인 일정은 사용자 단위라 포함). `busy-times` 는 다른 보드 할일도 실제 시간을 먹으므로 사용자 단위 유지 — PR #346 머지 (11-19, `de48c27`) · `./gradlew test` 462건 0 실패(기준선 453, 신규 9) · 로컬 기동 스모크 테스트(보관 필터·`INVALID_DESCRIPTION`·404) 확인 · 운영 DB 에 RB-179 컬럼 적용 후 머지 · 배포 후 앱 홈 화면 정상 확인 (11-19)
-- [x] done RB-181 플랜 수정 화면 API 보강 + 대표 플랜 (프론트 요청, 피그마 `플랜 수정하기` 프레임 3559:5150) — 이름·설명·기간은 기존 `PATCH /plan-boards/{boardId}` 로 되고(RB-180 에서 `description` 추가), 교과서는 신규 `PUT /plan-boards/{boardId}/subjects` 로 목록을 통째로 교체한다(빈 배열 = 전체 삭제, 검증 실패 시 아무것도 안 바뀜). 대표 플랜은 `plan_boards.is_representative` + 부분 유니크 인덱스 `uq_plan_boards_representative`(rooter-ddl PR #52)로 유저당 1개를 DB 에서 보장하고, `PUT`/`DELETE /plan-boards/{boardId}/representative` + 목록 응답 `isRepresentative` 로 오간다. 대표가 없는 유저가 보드를 만들면 자동으로 대표가 된다 — PR #346 에 추가 커밋 · `./gradlew test` 494건 0 실패(기준선 478, 신규 16) · 로컬 기동 스모크(첫 보드 자동 대표·전환·해제 204·교체·400·404) · **운영 DB 에 RB-179·RB-181 컬럼 적용 후 머지** · PR #346 머지 (11-19, `de48c27`) · 배포 후 앱 홈 화면 정상 확인(운영 DB 에 컬럼이 들어간 것으로 보임, 11-19) · rooter-ddl PR #52 는 아직 open — 정본 머지 필요
+- [x] done RB-181 플랜 수정 화면 API 보강 + 대표 플랜 (프론트 요청, 피그마 `플랜 수정하기` 프레임 3559:5150) — 이름·설명·기간은 기존 `PATCH /plan-boards/{boardId}` 로 되고(RB-180 에서 `description` 추가), 교과서는 신규 `PUT /plan-boards/{boardId}/subjects` 로 목록을 통째로 교체한다(빈 배열 = 전체 삭제, 검증 실패 시 아무것도 안 바뀜). 대표 플랜은 `plan_boards.is_representative` + 부분 유니크 인덱스 `uq_plan_boards_representative`(rooter-ddl PR #52)로 유저당 1개를 DB 에서 보장하고, `PUT`/`DELETE /plan-boards/{boardId}/representative` + 목록 응답 `isRepresentative` 로 오간다. 대표가 없는 유저가 보드를 만들면 자동으로 대표가 된다 — PR #346 에 추가 커밋 · `./gradlew test` 494건 0 실패(기준선 478, 신규 16) · 로컬 기동 스모크(첫 보드 자동 대표·전환·해제 204·교체·400·404) · **운영 DB 에 RB-179·RB-181 컬럼 적용 후 머지** · PR #346 머지 (11-19, `de48c27`) · 배포 후 앱 홈 화면 정상 확인(운영 DB 에 컬럼이 들어간 것으로 보임, 11-19) · rooter-ddl PR #52 머지 (11-19)
 
 ## M2. 컨벤션·구조 정비
 
