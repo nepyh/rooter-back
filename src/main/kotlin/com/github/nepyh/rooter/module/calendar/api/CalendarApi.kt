@@ -45,7 +45,8 @@ fun CalendarApi(calendarService: CalendarService) = ApiRoute("calendar") {
         }.describe {
             tag("Calendar")
             summary = "기간별 캘린더 조회 (일별 공부 시간 + 시험 D-Day + 개인 일정)"
-            description = "start~end 범위의 날짜별 계획 공부 시간(estimatedMinutes 합), 시험 일정(D-Day), 사용자가 등록한 개인 일정을 함께 반환"
+            description = "start~end 범위의 날짜별 계획 공부 시간(estimatedMinutes 합), 시험 일정(D-Day), 사용자가 등록한 개인 일정을 함께 반환. " +
+                "시험 일정은 시험 기간(examDate~examEndDate, examEndDate 가 null 이면 examDate 하루)이 범위와 겹치면 담기고 dDay 는 첫날 기준"
             parameters {
                 query("start") {
                     description = "조회 시작일 (yyyy-MM-dd)"

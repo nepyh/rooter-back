@@ -17,7 +17,9 @@ object PlanBoardTable : IntIdTable("plan_boards") {
     val description = text("description").nullable()
     val startDate = date("start_date")
     val endDate = date("end_date")
-    val examDate = date("exam_date").nullable() // 실제 시험 날짜 (end_date 와 별개일 수 있음)
+    val examDate = date("exam_date").nullable() // 실제 시험 날짜 (end_date 와 별개일 수 있음). 시험이 여러 날이면 첫날
+    // 시험 마지막 날. null 이면 examDate 하루짜리 시험. DDL chk_plan_boards_exam_end_date: examDate 가 있고 그보다 앞서지 않음 (#376)
+    val examEndDate = date("exam_end_date").nullable()
     val isCramMode = bool("is_cram_mode").default(false)
     // 보관한 보드. 목록에서 기본으로 빠지고 행은 남는다 (삭제는 daily_plans 까지 cascade 라 파괴적)
     val isArchived = bool("is_archived").default(false)
@@ -38,6 +40,7 @@ class PlanBoardRow(id: EntityID<Int>) : IntEntity(id) {
     var startDate by PlanBoardTable.startDate
     var endDate by PlanBoardTable.endDate
     var examDate by PlanBoardTable.examDate
+    var examEndDate by PlanBoardTable.examEndDate
     var isCramMode by PlanBoardTable.isCramMode
     var isArchived by PlanBoardTable.isArchived
     var isRepresentative by PlanBoardTable.isRepresentative

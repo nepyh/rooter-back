@@ -8,6 +8,7 @@ data class PlanBoardCreateRequest(
     val startDate: String,
     val endDate: String,
     val examDate: String? = null,
+    val examEndDate: String? = null, // 시험 마지막 날 "yyyy-MM-dd". examDate 가 있어야 하고 그보다 앞설 수 없다 (#376)
     val description: String? = null // 목록에서 보드를 구분하는 설명. 500자 이하, 빈 문자열은 설명 없음으로 본다
 )
 
@@ -18,7 +19,8 @@ data class PlanBoardResponse(
     val description: String?, // 설명 없으면 null
     val startDate: String,
     val endDate: String,
-    val examDate: String?,
+    val examDate: String?, // 시험 첫날
+    val examEndDate: String?, // 시험 마지막 날. null 이면 examDate 하루짜리 시험
     val isArchived: Boolean, // 보관한 보드인지. 목록 조회는 기본으로 보관된 보드를 뺀다
     val isRepresentative: Boolean, // 대표 플랜인지 (유저당 1개). 홈 화면이 이 보드의 디데이를 보여준다
     val createdAt: String,
@@ -45,5 +47,6 @@ data class PlanBoardUpdateRequest(
     val startDate: String? = null,
     val endDate: String? = null,
     val examDate: String? = null,
+    val examEndDate: String? = null, // 시험 마지막 날. 바꾼 뒤의 examDate 보다 앞설 수 없다
     val isArchived: Boolean? = null // true = 보관, false = 보관 해제
 )

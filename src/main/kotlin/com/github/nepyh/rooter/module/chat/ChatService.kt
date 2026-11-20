@@ -364,7 +364,7 @@ class ChatService(
             classNumber = classNumber,
             routine = userRoutine(userId),
             studyStyleSummary = studyStyleSummary,
-            planBoardSummary = planBoardSummaryOf(board.title, board.startDate, board.endDate, board.examDate, planDate),
+            planBoardSummary = planBoardSummaryOf(board.title, board.startDate, board.endDate, board.examDate, planDate, board.examEndDate),
             history = history,
             sessionId = session?.id?.value,
             needsSessionTitle = session?.title == null,
@@ -836,7 +836,14 @@ internal fun noOverlapReply(window: Pair<LocalTime, LocalTime>): String =
  * 챗봇 프롬프트의 <PLAN_BOARD> 에 넣는 플랜보드 요약. 학생이 시험 날짜·남은 기간을 물으면 AI 가 이 값으로 답한다
  * (이게 없으면 AI 가 TARGET_DATE 를 시험일처럼 답했음). D-day 는 대화 중인 날짜(planDate) 기준.
  */
-internal fun planBoardSummaryOf(title: String, startDate: LocalDate, endDate: LocalDate, examDate: LocalDate?, planDate: LocalDate): String {
+internal fun planBoardSummaryOf(
+    title: String,
+    startDate: LocalDate,
+    endDate: LocalDate,
+    examDate: LocalDate?,
+    planDate: LocalDate,
+    examEndDate: LocalDate? = null
+): String {
     val examLine = examDate?.let {
         val days = ChronoUnit.DAYS.between(planDate, it)
         val dDay = when {
@@ -844,7 +851,9 @@ internal fun planBoardSummaryOf(title: String, startDate: LocalDate, endDate: Lo
             days == 0L -> "D-day(오늘)"
             else -> "이미 지남(${-days}일 전)"
         }
-        "시험일: $it ($dDay)"
+        // 시험이 여러 날이면 기간도 함께 — "시험이 언제 끝나?" 에 답할 수 있게 (#376). D-day 는 첫날 기준
+        val period = examEndDate?.takeIf { end -> end.isAfter(it) }?.let { end -> ", 시험 기간: $it ~ $end" }.orEmpty()
+        "시험일: $it ($dDay)$period"
     } ?: "시험일: 등록되지 않음"
     return "플랜보드: $title\n학습 기간: $startDate ~ $endDate\n$examLine"
 }
