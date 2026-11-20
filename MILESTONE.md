@@ -48,7 +48,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M5 | 사용자 기능 | 12/14 | doing |
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 7/8 | doing |
-| M8 | AI 계획 생성·스케줄링 | 17/19 | doing |
+| M8 | AI 계획 생성·스케줄링 | 17/20 | doing |
 | M9 | 퀴즈 고도화 | 18/19 | doing |
 | M10 | 챗봇 재조정 | 11/11 | done |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
@@ -208,6 +208,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [x] done RB-158 스케줄러 `findDue` 가 매분 퀴즈 기록 전체를 읽고 끝난 재조정도 계속 청구하던 것 (#319) — 1차 후보의 시작 여부를 attempt 1 전체(108,000행·15.4ms)에서 확인하던 것을 오늘 끝난 할일 id 조회(780행·0.7ms)로, 재시도는 attempt 전체를 읽고 후보마다 `PlanTaskRow` 를 따로 조회하던 것(140,400행·17.3ms + N+1)을 오늘·어제 할일 id 조회(1,560행·1.3ms)로 바꿈. 엔진이 claim 전에 `job_runs` 의 `(job_type, run_key)` 를 한 번에 조회해 이미 기록된 작업을 걸러내 보드당 하루 약 1,440건 헛 INSERT 제거(중복 방지 판정은 그대로 claim 유니크 키). 퀴즈 기록을 10배(1,404,000행)로 늘려도 재시도 조회가 178.6→3.7ms 로만 늘어남. DDL 변경 없음 · 이틀보다 오래된 불합격 attempt 는 재시도를 만들지 않음(정책) · `./gradlew test` 369건 0 실패(신규 7건: `SchedulerEngineTest` 3·`TaskQuizServiceTest` 4) — 이슈 #319, PR #327 머지 (10-28) (`7183601` `0c22030` `68faef0`)
 - [x] done RB-169 사용자 수면시간 저장 (#260) — `GET`·`PUT /users/{id}/sleep-time`, `users.sleep_time`·`wake_time`(rooter-ddl #31, 둘 다 NULL 이면 기본 23:00~06:30). 계획 생성·busy-times SLEEP·챗봇 재조정/미루기·복습 배치가 고정값 대신 사용자 수면시간 사용, 자정 넘는 취침 처리 — PR #284 머지 (10-20, `6c2e167`)
 - [x] done RB-164 공부 스타일 설문의 주말·평소 공부량이 계획 분량에 안 먹던 것 + 코드블록 응답 생성 실패 (#333) — 실제 DeepSeek 로 설문 14가지 × 3회 비교: Q4 주말이 변수인데 주말(140~160분)이 평일(98~122분)보다 많았고, Q5 30분 이하는 처음 60~75분에서 늘지 않았음(14일 넘는 계획은 구간마다 다시 가볍게 시작). 프롬프트 지시 대신 `dailyTargetMinutes` 로 날짜별 권장 자체를 조정(주말 = 평일 권장 -30분, 첫 3일 상한 60·75·90 / 90·105·120, 전체 계획 기준 날짜), 프롬프트는 '권장을 그대로 따르고 따라잡기·복습도 권장 안에'. 재평가: 주말 < 평일 4/5·첫 3일 45~90분에서 4일차 90분 이상으로 늘어남 4/5. `stripCodeFence` 로 ```json 응답도 파싱. DB 변경 없음 · `./gradlew test` 421건 통과 0 실패(신규 8건) — 이슈 #333, PR #336 (`745db4d` `a97137a` `987b61d` `b10da03`) · Q2 아침·오후가 배치에 차이 없는 것(등교 전 막힘)은 정책 결정 필요로 범위 밖 · **PR #336 머지 `2eec3b8` (11-02), ECS 배포·Swagger 게시 성공**
+- [ ] doing RB-186 실패한 스케줄러 잡 재시도 (#318) — 실패(`failed`)한 작업이 `(job_type, run_key)` 유니크 claim 에 막혀 다시 실행되지 않던 것, 그리고 정작 흔한 실패인 LLM 오류는 클라이언트가 빈 결과로 삼켜 `done` 으로 끝나던 것. `SchedulerJob.retryDelays`(기본 없음)·`DEFAULT_RETRY_DELAYS`(5·15·30분, 최대 3회)를 자정 재조정·할일 퀴즈 자동 생성에만 켬(할일 알림은 후보가 시작 후 2분까지라 제외). 재시도는 `findDue` 가 아직 내는 작업만이라 재조정은 그 하루 안에서 끝남. `claimRetry` 는 `status = failed and retry_count = n` 조건부 UPDATE 라 배포 중 옛·새 서버가 함께 가져가지 않음. 실행 성공 뒤 완료 기록(`markDone`) 실패가 `failed` → 재시도(보충 할일 중복)로 이어지지 않게 분리. `ReplanLlmClient` 는 호출·파싱 실패를 `ReplanLlmException` 으로, 퀴즈 잡은 AI 생성 실패를 `TaskQuizGenerationException` 으로 · DB 변경 없음(`retry_count` 컬럼은 이미 있음) · `./gradlew test` 512건 중 S3 3건(로컬 AWS 자격증명 없음, 무관)만 실패, 신규 6건 · 실행 중 서버가 내려가 `pending` 으로 남는 행은 #383 으로 따로 · RB-185(#317, PR #382) 와 같은 `SchedulerEngine.kt` 를 고침
 
 ## M9. 퀴즈 고도화
 
