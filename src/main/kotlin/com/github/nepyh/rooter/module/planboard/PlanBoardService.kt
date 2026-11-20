@@ -63,6 +63,7 @@ class PlanBoardService {
         startDate = startDate.toString(),
         endDate = endDate.toString(),
         examDate = examDate?.toString(),
+        examEndDate = examEndDate?.toString(),
         isArchived = isArchived,
         isRepresentative = isRepresentative,
         createdAt = createdAt.toString(),
@@ -87,9 +88,9 @@ class PlanBoardService {
             .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
         val endDate = runCatching { LocalDate.parse(request.endDate) }
             .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
-        val examDate = request.examDate?.let {
-            runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
-        }
+        val examDate = request.examDate?.let { parseBoardDate(it) }
+        val examEndDate = request.examEndDate?.let { parseBoardDate(it) }
+        requireValidExamPeriod(examDate, examEndDate)
 
         if (endDate.isBefore(startDate)) {
             throw PlanBoardValidationException.InvalidDateRangeException()
@@ -103,6 +104,7 @@ class PlanBoardService {
                 this.startDate = startDate
                 this.endDate = endDate
                 this.examDate = examDate
+                this.examEndDate = examEndDate
                 createdAt = OffsetDateTime.now()
             }
             // 대표 플랜이 하나도 없으면 이 보드를 대표로 (홈 디데이가 비어 보이지 않게)
@@ -139,7 +141,7 @@ class PlanBoardService {
         }
     }
 
-    /** title/description/startDate/endDate/examDate/isArchived 중 전달된 필드만 수정 (null 은 변경 없음). 본인 보드만 가능 */
+    /** title/description/startDate/endDate/examDate/examEndDate/isArchived 중 전달된 필드만 수정 (null 은 변경 없음). 본인 보드만 가능 */
     fun updateBoard(userId: Int, boardId: Int, request: PlanBoardUpdateRequest): PlanBoardResponse = transaction {
         val board = PlanBoardRow.findById(boardId) ?: throw PlanBoardNotFoundException()
         if (board.user.id.value != userId) throw PlanBoardForbiddenException()
@@ -159,10 +161,12 @@ class PlanBoardService {
         board.startDate = newStartDate
         board.endDate = newEndDate
 
-        request.examDate?.let {
-            board.examDate = runCatching { LocalDate.parse(it) }
-                .getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
-        }
+        // 시험 첫날·마지막 날은 바꾼 뒤의 두 값으로 함께 검증한다 (첫날만 마지막 날 뒤로 옮기는 것도 막는다)
+        val newExamDate = request.examDate?.let { parseBoardDate(it) } ?: board.examDate
+        val newExamEndDate = request.examEndDate?.let { parseBoardDate(it) } ?: board.examEndDate
+        requireValidExamPeriod(newExamDate, newExamEndDate)
+        board.examDate = newExamDate
+        board.examEndDate = newExamEndDate
 
         request.description?.let { board.description = normalizeDescription(it) }
         request.isArchived?.let { board.isArchived = it }
