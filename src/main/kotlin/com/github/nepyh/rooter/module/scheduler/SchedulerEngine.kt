@@ -21,7 +21,8 @@ import java.util.concurrent.ConcurrentHashMap
  * 스케줄 상태를 메모리에 보관하지 않으므로 재시작 시 휘발되는 것이 없다.
  *
  * 파생 결과에는 이미 실행을 마친 작업도 계속 섞이므로, claim 전에 job_runs 기록을 한 번에 조회해 걸러낸다
- * ([JobRunRepo.filterUnclaimed]). 걸러내지 않으면 끝난 작업마다 매분 헛 INSERT 가 나간다.
+ * ([JobRunRepo.findClaimable]). 걸러내지 않으면 끝난 작업마다 매분 헛 INSERT 가 나간다.
+ * 실패(failed)한 작업은 잡이 [SchedulerJob.retryDelays] 를 두었으면 그 간격이 지난 뒤 다시 실행한다 (#318).
  *
  * [SchedulerJob.monitored] 인 잡들의 상태를 모아 틱 간격마다 [monitor](기본 Sentry Crons)에 heartbeat 하나를 보낸다
  * (무료 플랜은 모니터가 1개라 잡마다 보내지 않는다). 모두 정상이면 OK, 한 잡이라도 루프가 죽었거나(#317)·마지막 틱이
@@ -122,19 +123,30 @@ class SchedulerEngine(
             return false
         }
         var ok = true
-        // 매 틱 다시 파생되는 후보 중 job_runs 에 이미 기록된 runKey 는 claim(=INSERT) 까지 보내지 않는다
-        jobRunRepo.filterUnclaimed(job.jobType, dueJobs).forEach { due ->
-            val claimed = jobRunRepo.claim(job.jobType, due)
+        // 매 틱 다시 파생되는 후보 중 이미 기록된 runKey 는 claim 까지 보내지 않는다. 실패한 작업은 잡의 재시도 간격이 지났으면 다시 고른다
+        jobRunRepo.findClaimable(job.jobType, dueJobs, job.retryDelays, now).forEach { (due, retryCount) ->
+            val claimed = if (retryCount == null) {
+                jobRunRepo.claim(job.jobType, due)
+            } else {
+                jobRunRepo.claimRetry(job.jobType, due.runKey, retryCount)
+            }
             if (!claimed) return@forEach
 
-            try {
+            val failure = try {
                 job.execute(due)
-                jobRunRepo.markDone(job.jobType, due.runKey)
+                null
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                ErrorMonitoring.capture(e, ErrorSource.SCHEDULER)
-                logger.error("잡 실행 실패: jobType={} runKey={}", job.jobType, due.runKey, e)
-                jobRunRepo.markFailed(job.jobType, due.runKey, e)
+                e
+            }
+            if (failure == null) {
+                // 실행 뒤 완료 기록이 실패해도 failed 로 바꾸지 않는다 — 재시도 대상이 되면 이미 끝난 일(보충 할일 등)을 한 번 더 한다.
+                // 이 예외는 틱의 실패로 올라가고, 행은 pending 으로 남아 다시 실행되지 않는다
+                jobRunRepo.markDone(job.jobType, due.runKey)
+            } else {
+                ErrorMonitoring.capture(failure, ErrorSource.SCHEDULER)
+                logger.error("잡 실행 실패: jobType={} runKey={} retryCount={}", job.jobType, due.runKey, retryCount ?: 0, failure)
+                jobRunRepo.markFailed(job.jobType, due.runKey, failure)
                 ok = false
             }
         }

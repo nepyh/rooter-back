@@ -3,6 +3,7 @@ package com.github.nepyh.rooter.module.taskquiz
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.scheduler.DEFAULT_RETRY_DELAYS
 import com.github.nepyh.rooter.module.scheduler.DueJob
 import com.github.nepyh.rooter.module.scheduler.SchedulerJob
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizAttemptTable
@@ -15,6 +16,7 @@ import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -50,6 +52,9 @@ class TaskQuizTriggerJob(
 
     override val jobType: String = "task_quiz_trigger"
     override val monitored: Boolean = true
+
+    /** AI 생성이 실패하면 5·15·30분 뒤 다시 만든다 (#318). [TaskQuizService.generateAttempt] 는 같은 차수가 있으면 만들지 않아 겹치지 않는다 */
+    override val retryDelays: List<Duration> = DEFAULT_RETRY_DELAYS
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -155,6 +160,13 @@ class TaskQuizTriggerJob(
 
     override suspend fun execute(due: DueJob) {
         val payload = json.decodeFromString(TaskQuizJobPayload.serializer(), due.payload)
-        taskQuizService.generateAttempt(payload.planTaskId, payload.attemptNumber, payload.taskName)
+        // AI 생성 실패는 false 로 온다. 그대로 끝내면 done 으로 남아 다시 만들지 않으므로 실패로 올려 재시도에 맡긴다 (#318)
+        if (!taskQuizService.generateAttempt(payload.planTaskId, payload.attemptNumber, payload.taskName)) {
+            throw TaskQuizGenerationException(payload.planTaskId, payload.attemptNumber)
+        }
     }
 }
+
+/** 스케줄러가 만들려던 할일 퀴즈를 AI 가 만들지 못함 (LLM 호출·응답 실패). job_runs 에 failed 로 남아 재시도된다 */
+class TaskQuizGenerationException(planTaskId: Int, attemptNumber: Int) :
+    IllegalStateException("할일 퀴즈 AI 생성 실패: planTaskId=$planTaskId attempt=$attemptNumber")

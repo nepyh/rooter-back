@@ -82,7 +82,7 @@ class TaskQuizService(
         val generated = llmClient.generateQuestions(taskName, gradeLabel, studyScope, questionCount)
             .filter { it.choices.size >= 2 && it.correct_index in it.choices.indices }
             .take(questionCount)
-        if (generated.isEmpty()) return false // AI 생성 실패 시 이번 attempt는 건너뜀 (다음 스케줄 대상이 되진 않음)
+        if (generated.isEmpty()) return false // AI 생성 실패. 스케줄러는 실패로 남겨 재시도하고(#318), 퀴즈 열기는 다음에 열 때 다시 만든다
 
         newSuspendedTransaction {
             PlanTaskTable.selectAll().where { PlanTaskTable.id eq planTaskId }.forUpdate().single()
