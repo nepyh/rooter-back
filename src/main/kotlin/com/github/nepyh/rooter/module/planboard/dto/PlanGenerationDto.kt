@@ -16,6 +16,8 @@ data class PlanGenerationRequest(
     val subjects: List<PlanGenerationSubjectInput>,
     val startDate: String? = null, // "yyyy-MM-dd", 생략하면 오늘
     val examDate: String? = null, // "yyyy-MM-dd", 주어지면 daysRemaining을 여기서 자동 계산 (시험 당일은 공부일에서 제외)
+    // 시험 마지막 날 "yyyy-MM-dd" (#376). examDate 가 있어야 하고 그보다 앞설 수 없다. 저장·표시용이라 계획 기간은 바뀌지 않는다(시험 첫날 전날까지)
+    val examEndDate: String? = null,
     val daysRemaining: Int? = null, // examDate 를 안 주면 이 값으로 종료일을 계산. 둘 다 없으면 에러
     val targetScore: Int? = null,
     val isCramMode: Boolean = false
@@ -48,6 +50,7 @@ data class PlanGenerationResponse(
     val startDate: String,
     val endDate: String,
     val examDate: String?,
+    val examEndDate: String?,
     val isCramMode: Boolean,
     val dailyPlans: List<PlanGenerationDailyResponse>,
     val tips: List<String>
