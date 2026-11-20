@@ -54,13 +54,17 @@ class ReplanLlmClient(private val appConfig: AppConfig) {
         }
     }
 
+    /**
+     * AI 가 제안한 보충 할일. 제안이 없으면(빈 배열) 빈 목록이고, 호출·응답이 실패하면 [ReplanLlmException] 을 던진다.
+     * 예전엔 실패도 빈 목록으로 돌려줘 자정 배치가 done 으로 끝나고 다시 하지 않았다 (#318)
+     */
     suspend fun suggestAdjustments(context: String): List<ReplanSuggestion> {
         val prompt = PromptLoader.load("prompts/feedback-replan.md", "CONTEXT" to context)
 
-        val content = requestChatCompletion(prompt) ?: return emptyList()
+        val content = requestChatCompletion(prompt) ?: throw ReplanLlmException("LLM 호출 실패 또는 빈 응답")
         return runCatching { json.decodeFromString<List<ReplanSuggestion>>(content) }
             .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
-            .getOrElse { emptyList() }
+            .getOrElse { throw ReplanLlmException("LLM 응답 JSON 파싱 실패", it) }
     }
 
     private suspend fun requestChatCompletion(prompt: String): String? {
@@ -86,3 +90,6 @@ class ReplanLlmClient(private val appConfig: AppConfig) {
         return response.choices.firstOrNull()?.message?.content
     }
 }
+
+/** 자정 재조정의 AI 호출·응답 실패. 스케줄러가 job_runs 에 failed 로 남기고 재시도한다 (#318) */
+class ReplanLlmException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)

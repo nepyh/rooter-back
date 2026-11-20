@@ -4,6 +4,7 @@ import com.github.nepyh.rooter.module.feedback.model.DailyFeedbackTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.scheduler.DEFAULT_RETRY_DELAYS
 import com.github.nepyh.rooter.module.scheduler.DueJob
 import com.github.nepyh.rooter.module.scheduler.SchedulerJob
 import kotlinx.serialization.Serializable
@@ -11,6 +12,7 @@ import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.time.Duration
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -34,6 +36,12 @@ class FeedbackReplanJob(
 
     override val jobType: String = "feedback_replan"
     override val monitored: Boolean = true
+
+    /**
+     * AI 호출이 실패하면 5·15·30분 뒤 다시 한다 (#318). 보충 할일은 AI 응답을 받은 뒤 한 트랜잭션에서 붙이므로
+     * 실패한 시도는 아무것도 남기지 않는다. 후보는 그 하루(자정~다음 자정) 동안만 나오므로 그 뒤로는 재시도하지 않는다
+     */
+    override val retryDelays: List<Duration> = DEFAULT_RETRY_DELAYS
 
     private val json = Json { ignoreUnknownKeys = true }
 
