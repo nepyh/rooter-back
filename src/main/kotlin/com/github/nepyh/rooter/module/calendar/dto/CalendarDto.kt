@@ -13,8 +13,9 @@ data class CalendarDayResponse(
 data class CalendarExamResponse(
     val planBoardId: Int,
     val title: String,
-    val examDate: String,
-    val dDay: Int                // 오늘 기준 남은 일수 (지났으면 음수)
+    val examDate: String,        // 시험 첫날
+    val examEndDate: String?,    // 시험 마지막 날. null 이면 examDate 하루짜리 시험 (#376)
+    val dDay: Int                // 오늘 기준 시험 첫날까지 남은 일수 (지났으면 음수)
 )
 
 @Serializable

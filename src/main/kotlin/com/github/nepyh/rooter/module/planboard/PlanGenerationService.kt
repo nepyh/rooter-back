@@ -78,6 +78,9 @@ class PlanGenerationService(
             ?: todayInAppZone(clock)
         val examDate = request.examDate
             ?.let { runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() } }
+        // 시험 마지막 날은 저장·표시용 — 계획 기간은 아래처럼 시험 첫날 전날까지 그대로다 (#376)
+        val examEndDate = request.examEndDate?.let { parseBoardDate(it) }
+        requireValidExamPeriod(examDate, examEndDate)
 
         val endDate: LocalDate
         val totalDays: Int
@@ -235,6 +238,7 @@ class PlanGenerationService(
                 this.startDate = startDate
                 this.endDate = endDate
                 this.examDate = examDate
+                this.examEndDate = examEndDate
                 isCramMode = request.isCramMode
                 createdAt = OffsetDateTime.now()
             }
@@ -313,6 +317,7 @@ class PlanGenerationService(
                 startDate = startDate.toString(),
                 endDate = endDate.toString(),
                 examDate = examDate?.toString(),
+                examEndDate = examEndDate?.toString(),
                 isCramMode = request.isCramMode,
                 dailyPlans = dailyResponses,
                 tips = generated.tips

@@ -29,7 +29,9 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.isNotNull
+import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
@@ -87,17 +89,22 @@ class CalendarService {
             } else {
                 PlanBoardTable.id eq planBoardId
             }
+            // 시험 기간(첫날~마지막 날, 마지막 날이 없으면 첫날 하루)이 조회 범위와 겹치면 담는다 — 첫날이 범위 앞이어도 (#376)
             val exams = PlanBoardRow.find {
                 examFilter and
                     (PlanBoardTable.examDate.isNotNull()) and
-                    (PlanBoardTable.examDate greaterEq start) and
-                    (PlanBoardTable.examDate lessEq end)
+                    (PlanBoardTable.examDate lessEq end) and
+                    (
+                        ((PlanBoardTable.examEndDate.isNull()) and (PlanBoardTable.examDate greaterEq start)) or
+                            (PlanBoardTable.examEndDate greaterEq start)
+                    )
             }.map {
                 val examDate = it.examDate!!
                 CalendarExamResponse(
                     planBoardId = it.id.value,
                     title = it.title,
                     examDate = examDate.toString(),
+                    examEndDate = it.examEndDate?.toString(),
                     dDay = ChronoUnit.DAYS.between(todayInAppZone(), examDate).toInt()
                 )
             }
