@@ -181,6 +181,13 @@ class AuthServicePasswordTest : StringSpec({
         authService.login(UserLoginRequest("legacy-space@test.com", "abcd 1234")).token.shouldNotBeNull()
     }
 
+    "login: 새 규칙(20자 초과·이모지)에 어긋나는 기존 비밀번호도 그대로 로그인된다" {
+        val legacy = "abcd1234😀abcdefghijklmn"
+        seedUser("legacy-long@test.com", legacy)
+
+        authService.login(UserLoginRequest("legacy-long@test.com", legacy)).token.shouldNotBeNull()
+    }
+
     "changePassword: 그 사용자의 푸시 토큰은 전부 지우고, 다른 사용자 토큰은 남긴다" {
         val userId = seedUser("pw5@test.com", "Passw0rd!")
         val other = seedUser("other@test.com", "Passw0rd!")

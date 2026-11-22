@@ -15,7 +15,7 @@ sealed class UserValidationException(
     class WrongPasswordFormatException : UserValidationException(
         HttpStatusCode.BadRequest,
         "INVALID_PASSWORD_FORMAT",
-        "비밀번호는 영문과 숫자를 포함해 8자 이상이어야 하고, 띄어쓰기를 넣을 수 없습니다."
+        "비밀번호는 영문과 숫자를 포함한 8~20자여야 하고, 띄어쓰기와 이모지는 넣을 수 없습니다."
     )
     class BadCredentialsException : UserValidationException(
         HttpStatusCode.Unauthorized,
