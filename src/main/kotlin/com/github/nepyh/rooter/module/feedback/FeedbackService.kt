@@ -20,18 +20,23 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizAttemptTable
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizChoiceTable
 import com.github.nepyh.rooter.module.quiz.model.DailyQuizQuestionTable
+import org.jetbrains.exposed.v1.core.JoinType
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.LocalDate
 import java.time.LocalTime
 
 private val VALID_DIFFICULTIES = setOf("쉬움", "적당", "어려움")
+
+/** 재조정 근거에서 할일 없이 하루 전체에 대해 낸 일일 설문의 이름 */
+private const val DAILY_SURVEY_LABEL = "오늘 공부 전체(일일 설문)"
 
 class FeedbackService(
     private val replanLlmClient: ReplanLlmClient
@@ -69,16 +74,7 @@ class FeedbackService(
     suspend fun submitFeedback(userId: Int, taskId: Int, request: FeedbackSubmitRequest): FeedbackResponse =
         newSuspendedTransaction {
             val task = requireOwnedTask(userId, taskId)
-
-            if (request.difficulty !in VALID_DIFFICULTIES) {
-                throw FeedbackValidationException.InvalidDifficultyException()
-            }
-            if (request.timeSpentMinutes != null && request.timeSpentMinutes < 1) {
-                throw FeedbackValidationException.InvalidTimeSpentMinutesException()
-            }
-            if (request.focusLevel != null && request.focusLevel !in 1..5) {
-                throw FeedbackValidationException.InvalidFocusLevelException()
-            }
+            validate(request)
 
             // DDL 의 uq_daily_feedback_plan_task 와 같은 규칙을 서비스에서 먼저 확인해 409 로 돌려준다.
             val alreadySubmitted = DailyFeedbackRow.find { DailyFeedbackTable.planTaskId eq taskId }
@@ -95,6 +91,44 @@ class FeedbackService(
                 focusLevel = request.focusLevel
             }.toFeedbackResponse(task.dailyPlanId)
         }
+
+    /**
+     * 하루 한 번 내는 오늘 공부 설문 (#373). 할일과 묶이지 않아 plan_task_id = NULL 로 저장한다.
+     * 일일 계획당 1건 — DDL 의 uq_daily_feedback_plan_task 는 NULL 끼리 겹쳐도 막지 않아 서비스에서 확인해 409 로 돌려준다.
+     * 재조정(AI)은 할일 설문과 같이 자정 배치 [FeedbackReplanJob] 이 그날 설문으로 함께 모아 실행한다.
+     */
+    suspend fun submitDailyFeedback(userId: Int, dailyPlanId: Int, request: FeedbackSubmitRequest): FeedbackResponse =
+        newSuspendedTransaction {
+            requireOwnedDailyPlan(userId, dailyPlanId)
+            validate(request)
+
+            val alreadySubmitted = DailyFeedbackRow.find {
+                (DailyFeedbackTable.dailyPlanId eq dailyPlanId) and DailyFeedbackTable.planTaskId.isNull()
+            }.firstOrNull() != null
+            if (alreadySubmitted) {
+                throw FeedbackAlreadySubmittedException()
+            }
+
+            DailyFeedbackRow.new {
+                this.dailyPlan = DailyPlanRow[dailyPlanId]
+                this.planTaskId = null
+                difficulty = request.difficulty
+                timeSpentMinutes = request.timeSpentMinutes
+                focusLevel = request.focusLevel
+            }.toFeedbackResponse(dailyPlanId)
+        }
+
+    private fun validate(request: FeedbackSubmitRequest) {
+        if (request.difficulty !in VALID_DIFFICULTIES) {
+            throw FeedbackValidationException.InvalidDifficultyException()
+        }
+        if (request.timeSpentMinutes != null && request.timeSpentMinutes < 1) {
+            throw FeedbackValidationException.InvalidTimeSpentMinutesException()
+        }
+        if (request.focusLevel != null && request.focusLevel !in 1..5) {
+            throw FeedbackValidationException.InvalidFocusLevelException()
+        }
+    }
 
     /** 할일 하나에 제출된 설문 단건. 없으면 404. */
     suspend fun getFeedbackByTask(userId: Int, taskId: Int): FeedbackResponse = newSuspendedTransaction {
@@ -157,14 +191,15 @@ class FeedbackService(
 
         if (dailyPlanIds.isEmpty()) return@newSuspendedTransaction null
 
-        // 설문이 달린 할일과 조인해 "어느 할일의 설문인지"까지 근거에 넣는다 (제출 안 한 할일은 빠짐).
-        val surveys = (DailyFeedbackTable innerJoin PlanTaskTable)
+        // 할일 설문은 할일과 조인해 "어느 할일의 설문인지"까지 근거에 넣는다 (제출 안 한 할일은 빠짐).
+        // 일일 설문(plan_task_id NULL, #373)은 할일이 없어 left join 으로 남기고 "하루 전체" 로 적는다.
+        val surveys = DailyFeedbackTable.join(PlanTaskTable, JoinType.LEFT, DailyFeedbackTable.planTaskId, PlanTaskTable.id)
             .selectAll()
             .where { DailyFeedbackTable.dailyPlanId inList dailyPlanIds }
-            .orderBy(PlanTaskTable.startTime to SortOrder.ASC)
+            .orderBy(PlanTaskTable.startTime to SortOrder.ASC_NULLS_LAST)
             .map {
                 SurveyContext(
-                    taskName = it[PlanTaskTable.taskName],
+                    taskName = it.getOrNull(PlanTaskTable.taskName) ?: DAILY_SURVEY_LABEL,
                     difficulty = it[DailyFeedbackTable.difficulty],
                     timeSpentMinutes = it[DailyFeedbackTable.timeSpentMinutes],
                     focusLevel = it[DailyFeedbackTable.focusLevel]
@@ -189,7 +224,7 @@ class FeedbackService(
         if (wrongQuestionTexts.isEmpty() && allSurveysOkay) return@newSuspendedTransaction null
 
         buildString {
-            appendLine("제출된 설문 ${surveys.size}건 (할일별)")
+            appendLine("제출된 설문 ${surveys.size}건 (할일별, 하루 전체 설문 포함)")
             surveys.forEach { survey ->
                 appendLine(
                     "- 할일: ${survey.taskName} / 체감 난이도: ${survey.difficulty} / " +
