@@ -27,7 +27,6 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.shouldNotBe
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -131,33 +130,31 @@ class DailyFeedbackReminderJobTest : StringSpec({
 
     fun DailyFeedbackReminderJob.runKeys(now: OffsetDateTime): List<String> = findDue(now).map { it.runKey }
 
-    "회차는 19:00~22:00 30분마다 7번이고, 회차 시각부터 5분 안에서만 후보다" {
+    "매일 22:00 에 한 번, 22:00 부터 5분 안에서만 후보다" {
         val userId = newUser()
         seedPlan(userId)
         val (job, _) = jobWith()
 
-        DailyFeedbackReminderJob.SLOTS.map { it.toString() } shouldContainExactly
-            listOf("19:00", "19:30", "20:00", "20:30", "21:00", "21:30", "22:00")
-        job.runKeys(at("18:59:59")).shouldBeEmpty()
-        job.runKeys(at("19:00")) shouldContainExactly listOf("daily_feedback_reminder_${userId}_2026-11-02_19:00")
-        job.runKeys(at("19:04:59")) shouldContainExactly listOf("daily_feedback_reminder_${userId}_2026-11-02_19:00")
-        job.runKeys(at("19:05")).shouldBeEmpty()
-        job.runKeys(at("19:29")).shouldBeEmpty()
-        job.runKeys(at("22:00")) shouldContainExactly listOf("daily_feedback_reminder_${userId}_2026-11-02_22:00")
-        job.runKeys(at("22:30")).shouldBeEmpty()
-        job.findDue(at("19:32")).single().scheduledAt.isEqual(at("19:30")) shouldBe true
+        DailyFeedbackReminderJob.SEND_AT.toString() shouldBe "22:00"
+        listOf("19:00", "19:30", "21:00", "21:59:59").forEach { job.runKeys(at(it)).shouldBeEmpty() }
+        job.runKeys(at("22:00")) shouldContainExactly listOf("daily_feedback_reminder_${userId}_2026-11-02")
+        job.runKeys(at("22:04:59")) shouldContainExactly listOf("daily_feedback_reminder_${userId}_2026-11-02")
+        job.runKeys(at("22:05")).shouldBeEmpty()
+        job.runKeys(at("23:30")).shouldBeEmpty()
+        job.findDue(at("22:02")).single().scheduledAt.isEqual(at("22:00")) shouldBe true
     }
 
-    "회차마다 runKey 가 달라 한 번씩만 가고, 같은 회차 안에서는 같은 runKey 다" {
+    "runKey 는 학생·날짜라 하루 한 번만 가고, 다음 날은 다른 runKey 다" {
         val userId = newUser()
         seedPlan(userId)
+        seedPlan(userId, date = day.plusDays(1))
         val (job, _) = jobWith()
 
-        job.runKeys(at("20:00")) shouldBe job.runKeys(at("20:03"))
-        job.runKeys(at("20:00")) shouldNotBe job.runKeys(at("20:30"))
+        job.runKeys(at("22:00")) shouldBe job.runKeys(at("22:03"))
+        job.runKeys(at("22:00", day.plusDays(1))) shouldContainExactly listOf("daily_feedback_reminder_${userId}_2026-11-03")
     }
 
-    "오늘 일일 설문을 내면 다음 회차부터 빠진다 — 할일 설문(plan_task_id 있음)은 일일 설문이 아니다" {
+    "22시 전에 오늘 일일 설문을 냈으면 빠진다 — 할일 설문(plan_task_id 있음)은 일일 설문이 아니다" {
         val submitted = newUser()
         val taskSurveyOnly = newUser()
         val submittedPlan = seedPlan(submitted)
@@ -168,7 +165,7 @@ class DailyFeedbackReminderJobTest : StringSpec({
         val taskId = transaction(db) { PlanTaskRow.find { PlanTaskTable.dailyPlanId eq taskPlan }.first().id.value }
         submitSurvey(taskPlan, planTaskId = taskId)
 
-        job.runKeys(at("19:30")) shouldContainExactly listOf("daily_feedback_reminder_${taskSurveyOnly}_2026-11-02_19:30")
+        job.runKeys(at("22:00")) shouldContainExactly listOf("daily_feedback_reminder_${taskSurveyOnly}_2026-11-02")
     }
 
     "오늘 계획이 없거나, 할일이 없거나, 보관한 보드뿐이면 보내지 않는다" {
@@ -182,17 +179,17 @@ class DailyFeedbackReminderJobTest : StringSpec({
         seedPlan(target)
         val (job, _) = jobWith()
 
-        job.runKeys(at("21:00")) shouldContainExactly listOf("daily_feedback_reminder_${target}_2026-11-02_21:00")
+        job.runKeys(at("22:00")) shouldContainExactly listOf("daily_feedback_reminder_${target}_2026-11-02")
     }
 
-    "보드가 여러 개여도 회차마다 학생당 한 번, 대표 보드의 계획을 싣는다" {
+    "보드가 여러 개여도 학생당 한 번, 대표 보드의 계획을 싣는다" {
         val userId = newUser()
         seedPlan(userId)
         val representativePlan = seedPlan(userId, representative = true)
         seedPlan(userId)
         val (job, _) = jobWith()
 
-        val due = job.findDue(at("19:00"))
+        val due = job.findDue(at("22:00"))
         due.size shouldBe 1
         due.single().payload shouldBe """{"userId":$userId,"dailyPlanId":$representativePlan}"""
     }
@@ -203,10 +200,10 @@ class DailyFeedbackReminderJobTest : StringSpec({
         val second = seedPlan(userId)
         val (job, _) = jobWith()
 
-        job.findDue(at("19:00")).single().payload shouldBe """{"userId":$userId,"dailyPlanId":$first}"""
+        job.findDue(at("22:00")).single().payload shouldBe """{"userId":$userId,"dailyPlanId":$first}"""
 
         submitSurvey(second)
-        job.runKeys(at("19:30")).shouldBeEmpty()
+        job.runKeys(at("22:00")).shouldBeEmpty()
     }
 
     "여러 학생에게 각각 보낸다" {
@@ -216,9 +213,9 @@ class DailyFeedbackReminderJobTest : StringSpec({
         seedPlan(b)
         val (job, _) = jobWith()
 
-        job.runKeys(at("20:30")) shouldContainExactlyInAnyOrder listOf(
-            "daily_feedback_reminder_${a}_2026-11-02_20:30",
-            "daily_feedback_reminder_${b}_2026-11-02_20:30"
+        job.runKeys(at("22:00")) shouldContainExactlyInAnyOrder listOf(
+            "daily_feedback_reminder_${a}_2026-11-02",
+            "daily_feedback_reminder_${b}_2026-11-02"
         )
     }
 
@@ -229,7 +226,7 @@ class DailyFeedbackReminderJobTest : StringSpec({
         val (job, devices) = jobWith(sender)
         devices.register(userId, DeviceTokenRegisterRequest("ExponentPushToken[phone]", DevicePlatform.IOS))
 
-        job.execute(job.findDue(at("19:00")).single())
+        job.execute(job.findDue(at("22:00")).single())
 
         val saved = transaction(db) { NotificationTable.selectAll().single() }
         saved[NotificationTable.userId].value shouldBe userId
@@ -249,7 +246,7 @@ class DailyFeedbackReminderJobTest : StringSpec({
         val (job, devices) = jobWith(sender)
         devices.register(userId, DeviceTokenRegisterRequest("ExponentPushToken[phone]", DevicePlatform.IOS))
 
-        job.execute(job.findDue(at("19:00")).single())
+        job.execute(job.findDue(at("22:00")).single())
 
         transaction(db) { NotificationTable.selectAll().count() } shouldBe 1L
         sender.sent.shouldBeEmpty()
