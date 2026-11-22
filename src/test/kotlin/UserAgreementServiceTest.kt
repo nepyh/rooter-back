@@ -9,6 +9,7 @@ import com.github.nepyh.rooter.module.user.dto.AgreementsUpdateRequest
 import com.github.nepyh.rooter.module.user.dto.UserLoginRequest
 import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
 import com.github.nepyh.rooter.module.user.exception.AgreementValidationException
+import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.model.AgreementCatalog
 import com.github.nepyh.rooter.module.user.model.AgreementCode
 import com.github.nepyh.rooter.module.user.model.AgreementDocument
@@ -174,6 +175,15 @@ class UserAgreementServiceTest : StringSpec({
             userService.registerUser(registerRequest("empty@test.com", emptyList()))
         }
         exception.code shouldBe "EMPTY_AGREEMENTS"
+    }
+
+    "가입: 비밀번호에 공백이 있으면 INVALID_PASSWORD_FORMAT 이고 유저가 만들어지지 않는다 (#385)" {
+        val userService = service()
+        val exception = shouldThrow<UserValidationException.WrongPasswordFormatException> {
+            userService.registerUser(registerRequest("space@test.com", null).copy(password = "abcd 1234"))
+        }
+        exception.code shouldBe "INVALID_PASSWORD_FORMAT"
+        ExposedUserRepo().findUserByEmail("space@test.com") shouldBe null
     }
 
     "재동의: 기존 사용자가 동의하면 pendingAgreements 가 비고 이력은 append 된다" {
