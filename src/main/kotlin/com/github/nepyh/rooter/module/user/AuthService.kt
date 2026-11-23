@@ -91,10 +91,7 @@ class AuthService(
     fun changePassword(userId: Int, request: ChangePasswordRequest): PasswordUpdateResponse {
         requireCurrentPassword(userId, request.currentPassword)
 
-        val passwordRegex = Regex("^(?=.*[A-Za-z])(?=.*\\d).{8,}$")
-        if (!passwordRegex.matches(request.newPassword)) {
-            throw UserValidationException.WrongPasswordFormatException()
-        }
+        requireValidPasswordFormat(request.newPassword)
 
         val hashedPassword = BCrypt.hashpw(request.newPassword, BCrypt.gensalt())
         // 비밀번호·tokenVersion 변경과 푸시 토큰 삭제를 한 트랜잭션으로 — 하나만 반영되는 일이 없게

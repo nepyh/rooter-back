@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.quiz.api
 
+import com.github.nepyh.rooter.common.QUIZ_LATEX_DOC
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.common.todayInAppZone
@@ -38,7 +39,7 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
         }.describe {
             tag("Quiz")
             summary = "일일 퀴즈 생성"
-            description = "date(yyyy-MM-dd, 생략 시 한국 시간 기준 오늘)의 완료된 학습 범위를 바탕으로 퀴즈를 생성. 문항 수는 그날 공부한 시간(완료한 할일들의 estimatedMinutes 합)에 따라 30분 이하 4문항, 1시간 이하 5문항, 1시간 초과 7문항. " +
+            description = QUIZ_LATEX_DOC + "date(yyyy-MM-dd, 생략 시 한국 시간 기준 오늘)의 완료된 학습 범위를 바탕으로 퀴즈를 생성. 문항 수는 그날 공부한 시간(완료한 할일들의 estimatedMinutes 합)에 따라 30분 이하 4문항, 1시간 이하 5문항, 1시간 초과 7문항. " +
                 "같은 날 플랜보드가 여러 개면 planBoardId 로 퀴즈를 만들 보드를 지정 " +
                 "(생략 시 그날 학습 범위가 있는 보드 중 먼저 만든 보드). 보드마다 퀴즈가 따로 만들어짐"
             requestBody {
@@ -75,7 +76,7 @@ fun QuizApi(quizService: QuizService) = ApiRoute("quiz") {
         }.describe {
             tag("Quiz")
             summary = "퀴즈 문제 조회"
-            description = "본인 소유의 daily_plan 에 대한 퀴즈만 조회 가능, 정답은 노출되지 않음"
+            description = QUIZ_LATEX_DOC + "본인 소유의 daily_plan 에 대한 퀴즈만 조회 가능, 정답은 노출되지 않음"
             parameters {
                 path("dailyPlanId") {
                     description = "일일 계획 ID"

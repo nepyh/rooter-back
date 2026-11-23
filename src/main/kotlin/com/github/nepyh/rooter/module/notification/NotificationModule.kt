@@ -16,5 +16,6 @@ fun NotificationModule(appConfig: AppConfig) = module {
     // named 필수: SchedulerJob 을 이름 없이 등록하면 다른 모듈의 SchedulerJob 정의를 덮어써서
     // SchedulerEngine 의 getAll<SchedulerJob>() 에 하나만 잡히는 문제가 생김
     single<SchedulerJob>(named("taskReminderJob")) { TaskReminderJob(get()) }
+    single<SchedulerJob>(named("dailyFeedbackReminderJob")) { DailyFeedbackReminderJob(get()) }
     single(named("notificationApi")) { NotificationApi(get(), get(), get()) }
 }

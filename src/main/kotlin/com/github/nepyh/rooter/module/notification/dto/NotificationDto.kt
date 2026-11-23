@@ -9,7 +9,7 @@ data class NotificationResponse(
     val type: NotificationType,      // 앱이 눌렀을 때 이동할 화면을 고르는 기준
     val title: String,
     val body: String,
-    val data: Map<String, String>,   // 이동 대상 등 부가 정보. 예: TASK_REMINDER → {"planTaskId": "12"}
+    val data: Map<String, String>,   // 이동 대상 등 부가 정보. 예: TASK_REMINDER → {"planTaskId": "12"}, DAILY_FEEDBACK_REMINDER → {"dailyPlanId": "34"}
     val read: Boolean,
     val readAt: String?,             // 읽은 시각 (오프셋 포함). 안 읽었으면 null
     val createdAt: String            // 알림이 생긴 시각 (오프셋 포함)

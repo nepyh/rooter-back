@@ -88,11 +88,8 @@ class UserService(
             throw UserValidationException.DuplicatedEmailException()
         }
 
-        // 비밀번호 형식 체크 (8자 이상, 숫자 + 영문 포함)
-        val passwordRegex = Regex("^(?=.*[A-Za-z])(?=.*\\d).{8,}$")
-        if (!passwordRegex.matches(request.password)) {
-            throw UserValidationException.WrongPasswordFormatException()
-        }
+        // 비밀번호 형식 체크 (8자 이상, 숫자 + 영문 포함, 공백 불가)
+        requireValidPasswordFormat(request.password)
 
         // bcrypt 암호화
         val hashedPassword = BCrypt.hashpw(

@@ -165,6 +165,29 @@ class AuthServicePasswordTest : StringSpec({
         transaction(db) { UserRow.findById(userId)!!.tokenVersion } shouldBe 0
     }
 
+    "changePassword: 새 비밀번호에 공백이 있으면 WrongPasswordFormatException 이고 비밀번호는 그대로다 (#385)" {
+        val userId = seedUser("pw-space@test.com", "Passw0rd!")
+
+        shouldThrow<UserValidationException.WrongPasswordFormatException> {
+            authService.changePassword(userId, ChangePasswordRequest("Passw0rd!", "NewPass 0rd"))
+        }
+        transaction(db) { UserRow.findById(userId)!!.tokenVersion } shouldBe 0
+        authService.login(UserLoginRequest("pw-space@test.com", "Passw0rd!")).token.shouldNotBeNull()
+    }
+
+    "login: 공백째 저장된 기존 비밀번호도 그대로 로그인된다 (형식 검사는 새로 설정할 때만)" {
+        seedUser("legacy-space@test.com", "abcd 1234")
+
+        authService.login(UserLoginRequest("legacy-space@test.com", "abcd 1234")).token.shouldNotBeNull()
+    }
+
+    "login: 새 규칙(20자 초과·이모지)에 어긋나는 기존 비밀번호도 그대로 로그인된다" {
+        val legacy = "abcd1234😀abcdefghijklmn"
+        seedUser("legacy-long@test.com", legacy)
+
+        authService.login(UserLoginRequest("legacy-long@test.com", legacy)).token.shouldNotBeNull()
+    }
+
     "changePassword: 그 사용자의 푸시 토큰은 전부 지우고, 다른 사용자 토큰은 남긴다" {
         val userId = seedUser("pw5@test.com", "Passw0rd!")
         val other = seedUser("other@test.com", "Passw0rd!")
