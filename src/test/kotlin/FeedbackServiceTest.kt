@@ -272,6 +272,81 @@ class FeedbackServiceTest : StringSpec({
         feedbackService.buildReplanContext(userId, boardIdOf(dailyPlanId), day) shouldBe null
     }
 
+    "submitDailyFeedback: 일일 설문은 taskId 없이 저장되고 그날 목록에 담긴다 (#373)" {
+        val (userId, dailyPlanId, taskId) = seedPlan()
+        feedbackService.submitFeedback(userId, taskId, FeedbackSubmitRequest(difficulty = "쉬움"))
+
+        val daily = feedbackService.submitDailyFeedback(
+            userId, dailyPlanId, FeedbackSubmitRequest(difficulty = "어려움", timeSpentMinutes = 120, focusLevel = 4)
+        )
+
+        daily.taskId shouldBe null
+        daily.dailyPlanId shouldBe dailyPlanId
+        daily.difficulty shouldBe "어려움"
+        daily.insertedAdjustmentTasks shouldBe emptyList()
+        // 할일 설문이 먼저, 일일 설문은 뒤에
+        feedbackService.getFeedbacksByDailyPlan(userId, dailyPlanId).map { it.taskId } shouldContainExactly listOf(taskId, null)
+    }
+
+    "submitDailyFeedback: 같은 날 두 번 내면 FeedbackAlreadySubmittedException — 할일 설문은 따로 낼 수 있다" {
+        val (userId, dailyPlanId, taskId) = seedPlan()
+        feedbackService.submitDailyFeedback(userId, dailyPlanId, FeedbackSubmitRequest(difficulty = "적당"))
+
+        shouldThrow<FeedbackAlreadySubmittedException> {
+            feedbackService.submitDailyFeedback(userId, dailyPlanId, FeedbackSubmitRequest(difficulty = "쉬움"))
+        }
+        feedbackService.submitFeedback(userId, taskId, FeedbackSubmitRequest(difficulty = "쉬움")).taskId shouldBe taskId
+    }
+
+    "submitDailyFeedback: 남의 일일 계획이면 DailyPlanNotFoundException" {
+        seedPlan(email = "owner-daily@test.com")
+        val (otherUserId, _, _) = seedPlan(email = "other-daily@test.com")
+        val (_, ownerPlanId, _) = seedPlan(email = "owner2-daily@test.com")
+
+        shouldThrow<DailyPlanNotFoundException> {
+            feedbackService.submitDailyFeedback(otherUserId, ownerPlanId, FeedbackSubmitRequest(difficulty = "적당"))
+        }
+    }
+
+    "submitDailyFeedback: 값 검증은 할일 설문과 같다 (FEEDBACK_001~003)" {
+        val (userId, dailyPlanId, _) = seedPlan()
+
+        shouldThrow<FeedbackValidationException.InvalidDifficultyException> {
+            feedbackService.submitDailyFeedback(userId, dailyPlanId, FeedbackSubmitRequest(difficulty = "매우 어려움"))
+        }
+        shouldThrow<FeedbackValidationException.InvalidTimeSpentMinutesException> {
+            feedbackService.submitDailyFeedback(userId, dailyPlanId, FeedbackSubmitRequest(difficulty = "적당", timeSpentMinutes = 0))
+        }
+        shouldThrow<FeedbackValidationException.InvalidFocusLevelException> {
+            feedbackService.submitDailyFeedback(userId, dailyPlanId, FeedbackSubmitRequest(difficulty = "적당", focusLevel = 6))
+        }
+        // 검증에 걸린 제출은 저장되지 않아 이후 정상 제출이 된다
+        feedbackService.submitDailyFeedback(userId, dailyPlanId, FeedbackSubmitRequest(difficulty = "적당")).taskId shouldBe null
+    }
+
+    "buildReplanContext: 일일 설문도 근거로 쓴다 — 할일이 없어도 빠지지 않는다 (#373)" {
+        val (userId, dailyPlanId, _) = seedPlan(taskName = "제출 안 한 할일")
+        feedbackService.submitDailyFeedback(
+            userId, dailyPlanId, FeedbackSubmitRequest(difficulty = "어려움", timeSpentMinutes = 90, focusLevel = 2)
+        )
+
+        val context = feedbackService.buildReplanContext(userId, boardIdOf(dailyPlanId), day)
+
+        context shouldNotBe null
+        context!! shouldContain "오늘 공부 전체(일일 설문)"
+        context shouldContain "체감 난이도: 어려움"
+        context shouldNotContain "제출 안 한 할일"
+    }
+
+    "FeedbackReplanJob: 일일 설문만 낸 날도 후보가 된다 (#373)" {
+        val (userId, dailyPlanId, _) = seedPlan()
+        feedbackService.submitDailyFeedback(userId, dailyPlanId, FeedbackSubmitRequest(difficulty = "어려움"))
+
+        val due = FeedbackReplanJob(feedbackService).findDue(afterMidnightOf(day))
+
+        due.map { it.runKey } shouldContainExactly listOf("feedback_replan_${day}_${boardIdOf(dailyPlanId)}")
+    }
+
     "FeedbackReplanJob: 설문이 0건인 날은 후보가 없다" {
         val (_, dailyPlanId, _) = seedPlan()
         addTask(dailyPlanId, "제출 안 한 할일")

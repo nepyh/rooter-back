@@ -43,6 +43,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
@@ -68,6 +69,7 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -111,6 +113,7 @@ class PlanBoardServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS student_profiles CASCADE")
             exec("DROP TABLE IF EXISTS user_unavailable_times CASCADE")
             exec("DROP TABLE IF EXISTS task_quiz_attempts CASCADE")
+            exec("DROP TABLE IF EXISTS plan_task_chapters CASCADE")
             exec("DROP TABLE IF EXISTS plan_subjects CASCADE")
             exec("DROP TABLE IF EXISTS plan_tasks CASCADE")
             exec("DROP TABLE IF EXISTS daily_plans CASCADE")
@@ -122,6 +125,8 @@ class PlanBoardServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS users CASCADE")
             SchemaUtils.create(
                 UserTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable, DailyPlanTable, PlanTaskTable,
+                // 할일별 단원 (#387)
+                PlanTaskChapterTable,
                 // 보드별 캘린더 조회가 개인 일정도 함께 읽는다
                 CalendarEventTable,
                 // plan-generation 이 등급·프로필·불가 시간을 조회한다
@@ -142,6 +147,7 @@ class PlanBoardServiceTest : StringSpec({
             StudentProfileTable.deleteAll()
             UnavailableTimeTable.deleteAll()
             TaskQuizAttemptTable.deleteAll()
+            PlanTaskChapterTable.deleteAll()
             PlanTaskTable.deleteAll()
             PlanSubjectTable.deleteAll()
             DailyPlanTable.deleteAll()
@@ -1811,6 +1817,83 @@ class PlanBoardServiceTest : StringSpec({
         planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks shouldBe emptyList()
     }
 
+    fun taskChapterIds(): Map<String, List<Int>> = transaction(db) {
+        (PlanTaskChapterTable innerJoin PlanTaskTable).selectAll()
+            .groupBy({ it[PlanTaskTable.taskName] }, { it[PlanTaskChapterTable.chapterId].value })
+            .mapValues { (_, ids) -> ids.sorted() }
+    }
+
+    "createTask: chapterIds 를 보내면 할일 단원으로 저장한다 — 떨어진 단원·중복 id 도 (#387)" {
+        val userId = seedUser("task-chapters@test.com")
+        val boardId = seedBoard(userId)
+        val textbookId = seedTextbook(seedSubject("수학"))
+        val chapter1 = seedChapter(textbookId, 1)
+        seedChapter(textbookId, 2)
+        val chapter3 = seedChapter(textbookId, 3)
+
+        planTaskService.createTask(userId, taskRequest(boardId, textbookId = textbookId, chapterIds = listOf(chapter3, chapter1, chapter1)))
+        planTaskService.createTask(userId, taskRequest(boardId, taskName = "단원 없음", textbookId = textbookId, chapterIds = emptyList()))
+
+        taskChapterIds() shouldBe mapOf("수학 2단원" to listOf(chapter1, chapter3).sorted())
+    }
+
+    "createTask: textbookId 없이 단원을 보내거나, 없는 단원·다른 교과서 단원이면 INVALID_TASK_CHAPTERS 이고 할일도 안 만든다 (#387)" {
+        val userId = seedUser("task-badchapters@test.com")
+        val boardId = seedBoard(userId)
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val science = seedTextbook(seedSubject("과학"), title = "과학")
+        val mathChapter = seedChapter(math, 1)
+        val scienceChapter = seedChapter(science, 1)
+
+        listOf(
+            taskRequest(boardId, chapterIds = listOf(mathChapter)),                                // textbookId 없음
+            taskRequest(boardId, textbookId = math, chapterIds = listOf(mathChapter, 999_999)),    // 없는 단원
+            taskRequest(boardId, textbookId = math, chapterIds = listOf(mathChapter, scienceChapter)) // 다른 교과서 단원
+        ).forEach { request ->
+            val e = shouldThrow<PlanTaskValidationException.InvalidTaskChaptersException> {
+                planTaskService.createTask(userId, request)
+            }
+            e.status.value shouldBe 400
+            e.code shouldBe "INVALID_TASK_CHAPTERS"
+        }
+        planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 15)).tasks shouldBe emptyList()
+        taskChapterIds() shouldBe emptyMap()
+    }
+
+    "plan-generation: AI 가 고른 단원 중 그 할일 과목 범위에 있는 것만 저장한다 (#387)" {
+        val userId = seedUser("gen-chapters@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1, "소인수분해")
+        val math2 = seedChapter(math, 2, "정수와 유리수")
+        seedChapter(math, 3, "문자와 식") // 요청 범위(1~2단원) 밖
+        val science = seedTextbook(seedSubject("과학"), title = "과학")
+        val science1 = seedChapter(science, 1, "지구계")
+        val llm = FakePlanGenerationLlmClient(
+            tasks = listOf(
+                GeneratedPlanTask("수학 개념", 60, "수학", listOf(" 소인수분해 ", "정수와 유리수", "소인수분해")), // 공백 무시·중복 제거
+                GeneratedPlanTask("수학 응용", 30, "수학", listOf("문자와 식", "지구계", "없는 단원")),         // 범위 밖·다른 과목 단원은 버림
+                GeneratedPlanTask("과학 개념", 30, "과학", listOf("지구계")),
+                GeneratedPlanTask("국어 문법", 30, "국어", listOf("지구계"))                                  // 과목을 못 맞추면 단원도 안 붙임
+            )
+        )
+
+        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+            userId,
+            PlanGenerationRequest(
+                title = "단원 귀속",
+                subjects = listOf(PlanGenerationSubjectInput(math, math1, math2), PlanGenerationSubjectInput(science, science1, science1)),
+                startDate = "2026-07-04", // 토요일 — 자리가 넉넉해 4개 다 배치된다
+                daysRemaining = 1
+            )
+        )
+
+        planTaskService.getDailyPlan(userId, LocalDate.of(2026, 7, 4)).tasks.size shouldBe 4
+        taskChapterIds() shouldBe mapOf(
+            "수학 개념" to listOf(math1, math2).sorted(),
+            "과학 개념" to listOf(science1)
+        )
+    }
+
     "plan-generation: LLM 이 준 subject_name 이 요청 과목과 맞으면 저장되고, 못 맞추면 null 이다" {
         val userId = seedUser("gen-subject@test.com")
         val subjectId = seedSubject("수학")
@@ -1891,8 +1974,9 @@ private fun taskRequest(
     startTime: String = "17:30",
     endTime: String = "19:30",
     estimatedMinutes: Int = 120,
-    textbookId: Int? = null
-) = PlanTaskCreateRequest(planBoardId, planDate, taskName, startTime, endTime, estimatedMinutes, textbookId)
+    textbookId: Int? = null,
+    chapterIds: List<Int>? = null
+) = PlanTaskCreateRequest(planBoardId, planDate, taskName, startTime, endTime, estimatedMinutes, textbookId, chapterIds)
 
 private fun ensureTestDatabase(url: String, user: String, password: String) {
     val dbName = url.substringAfterLast("/")

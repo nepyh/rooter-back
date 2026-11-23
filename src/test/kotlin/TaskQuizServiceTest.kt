@@ -17,6 +17,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
@@ -52,7 +53,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.insert
@@ -90,12 +93,12 @@ class TaskQuizServiceTest : StringSpec({
     beforeSpec {
         transaction(db) {
             listOf(
-                "review_choices", "review_questions", "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "plan_subjects",
+                "plan_task_chapters", "review_choices", "review_questions", "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "plan_subjects",
                 "daily_plans", "plan_boards", "chapters", "textbooks", "subjects", "student_profiles", "users"
             ).forEach { exec("DROP TABLE IF EXISTS $it CASCADE") }
             SchemaUtils.create(
                 UserTable, StudentProfileTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable,
-                DailyPlanTable, PlanTaskTable, TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable,
+                DailyPlanTable, PlanTaskTable, PlanTaskChapterTable, TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable,
                 // 틀린 문제를 복습 목록으로 복사한다 (users 를 지우면 cascade 로 함께 지워짐)
                 ReviewQuestionTable, ReviewChoiceTable
             )
@@ -231,13 +234,113 @@ class TaskQuizServiceTest : StringSpec({
         llm.lastStudyScope shouldBe "과학: 지구계"
     }
 
-    "할일 과목을 정할 수 없으면 보드 범위 전체를 넘긴다" {
+    "할일 과목을 정할 수 없으면 보드의 다른 과목을 섞지 않고 '지정 안 됨' 으로 넘긴다 (#387)" {
         val taskId = seedTwoSubjectTask("문제집 30쪽 풀기")
         val llm = FakeTaskQuizLlmClient()
 
         TaskQuizService(llm).generateAttempt(taskId, 1, "문제집 30쪽 풀기")
 
-        llm.lastStudyScope shouldBe "수학: 이차방정식\n과학: 지구계"
+        llm.lastStudyScope shouldBe "지정 안 됨"
+    }
+
+    /** 과목 [boardSubjects] 범위만 있는 보드(빈 목록 = 직접 만든 일정 보드)에 할일을 만든다. [extraSubjects] 는 보드에 없는 과목 행 */
+    fun seedTaskOnBoard(
+        taskName: String,
+        boardSubjects: List<String>,
+        extraSubjects: List<String> = emptyList(),
+        taskSubject: String? = null
+    ): Int = transaction(db) {
+        val user = UserRow.new { email = "tqb${UserRow.count()}@test.com"; username = "t"; password = "x"; createdAt = OffsetDateTime.now() }
+        val board = PlanBoardRow.new {
+            this.user = user; title = "보드"; startDate = day; endDate = day; createdAt = OffsetDateTime.now()
+        }
+        val subjects = (boardSubjects + extraSubjects).associateWith { SubjectRow.new { name = it } }
+        boardSubjects.forEach { subjectName ->
+            val textbook = TextbookRow.new { this.subject = subjects.getValue(subjectName); title = "$subjectName 3" }
+            val chapter = ChapterRow.new { this.textbook = textbook; chapterName = "$subjectName 1단원"; chapterOrder = 1 }
+            PlanSubjectRow.new { planBoard = board; this.textbook = textbook; startChapter = chapter; endChapter = chapter }
+        }
+        val dailyPlan = DailyPlanRow.new { planBoard = board; planDate = day }
+        PlanTaskRow.new {
+            this.dailyPlan = dailyPlan; this.taskName = taskName
+            startTime = LocalTime.of(16, 0); endTime = LocalTime.of(17, 0); estimatedMinutes = 60
+            subjectId = taskSubject?.let { subjects.getValue(it).id }
+        }.id.value
+    }
+
+    suspend fun scopeOf(taskId: Int, taskName: String): String? {
+        val llm = FakeTaskQuizLlmClient()
+        TaskQuizService(llm).generateAttempt(taskId, 1, taskName)
+        return llm.lastStudyScope
+    }
+
+    "할일 과목(subject_id)이 보드 범위에 없으면 보드 전체가 아니라 그 과목 이름만 넘긴다 (#387)" {
+        val taskId = seedTaskOnBoard("문제집 30쪽 풀기", boardSubjects = listOf("국어", "수학"), extraSubjects = listOf("과학"), taskSubject = "과학")
+
+        scopeOf(taskId, "문제집 30쪽 풀기") shouldBe "과학: 단원 지정 안 됨"
+    }
+
+    "직접 만든 일정 보드(범위 없음)여도 할일 과목(subject_id)은 넘긴다 (#387)" {
+        val taskId = seedTaskOnBoard("문제집 30쪽 풀기", boardSubjects = emptyList(), extraSubjects = listOf("과학"), taskSubject = "과학")
+
+        scopeOf(taskId, "문제집 30쪽 풀기") shouldBe "과학: 단원 지정 안 됨"
+    }
+
+    "과목이 저장 안 된 할일은 이름에 든 과목명으로 보드 밖 과목까지 찾는다 (#387)" {
+        val onManualBoard = seedTaskOnBoard("과학 문제집 풀기", boardSubjects = emptyList(), extraSubjects = listOf("과학"))
+        scopeOf(onManualBoard, "과학 문제집 풀기") shouldBe "과학: 단원 지정 안 됨"
+    }
+
+    "보드에 없는 과목명이 이름에 있으면 그 과목만 넘기고, 과목명이 둘이면 정하지 않는다 (#387)" {
+        val outside = seedTaskOnBoard("국어 문법 정리", boardSubjects = listOf("수학", "과학"), extraSubjects = listOf("국어", "영어"))
+        scopeOf(outside, "국어 문법 정리") shouldBe "국어: 단원 지정 안 됨"
+
+        val ambiguous = transaction(db) {
+            val dailyPlan = PlanTaskRow[outside].dailyPlan
+            PlanTaskRow.new {
+                this.dailyPlan = dailyPlan; taskName = "국어 영어 단어 비교"
+                startTime = LocalTime.of(18, 0); endTime = LocalTime.of(19, 0); estimatedMinutes = 60
+            }.id.value
+        }
+        scopeOf(ambiguous, "국어 영어 단어 비교") shouldBe "지정 안 됨"
+    }
+
+    /** 할일에 단원 [chapterNames] 를 저장한다 (같은 할일 보드 교과서에서 이름으로 찾음) */
+    fun attachChapters(taskId: Int, vararg chapterNames: String) = transaction(db) {
+        val ids = ChapterRow.all().filter { it.chapterName in chapterNames }.map { it.id }
+        PlanTaskChapterTable.batchInsert(ids) { chapterId ->
+            this[PlanTaskChapterTable.planTaskId] = EntityID(taskId, PlanTaskTable)
+            this[PlanTaskChapterTable.chapterId] = chapterId
+        }
+    }
+
+    "할일에 단원이 저장돼 있으면 보드 범위 대신 그 단원만 넘기고, 문항 단원도 그 안에서만 받는다 (#387)" {
+        // 보드 범위: 과학 지구계 ~ 지권의 구조. 할일 단원: 지권의 구조만
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = true)
+        attachChapters(taskId, "지권의 구조")
+        fun q(n: Int, chapter: String) = GeneratedTaskQuizQuestion(
+            "문제 $n", listOf("A", "B", "C", "D"), 0, "풀이 $n", listOf("", "B", "C", "D"), chapter_name = chapter
+        )
+        val llm = FakeTaskQuizLlmClient(listOf(q(1, "지권의 구조"), q(2, "지구계")))
+
+        TaskQuizService(llm).generateAttempt(taskId, 1, "과학 문제집 30쪽 풀기")
+
+        llm.lastStudyScope shouldBe "과학: 지권의 구조"
+        // 할일 단원 밖(지구계)으로 답한 문항은 단원을 비워 둔다 — 오답 리포트가 그날 공부한 단원 기준이 되게
+        transaction(db) { TaskQuizQuestionRow.all().sortedBy { it.id.value }.map { it.chapterName } } shouldBe listOf("지권의 구조", null)
+    }
+
+    "직접 만든 일정 보드(범위 없음)여도 할일 단원이 있으면 과목과 단원을 넘긴다 (#387)" {
+        val taskId = seedTaskOnBoard("문제집 30쪽 풀기", boardSubjects = emptyList(), extraSubjects = listOf("과학"), taskSubject = "과학")
+        transaction(db) {
+            val science = SubjectRow.find { SubjectTable.name eq "과학" }.single()
+            val textbook = TextbookRow.new { subject = science; title = "과학 1" }
+            ChapterRow.new { this.textbook = textbook; chapterName = "물질의 상태 변화"; chapterOrder = 1 }
+            ChapterRow.new { this.textbook = textbook; chapterName = "빛과 파동"; chapterOrder = 2 }
+        }
+        attachChapters(taskId, "빛과 파동")
+
+        scopeOf(taskId, "문제집 30쪽 풀기") shouldBe "과학: 빛과 파동"
     }
 
     "getCurrentQuiz: 플랜보드 학습 범위 과목(subjects)과 태스크 이름으로 추정한 과목(subject)을 함께 준다" {

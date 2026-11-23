@@ -2,7 +2,9 @@ package com.github.nepyh.rooter.module.taskquiz
 
 import com.github.nepyh.rooter.common.LLM_REQUEST_TIMEOUT_MILLIS
 import com.github.nepyh.rooter.common.LlmThinking
+import com.github.nepyh.rooter.common.LLM_RESPONSE_JSON
 import com.github.nepyh.rooter.common.PromptLoader
+import com.github.nepyh.rooter.common.cleanQuizLlmJson
 import com.github.nepyh.rooter.common.config.AppConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -18,7 +20,6 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 
 @Serializable
@@ -48,7 +49,7 @@ private data class ChatCompletionResponse(val choices: List<ChatCompletionChoice
 
 open class TaskQuizLlmClient(private val appConfig: AppConfig) {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = LLM_RESPONSE_JSON
     private val logger = LoggerFactory.getLogger(TaskQuizLlmClient::class.java)
 
     private val client = HttpClient(CIO) {
@@ -74,7 +75,8 @@ open class TaskQuizLlmClient(private val appConfig: AppConfig) {
         )
 
         val content = requestChatCompletion(prompt) ?: return emptyList()
-        return runCatching { json.decodeFromString<GeneratedTaskQuiz>(content).questions }
+        // 코드블록을 벗기고, 수식($...$ LaTeX)의 역슬래시를 한 번만 쓴 응답이 깨지지 않게 바로잡는다 (#388)
+        return runCatching { json.decodeFromString<GeneratedTaskQuiz>(cleanQuizLlmJson(content)).questions }
             .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
             .getOrElse { emptyList() }
     }
