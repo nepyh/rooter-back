@@ -24,6 +24,8 @@ import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import org.jetbrains.exposed.v1.jdbc.update
+import org.jetbrains.exposed.v1.core.eq
 
 class SchedulerEngineTest : StringSpec({
 
@@ -77,7 +79,7 @@ class SchedulerEngineTest : StringSpec({
         transaction(db) { JobRunTable.selectAll().count() } shouldBe 2L
     }
 
-    "실행에 실패해 FAILED 로 남은 작업도 다시 실행하지 않는다" {
+    "재시도 간격(retryDelays)을 두지 않은 잡은 실패해 FAILED 로 남은 작업을 다시 실행하지 않는다" {
         val executed = mutableListOf<String>()
         val now = OffsetDateTime.now()
         val repo = JobRunRepo()
@@ -88,6 +90,102 @@ class SchedulerEngineTest : StringSpec({
 
         executed shouldBe emptyList()
         transaction(db) { JobRunTable.selectAll().single()[JobRunTable.status] } shouldBe JobStatus.FAILED.value
+    }
+
+    /** retryDelays 를 둔 잡. [fail] 이 true 인 동안 실행이 실패한다 */
+    fun retryingJob(executed: MutableList<String>, delays: List<Duration>, fail: () -> Boolean = { false }, vararg runKeys: String) =
+        object : SchedulerJob {
+            override val jobType = "retry_job"
+            override val retryDelays = delays
+            override fun findDue(now: OffsetDateTime): List<DueJob> = runKeys.map { DueJob(it, now) }
+            override suspend fun execute(due: DueJob) {
+                executed += due.runKey
+                if (fail()) error("LLM 실패")
+            }
+        }
+
+    /** 실패 행의 finished_at 을 [minutesAgo] 분 전으로 돌린다 (재시도 간격이 지났는지 시험하려고) */
+    fun failedMinutesAgo(runKey: String, minutesAgo: Long) = transaction(db) {
+        JobRunTable.update({ JobRunTable.runKey eq runKey }) {
+            it[JobRunTable.finishedAt] = OffsetDateTime.now().minusMinutes(minutesAgo)
+        }
+    }
+
+    fun rowOf(runKey: String) = transaction(db) {
+        JobRunTable.selectAll().where { JobRunTable.runKey eq runKey }.single()
+            .let { it[JobRunTable.status] to it[JobRunTable.retryCount] }
+    }
+
+    "재시도 잡: 실패한 작업은 간격이 지나면 다시 실행하고, 성공하면 done·retry_count 1 이 된다 (#318)" {
+        val executed = mutableListOf<String>()
+        val failing = java.util.concurrent.atomic.AtomicBoolean(true)
+        val engine = SchedulerEngine(listOf(retryingJob(executed, listOf(Duration.ofMinutes(5)), { failing.get() }, "r")), JobRunRepo())
+
+        engine.runTick()
+        rowOf("r") shouldBe (JobStatus.FAILED.value to 0)
+
+        // 간격(5분)이 지나기 전에는 다시 실행하지 않는다
+        failedMinutesAgo("r", 4)
+        engine.runTick()
+        executed shouldBe listOf("r")
+
+        failing.set(false)
+        failedMinutesAgo("r", 6)
+        engine.runTick()
+        executed shouldBe listOf("r", "r")
+        rowOf("r") shouldBe (JobStatus.DONE.value to 1)
+
+        // 끝난 작업은 다시 실행하지 않는다
+        engine.runTick()
+        executed shouldBe listOf("r", "r")
+    }
+
+    "재시도 잡: 간격 목록 크기만큼만 재시도하고, n 번째 재시도는 n 번째 간격을 기다린다 (#318)" {
+        val executed = mutableListOf<String>()
+        val engine = SchedulerEngine(
+            listOf(retryingJob(executed, listOf(Duration.ofMinutes(5), Duration.ofMinutes(15)), { true }, "x")),
+            JobRunRepo()
+        )
+
+        engine.runTick() // 처음 실행 실패
+        failedMinutesAgo("x", 6)
+        engine.runTick() // 1번째 재시도 실패
+        rowOf("x") shouldBe (JobStatus.FAILED.value to 1)
+
+        failedMinutesAgo("x", 6) // 2번째 재시도는 15분을 기다린다
+        engine.runTick()
+        executed.size shouldBe 2
+
+        failedMinutesAgo("x", 16)
+        engine.runTick() // 2번째 재시도 실패 → 소진
+        rowOf("x") shouldBe (JobStatus.FAILED.value to 2)
+
+        failedMinutesAgo("x", 600)
+        engine.runTick()
+        executed.size shouldBe 3
+    }
+
+    "재시도 claim 은 한 곳만 가져간다 — 배포 중 옛·새 서버가 같은 실패 작업을 동시에 재시도하지 않는다 (#318)" {
+        val repo = JobRunRepo()
+        repo.claim("race_job", DueJob("k", OffsetDateTime.now()))
+        repo.markFailed("race_job", "k", IllegalStateException("실패"))
+
+        repo.claimRetry("race_job", "k", retryCount = 0) shouldBe true
+        repo.claimRetry("race_job", "k", retryCount = 0) shouldBe false
+        transaction(db) { JobRunTable.selectAll().single()[JobRunTable.status] } shouldBe JobStatus.PENDING.value
+    }
+
+    "재시도 대상은 findDue 가 아직 내는 작업뿐이다 — 후보에서 빠진 실패 작업은 재시도하지 않는다 (#318)" {
+        val repo = JobRunRepo()
+        repo.claim("retry_job", DueJob("gone", OffsetDateTime.now()))
+        repo.markFailed("retry_job", "gone", IllegalStateException("실패"))
+        failedMinutesAgo("gone", 600)
+        val executed = mutableListOf<String>()
+
+        SchedulerEngine(listOf(retryingJob(executed, listOf(Duration.ofMinutes(5)), runKeys = arrayOf("other"))), repo).runTick()
+
+        executed shouldBe listOf("other")
+        rowOf("gone") shouldBe (JobStatus.FAILED.value to 0)
     }
 
     "한 틱에 같은 runKey 가 두 번 파생돼도 한 번만 실행한다 (claim 유니크 키)" {

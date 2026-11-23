@@ -1,9 +1,11 @@
 package com.github.nepyh.rooter.module.feedback
 
 import com.github.nepyh.rooter.common.LLM_REQUEST_TIMEOUT_MILLIS
+import com.github.nepyh.rooter.common.LLM_RESPONSE_JSON
 import com.github.nepyh.rooter.common.LlmThinking
 import com.github.nepyh.rooter.common.PromptLoader
 import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.stripCodeFence
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
@@ -18,7 +20,6 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 
 @Serializable
@@ -42,7 +43,7 @@ private data class ChatCompletionResponse(val choices: List<ChatCompletionChoice
 
 class ReplanLlmClient(private val appConfig: AppConfig) {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = LLM_RESPONSE_JSON
     private val logger = LoggerFactory.getLogger(ReplanLlmClient::class.java)
 
     private val client = HttpClient(CIO) {
@@ -54,13 +55,18 @@ class ReplanLlmClient(private val appConfig: AppConfig) {
         }
     }
 
+    /**
+     * AI 가 제안한 보충 할일. 제안이 없으면(빈 배열) 빈 목록이고, 호출·응답이 실패하면 [ReplanLlmException] 을 던진다.
+     * 예전엔 실패도 빈 목록으로 돌려줘 자정 배치가 done 으로 끝나고 다시 하지 않았다 (#318)
+     */
     suspend fun suggestAdjustments(context: String): List<ReplanSuggestion> {
         val prompt = PromptLoader.load("prompts/feedback-replan.md", "CONTEXT" to context)
 
-        val content = requestChatCompletion(prompt) ?: return emptyList()
-        return runCatching { json.decodeFromString<List<ReplanSuggestion>>(content) }
+        val content = requestChatCompletion(prompt) ?: throw ReplanLlmException("LLM 호출 실패 또는 빈 응답")
+        // 코드블록·배열 끝 쉼표 때문에 실패(→ 재시도로 AI 를 다시 부름)가 되지 않게 벗기고 너그럽게 읽는다
+        return runCatching { json.decodeFromString<List<ReplanSuggestion>>(stripCodeFence(content)) }
             .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
-            .getOrElse { emptyList() }
+            .getOrElse { throw ReplanLlmException("LLM 응답 JSON 파싱 실패", it) }
     }
 
     private suspend fun requestChatCompletion(prompt: String): String? {
@@ -86,3 +92,6 @@ class ReplanLlmClient(private val appConfig: AppConfig) {
         return response.choices.firstOrNull()?.message?.content
     }
 }
+
+/** 자정 재조정의 AI 호출·응답 실패. 스케줄러가 job_runs 에 failed 로 남기고 재시도한다 (#318) */
+class ReplanLlmException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)

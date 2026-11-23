@@ -31,6 +31,7 @@ import com.github.nepyh.rooter.module.taskquiz.MAX_ATTEMPTS
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizLlmClient
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizTriggerJob
+import com.github.nepyh.rooter.module.taskquiz.TaskQuizGenerationException
 import com.github.nepyh.rooter.module.taskquiz.dto.TaskQuizQuestionResponse
 import com.github.nepyh.rooter.module.taskquiz.model.TaskQuizChoiceRow
 import com.github.nepyh.rooter.module.taskquiz.taskQuizPassCount
@@ -931,6 +932,22 @@ class TaskQuizServiceTest : StringSpec({
 
     fun dueKeys(at: OffsetDateTime) =
         TaskQuizTriggerJob(TaskQuizService(FakeTaskQuizLlmClient())).findDue(at).map { it.runKey }
+
+    "TaskQuizTriggerJob: AI 생성이 실패하면 실행을 실패로 끝내 재시도에 맡기고, 다시 실행해 성공하면 퀴즈가 생긴다 (#318)" {
+        val taskId = seedTask("과학 개념 정리", grade = null, withScope = false)
+        val at = day.atTime(23, 0).atZone(zone).toOffsetDateTime()
+        val due = TaskQuizTriggerJob(TaskQuizService(FakeTaskQuizLlmClient())).findDue(at).single()
+
+        shouldThrow<TaskQuizGenerationException> {
+            TaskQuizTriggerJob(TaskQuizService(FakeTaskQuizLlmClient(questions = emptyList()))).execute(due)
+        }
+        transaction(db) { TaskQuizAttemptTable.selectAll().where { TaskQuizAttemptTable.planTaskId eq taskId }.count() } shouldBe 0L
+
+        val job = TaskQuizTriggerJob(TaskQuizService(FakeTaskQuizLlmClient()))
+        job.retryDelays.size shouldBe 3
+        job.execute(due)
+        transaction(db) { TaskQuizAttemptTable.selectAll().where { TaskQuizAttemptTable.planTaskId eq taskId }.count() } shouldBe 1L
+    }
 
     "TaskQuizTriggerJob: 1차 퀴즈를 이미 만든 할일은 다시 후보로 내지 않는다" {
         val taskId = seedTask("영어 단어 외우기", grade = null, withScope = false)

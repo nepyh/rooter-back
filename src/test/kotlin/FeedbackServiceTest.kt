@@ -3,6 +3,7 @@ import com.github.nepyh.rooter.common.config.EnvironmentMode
 import com.github.nepyh.rooter.module.feedback.FeedbackReplanJob
 import com.github.nepyh.rooter.module.feedback.FeedbackService
 import com.github.nepyh.rooter.module.feedback.ReplanLlmClient
+import com.github.nepyh.rooter.module.feedback.ReplanLlmException
 import com.github.nepyh.rooter.module.feedback.dto.FeedbackSubmitRequest
 import com.github.nepyh.rooter.module.feedback.exception.DailyPlanNotFoundException
 import com.github.nepyh.rooter.module.feedback.exception.FeedbackAlreadySubmittedException
@@ -143,6 +144,11 @@ class FeedbackServiceTest : StringSpec({
 
     fun boardIdOf(dailyPlanId: Int): Int = transaction(db) {
         DailyPlanRow[dailyPlanId].planBoard.id.value
+    }
+
+    "suggestAdjustments: LLM 호출이 실패하면 빈 목록이 아니라 ReplanLlmException — 자정 재조정이 done 이 아니라 failed 로 남아 재시도된다 (#318)" {
+        // dummyAppConfig 의 llmBaseUrl 이 비어 있어 요청 자체가 실패한다
+        shouldThrow<ReplanLlmException> { ReplanLlmClient(dummyAppConfig()).suggestAdjustments("제출된 설문 1건") }
     }
 
     "createdAt: 제출·조회 응답의 createdAt 은 오프셋이 포함된 시각이다" {
