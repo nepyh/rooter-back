@@ -63,6 +63,12 @@ sealed class PlanTaskValidationException(
         "INVALID_TEXTBOOK",
         "존재하지 않는 교과서입니다."
     )
+    /** chapterIds 검증 실패 (#387). 사유: textbookId 없이 단원을 보냄 / 존재하지 않는 단원 / 고른 교과서의 단원이 아님 */
+    class InvalidTaskChaptersException : PlanTaskValidationException(
+        HttpStatusCode.BadRequest,
+        "INVALID_TASK_CHAPTERS",
+        "단원은 textbookId 와 함께 보내야 하고, 그 교과서의 단원이어야 합니다."
+    )
     /** AI 가 만든 할일은 지울 수 없다 (#245). 직접 추가한 할일만 지울 수 있다 */
     class AiTaskNotDeletableException : PlanTaskValidationException(
         HttpStatusCode.BadRequest,

@@ -10,10 +10,12 @@ import com.github.nepyh.rooter.module.planboard.exception.PlanBoardForbiddenExce
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskNotFoundException
 import com.github.nepyh.rooter.module.planboard.exception.PlanTaskValidationException
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
@@ -32,7 +34,9 @@ import org.jetbrains.exposed.v1.core.between
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
+import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.Clock
@@ -209,11 +213,11 @@ class PlanTaskService(private val clock: Clock = Clock.systemUTC()) {
         }
 
         // 프론트가 고른 교과서가 오면 그 교과서의 과목을 할일에 붙인다 (안 보내면 과목 미지정)
-        val textbookSubjectId = request.textbookId?.let { textbookId ->
-            val textbook = TextbookRow.findById(textbookId)
-                ?: throw PlanTaskValidationException.InvalidTextbookException()
-            textbook.subject.id.value
+        val textbook = request.textbookId?.let { textbookId ->
+            TextbookRow.findById(textbookId) ?: throw PlanTaskValidationException.InvalidTextbookException()
         }
+        val textbookSubjectId = textbook?.subject?.id?.value
+        val chapterIds = validTaskChapterIds(textbook?.id?.value, request.chapterIds.orEmpty())
 
         // 동시 요청에도 daily_plan 이 중복 생성되지 않도록 insertIgnore (DDL 유니크 제약과 짝)
         DailyPlanTable.insertIgnore {
@@ -225,7 +229,7 @@ class PlanTaskService(private val clock: Clock = Clock.systemUTC()) {
             (DailyPlanTable.planBoardId eq board.id) and (DailyPlanTable.planDate eq date)
         }.first()
 
-        PlanTaskRow.new {
+        val task = PlanTaskRow.new {
             this.dailyPlan = dailyPlan
             taskName = request.taskName
             this.startTime = startTime
@@ -235,6 +239,26 @@ class PlanTaskService(private val clock: Clock = Clock.systemUTC()) {
             // 이 API 로 만든 할일만 사용자가 지울 수 있다 (#245)
             origin = PlanTaskOrigin.USER
         }
+        PlanTaskChapterTable.batchInsert(chapterIds, shouldReturnGeneratedValues = false) { chapterId ->
+            this[PlanTaskChapterTable.planTaskId] = task.id
+            this[PlanTaskChapterTable.chapterId] = EntityID(chapterId, ChapterTable)
+        }
+    }
+
+    /**
+     * 할일에 붙일 단원 id (중복 제거). 단원을 보내려면 교과서가 있어야 하고, 모두 그 교과서의 단원이어야 한다.
+     * 하나라도 어긋나면 INVALID_TASK_CHAPTERS — 일부만 저장하지 않는다. 트랜잭션 안에서 부른다.
+     */
+    private fun validTaskChapterIds(textbookId: Int?, requested: List<Int>): List<Int> {
+        val chapterIds = requested.distinct()
+        if (chapterIds.isEmpty()) return emptyList()
+        if (textbookId == null) throw PlanTaskValidationException.InvalidTaskChaptersException()
+
+        val matched = ChapterTable.select(ChapterTable.id)
+            .where { (ChapterTable.id inList chapterIds) and (ChapterTable.textbookId eq textbookId) }
+            .count()
+        if (matched != chapterIds.size.toLong()) throw PlanTaskValidationException.InvalidTaskChaptersException()
+        return chapterIds
     }
 
     /**

@@ -11,9 +11,11 @@ import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationSubjectInput
 import com.github.nepyh.rooter.module.planboard.dto.PlanGenerationTaskResponse
 import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationException
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
@@ -36,6 +38,7 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
 import java.time.Clock
 import java.time.DayOfWeek
@@ -46,7 +49,13 @@ import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 
-private data class ResolvedSubject(val subjectId: Int, val subjectName: String, val topics: List<String>)
+/** [chapterIdsByName]: 학습 범위 단원 이름 → 단원 id. AI 가 할일마다 고른 단원 이름을 id 로 바꿀 때 쓴다 (직접 적은 범위는 단원이 아니라 없음) */
+private data class ResolvedSubject(
+    val subjectId: Int,
+    val subjectName: String,
+    val topics: List<String>,
+    val chapterIdsByName: Map<String, Int> = emptyMap()
+)
 
 private data class PlanContext(
     val resolvedSubjects: List<ResolvedSubject>,
@@ -256,6 +265,9 @@ class PlanGenerationService(
             // LLM 이 준 task 의 subject_name 을 요청한 과목명과 맞춰 볼 이름 → 과목 id 맵 (앞뒤 공백은 무시하고 정확히 일치할 때만)
             val subjectIdsByName = resolvedSubjects.associate { it.subjectName.trim() to it.subjectId }
             val subjectNamesById = resolvedSubjects.associate { it.subjectId to it.subjectName }
+            // 과목 id → 그 과목 범위의 단원 이름 → 단원 id. 같은 과목을 두 번 요청했으면 범위를 합친다
+            val chapterIdsBySubject = resolvedSubjects.groupBy { it.subjectId }
+                .mapValues { (_, subjects) -> subjects.fold(emptyMap<String, Int>()) { acc, subject -> subject.chapterIdsByName + acc } }
 
             val dailyResponses = generated.daily_plans
                 .filter { it.day in 1..totalDays }
@@ -280,8 +292,8 @@ class PlanGenerationService(
                     val taskSubjectIds = placedTasks.indices.map { index ->
                         day.tasks.getOrNull(index)?.subject_name?.trim()?.let { subjectIdsByName[it] }
                     }
-                    placedTasks.zip(taskSubjectIds).forEach { (task, taskSubjectId) ->
-                        PlanTaskRow.new {
+                    placedTasks.zip(taskSubjectIds).forEachIndexed { index, (task, taskSubjectId) ->
+                        val row = PlanTaskRow.new {
                             this.dailyPlan = dailyPlan
                             taskName = task.taskName
                             startTime = task.startTime
@@ -290,6 +302,15 @@ class PlanGenerationService(
                             this.subjectId = taskSubjectId?.let { EntityID(it, SubjectTable) }
                             // AI 가 만든 계획의 할일 — 사용자가 지울 수 없다 (#245)
                             origin = PlanTaskOrigin.AI
+                        }
+                        // AI 가 고른 단원 중 그 할일 과목의 범위에 있는 것만 저장한다. 과목을 못 맞췄으면 단원도 저장하지 않는다 (#387)
+                        val chapterIds = taskSubjectId?.let { subjectId ->
+                            val byName = chapterIdsBySubject[subjectId].orEmpty()
+                            day.tasks.getOrNull(index)?.chapter_names.orEmpty().mapNotNull { byName[it.trim()] }.distinct()
+                        }.orEmpty()
+                        PlanTaskChapterTable.batchInsert(chapterIds, shouldReturnGeneratedValues = false) { chapterId ->
+                            this[PlanTaskChapterTable.planTaskId] = row.id
+                            this[PlanTaskChapterTable.chapterId] = EntityID(chapterId, ChapterTable)
                         }
                     }
 
@@ -350,11 +371,15 @@ class PlanGenerationService(
 
         // 범위 선택은 검증과 같은 트리 순회 순서(대단원 → 소단원)를 쓴다.
         // 예전엔 chapter_order 만 비교해 소단원의 order 가 대단원 안에서 다시 1부터 시작하는 계층을 무시했다.
-        val topics = orderedChaptersInRange(textbook, startChapter, endChapter).map { it.chapterName }
+        val chapters = orderedChaptersInRange(textbook, startChapter, endChapter)
+        val topics = chapters.map { it.chapterName }
 
         val allTopics = if (input.customRangeText.isNullOrBlank()) topics else topics + input.customRangeText
 
-        return ResolvedSubject(subjectRow.id.value, subjectRow.name, allTopics)
+        // 같은 이름 단원이 범위에 둘 있으면 앞의 것 (이름만으로는 구분할 수 없음)
+        val chapterIdsByName = chapters.reversed().associate { it.chapterName.trim() to it.id.value }
+
+        return ResolvedSubject(subjectRow.id.value, subjectRow.name, allTopics, chapterIdsByName)
     }
 
     private fun levelTierFor(userId: Int, subjectName: String): String {

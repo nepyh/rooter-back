@@ -24,7 +24,13 @@ import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 
 @Serializable
-data class GeneratedPlanTask(val task_name: String, val estimated_minutes: Int, val subject_name: String? = null)
+data class GeneratedPlanTask(
+    val task_name: String,
+    val estimated_minutes: Int,
+    val subject_name: String? = null,
+    // 이 할일이 다루는 단원 이름 (과목별 학습 범위에 적힌 단원 이름 그대로). 못 맞춘 이름은 저장 때 버린다 (#387)
+    val chapter_names: List<String> = emptyList()
+)
 
 @Serializable
 data class GeneratedDailyPlan(
