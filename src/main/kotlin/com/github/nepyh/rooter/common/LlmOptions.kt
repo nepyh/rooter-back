@@ -1,6 +1,8 @@
 package com.github.nepyh.rooter.common
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /**
  * DeepSeek chat/completions 요청의 thinking 옵션.
@@ -21,6 +23,16 @@ data class LlmThinking(val type: String) {
  * 앱 앞의 ALB idle timeout 이 60초라서, 호출 한 번이 그 안에 끝나도록 50초로 둔다.
  */
 const val LLM_REQUEST_TIMEOUT_MILLIS = 50_000L
+
+/**
+ * 퀴즈 LLM 응답을 읽는 Json. 모르는 키는 무시하고, 배열·객체 끝의 쉼표(`"", ]`)를 허용한다 —
+ * AI 가 가끔 끝 쉼표를 붙여 응답 전체가 파싱에 실패하고 퀴즈 생성이 0문항이 됐다 (#388 확인 중 발견).
+ */
+@OptIn(ExperimentalSerializationApi::class)
+val LLM_RESPONSE_JSON = Json {
+    ignoreUnknownKeys = true
+    allowTrailingComma = true
+}
 
 private val CODE_FENCE_START = Regex("^```[A-Za-z]*\\s*")
 private val CODE_FENCE_END = Regex("\\s*```$")
