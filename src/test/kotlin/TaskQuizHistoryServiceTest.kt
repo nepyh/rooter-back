@@ -11,6 +11,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
@@ -72,12 +73,12 @@ class TaskQuizHistoryServiceTest : StringSpec({
     beforeSpec {
         transaction(db) {
             listOf(
-                "review_choices", "review_questions", "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "plan_subjects",
+                "plan_task_chapters", "review_choices", "review_questions", "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "plan_subjects",
                 "daily_plans", "plan_boards", "chapters", "textbooks", "subjects", "student_profiles", "users"
             ).forEach { exec("DROP TABLE IF EXISTS $it CASCADE") }
             SchemaUtils.create(
                 UserTable, StudentProfileTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable,
-                DailyPlanTable, PlanTaskTable, TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable,
+                DailyPlanTable, PlanTaskTable, PlanTaskChapterTable, TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable,
                 ReviewQuestionTable, ReviewChoiceTable
             )
         }

@@ -17,6 +17,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
@@ -52,7 +53,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.insert
@@ -90,12 +93,12 @@ class TaskQuizServiceTest : StringSpec({
     beforeSpec {
         transaction(db) {
             listOf(
-                "review_choices", "review_questions", "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "plan_subjects",
+                "plan_task_chapters", "review_choices", "review_questions", "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "plan_subjects",
                 "daily_plans", "plan_boards", "chapters", "textbooks", "subjects", "student_profiles", "users"
             ).forEach { exec("DROP TABLE IF EXISTS $it CASCADE") }
             SchemaUtils.create(
                 UserTable, StudentProfileTable, SubjectTable, TextbookTable, ChapterTable, PlanBoardTable, PlanSubjectTable,
-                DailyPlanTable, PlanTaskTable, TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable,
+                DailyPlanTable, PlanTaskTable, PlanTaskChapterTable, TaskQuizAttemptTable, TaskQuizQuestionTable, TaskQuizChoiceTable,
                 // 틀린 문제를 복습 목록으로 복사한다 (users 를 지우면 cascade 로 함께 지워짐)
                 ReviewQuestionTable, ReviewChoiceTable
             )
@@ -300,6 +303,44 @@ class TaskQuizServiceTest : StringSpec({
             }.id.value
         }
         scopeOf(ambiguous, "국어 영어 단어 비교") shouldBe "지정 안 됨"
+    }
+
+    /** 할일에 단원 [chapterNames] 를 저장한다 (같은 할일 보드 교과서에서 이름으로 찾음) */
+    fun attachChapters(taskId: Int, vararg chapterNames: String) = transaction(db) {
+        val ids = ChapterRow.all().filter { it.chapterName in chapterNames }.map { it.id }
+        PlanTaskChapterTable.batchInsert(ids) { chapterId ->
+            this[PlanTaskChapterTable.planTaskId] = EntityID(taskId, PlanTaskTable)
+            this[PlanTaskChapterTable.chapterId] = chapterId
+        }
+    }
+
+    "할일에 단원이 저장돼 있으면 보드 범위 대신 그 단원만 넘기고, 문항 단원도 그 안에서만 받는다 (#387)" {
+        // 보드 범위: 과학 지구계 ~ 지권의 구조. 할일 단원: 지권의 구조만
+        val taskId = seedTask("과학 문제집 30쪽 풀기", grade = 2, withScope = true)
+        attachChapters(taskId, "지권의 구조")
+        fun q(n: Int, chapter: String) = GeneratedTaskQuizQuestion(
+            "문제 $n", listOf("A", "B", "C", "D"), 0, "풀이 $n", listOf("", "B", "C", "D"), chapter_name = chapter
+        )
+        val llm = FakeTaskQuizLlmClient(listOf(q(1, "지권의 구조"), q(2, "지구계")))
+
+        TaskQuizService(llm).generateAttempt(taskId, 1, "과학 문제집 30쪽 풀기")
+
+        llm.lastStudyScope shouldBe "과학: 지권의 구조"
+        // 할일 단원 밖(지구계)으로 답한 문항은 단원을 비워 둔다 — 오답 리포트가 그날 공부한 단원 기준이 되게
+        transaction(db) { TaskQuizQuestionRow.all().sortedBy { it.id.value }.map { it.chapterName } } shouldBe listOf("지권의 구조", null)
+    }
+
+    "직접 만든 일정 보드(범위 없음)여도 할일 단원이 있으면 과목과 단원을 넘긴다 (#387)" {
+        val taskId = seedTaskOnBoard("문제집 30쪽 풀기", boardSubjects = emptyList(), extraSubjects = listOf("과학"), taskSubject = "과학")
+        transaction(db) {
+            val science = SubjectRow.find { SubjectTable.name eq "과학" }.single()
+            val textbook = TextbookRow.new { subject = science; title = "과학 1" }
+            ChapterRow.new { this.textbook = textbook; chapterName = "물질의 상태 변화"; chapterOrder = 1 }
+            ChapterRow.new { this.textbook = textbook; chapterName = "빛과 파동"; chapterOrder = 2 }
+        }
+        attachChapters(taskId, "빛과 파동")
+
+        scopeOf(taskId, "문제집 30쪽 풀기") shouldBe "과학: 빛과 파동"
     }
 
     "getCurrentQuiz: 플랜보드 학습 범위 과목(subjects)과 태스크 이름으로 추정한 과목(subject)을 함께 준다" {
