@@ -199,13 +199,13 @@ class SchedulerEngineTest : StringSpec({
         monitor.beats.all { it == "true:1" || it == "false:1" } shouldBe true
     }
 
-    "잡 루프가 멈추면 heartbeat 는 계속 ERROR 로 간다 (#317)" {
+    "잡 루프가 멈추면(Error) heartbeat 는 계속 ERROR 로 간다" {
         val monitor = RecordingMonitor()
         val dying = object : SchedulerJob {
             override val jobType = "dying_job"
             override val monitored = true
             override fun findDue(now: OffsetDateTime) = listOf(DueJob("d", now))
-            // runJob 이 잡지 않는 Error 로 루프를 끝낸다 (운영에선 DB 오류가 claim 에서 터지는 경우)
+            // Exception 은 틱 실패로 끝나고 루프는 계속 돈다(#317). 루프를 끝내는 건 OOM 같은 Error 뿐이다
             override suspend fun execute(due: DueJob) = throw AssertionError("루프를 끝내는 오류")
         }
 
@@ -214,6 +214,30 @@ class SchedulerEngineTest : StringSpec({
         }
 
         monitor.beats.takeLast(3) shouldBe listOf("false:1", "false:1", "false:1")
+    }
+
+    "job_runs 기록(claim)에서 DB 오류가 나도 잡 루프는 멈추지 않고 다음 틱에 계속 돈다 — 그 틱은 ERROR, 이후 OK (#317)" {
+        val monitor = RecordingMonitor()
+        val tick = AtomicInteger()
+        val executed = CopyOnWriteArrayList<String>()
+        val flaky = object : SchedulerJob {
+            override val jobType = "flaky_db_job"
+            override val monitored = true
+            // 첫 틱의 runKey 는 run_key varchar(255) 를 넘어 claim(INSERT) 에서 진짜 DB 오류가 난다
+            override fun findDue(now: OffsetDateTime): List<DueJob> {
+                val n = tick.getAndIncrement()
+                return listOf(DueJob(if (n == 0) "x".repeat(300) else "ok_$n", now))
+            }
+            override suspend fun execute(due: DueJob) {
+                executed += due.runKey
+            }
+        }
+
+        runEngine(SchedulerEngine(listOf(flaky), JobRunRepo(), Duration.ofMillis(50), monitor)) {
+            executed.size >= 2 && monitor.beats.lastOrNull() == "true:1"
+        }
+
+        executed.take(2) shouldBe listOf("ok_1", "ok_2")
     }
 
     "한 틱이 stallAfter 넘게 끝나지 않으면 heartbeat 가 ERROR, 모니터 대상 잡이 없으면 heartbeat 를 보내지 않는다" {

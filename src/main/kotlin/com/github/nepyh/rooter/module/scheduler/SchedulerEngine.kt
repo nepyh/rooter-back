@@ -24,8 +24,11 @@ import java.util.concurrent.ConcurrentHashMap
  * ([JobRunRepo.filterUnclaimed]). 걸러내지 않으면 끝난 작업마다 매분 헛 INSERT 가 나간다.
  *
  * [SchedulerJob.monitored] 인 잡들의 상태를 모아 틱 간격마다 [monitor](기본 Sentry Crons)에 heartbeat 하나를 보낸다
- * (무료 플랜은 모니터가 1개라 잡마다 보내지 않는다). 모두 정상이면 OK, 한 잡이라도 루프가 죽었거나(#317)·마지막 틱이
+ * (무료 플랜은 모니터가 1개라 잡마다 보내지 않는다). 모두 정상이면 OK, 한 잡이라도 루프가 죽었거나(OOM 같은 Error)·마지막 틱이
  * 실패했거나·한 틱이 [stallAfter] 넘게 끝나지 않으면 ERROR. 스케줄러가 통째로 멈추면 heartbeat 가 끊겨 누락으로 잡힌다.
+ *
+ * 틱 안의 예외(Exception)는 job_runs 기록의 DB 오류까지 그 틱의 실패로만 남기고 루프는 계속 돈다 — DB 가 잠깐 끊겨도
+ * 서버를 재시작할 때까지 잡이 멈추지 않게 (#317).
  *
  * 잡마다 따로 틱 루프를 돈다. 한 루프에서 차례로 돌리면 앞 잡(예: LLM 으로 퀴즈를 만드는 잡)이 오래 걸리는 동안
  * 뒤 잡(예: 시작 몇 분 전에 보내야 하는 할일 알림)이 밀리고, 틱 시작 때 잰 낡은 now 로 파생까지 하게 된다.
@@ -61,8 +64,11 @@ class SchedulerEngine(
                         } catch (cause: CancellationException) {
                             throw cause
                         } catch (cause: Exception) {
+                            // runJob 이 잡지 않는 job_runs 기록(filterUnclaimed·claim·markDone·markFailed)의 DB 오류.
+                            // 연결 끊김·타임아웃처럼 일시적인 경우가 대부분이라 이 틱만 실패로 두고 다음 틱에 다시 돈다 (#317)
                             ErrorMonitoring.capture(cause, ErrorSource.SCHEDULER)
-                            throw cause
+                            logger.error("스케줄러 틱 실패, 다음 틱에 다시 시도합니다: jobType={}", job.jobType, cause)
+                            state.lastTickOk = false
                         } finally {
                             state.tickStartedAt = null
                         }
