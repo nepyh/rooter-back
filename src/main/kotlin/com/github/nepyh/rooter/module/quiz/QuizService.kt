@@ -4,6 +4,7 @@ import com.github.nepyh.rooter.common.QUIZ_CHAPTER_NAME_MAX
 import com.github.nepyh.rooter.common.matchQuizChapter
 import com.github.nepyh.rooter.common.quizQuestionCount
 import com.github.nepyh.rooter.module.planboard.UserRoutine
+import com.github.nepyh.rooter.module.planboard.chapterNameToSubjectIds
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.planBoardSubjects
@@ -21,6 +22,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectTable
 import com.github.nepyh.rooter.module.quiz.dto.InsertedReviewTaskResponse
 import com.github.nepyh.rooter.module.quiz.dto.QuizAnswerSubmission
 import com.github.nepyh.rooter.module.quiz.dto.QuizChoiceResponse
@@ -46,6 +48,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -308,7 +311,7 @@ class QuizService(
             val tasks = if (suggestions.isEmpty()) {
                 emptyList()
             } else {
-                insertReviewTasks(graded, suggestions.map { "복습: ${it.reviewTaskDescription}".take(150) })
+                insertReviewTasks(graded, suggestions.map { "복습: ${it.reviewTaskDescription}".take(150) to it.chapterName })
             }
             tasks to customCount.await()
         }
@@ -339,7 +342,8 @@ class QuizService(
         )
     }
 
-    private suspend fun insertReviewTasks(graded: GradedQuiz, taskNames: List<String>): List<InsertedReviewTaskResponse> {
+    /** [reviewTasks]: (할일 이름, 약점 단원 이름). 단원으로 과목을 찾아 할일에 붙인다 — 복습 할일 퀴즈가 그 과목에서만 나오게 (#387) */
+    private suspend fun insertReviewTasks(graded: GradedQuiz, reviewTasks: List<Pair<String, String>>): List<InsertedReviewTaskResponse> {
         val date = graded.reviewDate
         val ctx = graded.scheduleContext
         // NICE 시간표 조회(네트워크)가 있어 트랜잭션 밖에서 계산해둔다
@@ -365,17 +369,24 @@ class QuizService(
                 PlanTaskScheduler.toMinutes(it.startTime) to PlanTaskScheduler.toMinutes(it.endTime)
             }
             val placed = PlanTaskScheduler.placeTasks(
-                taskNames.map { it to REVIEW_TASK_MINUTES },
+                reviewTasks.map { (taskName, _) -> taskName to REVIEW_TASK_MINUTES },
                 PlanTaskScheduler.freeIntervalsFromBusyRanges(unavailable + existingTaskRanges)
             )
 
-            placed.map { task ->
+            // 단원 이름 → 과목. 같은 이름이 여러 과목 교과서에 있으면 정하지 않는다(null — 퀴즈 때 이름으로 다시 추정)
+            val boardTextbookIds = PlanSubjectRow.find { PlanSubjectTable.planBoardId eq graded.planBoardId }.map { it.textbook.id.value }
+            val chapterSubjects = chapterNameToSubjectIds(boardTextbookIds)
+
+            // placeTasks 는 자리가 없으면 뒤쪽을 빼므로 결과는 입력의 앞부분과 순서대로 1:1 로 맞는다
+            placed.zip(reviewTasks).map { (task, reviewTask) ->
+                val reviewSubjectId = chapterSubjects[reviewTask.second.trim()]?.distinct()?.singleOrNull()
                 PlanTaskRow.new {
                     this.dailyPlan = dailyPlan
                     taskName = task.taskName
                     startTime = task.startTime
                     endTime = task.endTime
                     estimatedMinutes = task.estimatedMinutes
+                    subjectId = reviewSubjectId?.let { EntityID(it, SubjectTable) }
                     // 퀴즈 결과로 만든 복습 할일 — 사용자가 지울 수 없다 (#245)
                     origin = PlanTaskOrigin.AI
                 }
