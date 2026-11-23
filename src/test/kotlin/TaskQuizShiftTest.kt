@@ -8,7 +8,10 @@ import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskChapterTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.review.model.ReviewChoiceTable
 import com.github.nepyh.rooter.module.review.model.ReviewQuestionTable
 import com.github.nepyh.rooter.module.taskquiz.ShiftableTask
@@ -88,7 +91,7 @@ class TaskQuizShiftTest : StringSpec({
     beforeSpec {
         transaction(db) {
             listOf(
-                "review_choices", "review_questions", "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "daily_plans",
+                "plan_task_chapters", "review_choices", "review_questions", "task_quiz_choices", "task_quiz_questions", "task_quiz_attempts", "plan_tasks", "daily_plans",
                 "plan_boards", "user_unavailable_times", "users"
             ).forEach { exec("DROP TABLE IF EXISTS $it CASCADE") }
             SchemaUtils.create(
@@ -97,7 +100,9 @@ class TaskQuizShiftTest : StringSpec({
                 // 틀린 문제를 복습 목록으로 복사한다 (users 를 지우면 cascade 로 함께 지워짐)
                 ReviewQuestionTable, ReviewChoiceTable,
                 // 할일 과목(plan_tasks.subject_id) FK 대상
-                SubjectTable
+                SubjectTable,
+                // 퀴즈 범위가 할일 단원(plan_task_chapters)을 읽는다 (#387)
+                TextbookTable, ChapterTable, PlanTaskChapterTable
             )
         }
     }

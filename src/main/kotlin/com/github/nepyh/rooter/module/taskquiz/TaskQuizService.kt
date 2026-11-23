@@ -14,8 +14,10 @@ import com.github.nepyh.rooter.module.review.copyWrongQuestionToReview
 import com.github.nepyh.rooter.module.review.model.ReviewSource
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
+import com.github.nepyh.rooter.module.planboard.model.PlanTaskChapterTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
 import com.github.nepyh.rooter.module.planboard.model.SubjectRow
@@ -47,6 +49,7 @@ import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.isNull
+import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.update
 import org.jetbrains.exposed.v1.jdbc.transactions.experimental.newSuspendedTransaction
@@ -411,6 +414,7 @@ class TaskQuizService(
      * ("영어 단어 30개 외우기" 등) 학년·범위가 없으면 AI 가 "학생이 완료한 활동은?" 같은 문제를 냈다.
      *
      * 학습 범위에는 **그 할일의 과목 하나만** 넣는다 (#387 — 국어 할일에 수학 문제).
+     * - 할일에 단원이 저장돼 있으면: "수학: 소인수분해, 정수와 유리수" (그 단원만 — 보드 범위의 다른 단원은 넣지 않음)
      * - 과목을 알고 보드 범위에 그 과목이 있으면: "수학: 이차방정식, …" (보드 범위의 단원)
      * - 과목은 아는데 보드 범위에 없으면(직접 만든 일정 보드, 보드에 없는 교과서를 고른 할일): "과학: 단원 지정 안 됨"
      *   — 예전엔 여기서 보드의 모든 과목을 넘겨 다른 과목 문제가 나왔고, 범위가 비면 과목 이름조차 AI 에 가지 않았다
@@ -430,6 +434,12 @@ class TaskQuizService(
         val (subjectId, subjectName) = resolveTaskSubject(task, boardSubjects)
             ?: return TaskQuizContext(gradeLabel, NO_SCOPE, questionCount, emptyList())
 
+        // 할일에 단원이 저장돼 있으면(앱에서 고른 단원, AI 계획의 할일별 단원) 보드 범위 대신 그 단원에서만 낸다 (#387)
+        val taskChapterNames = taskChapterNamesOf(planTaskId)
+        if (taskChapterNames.isNotEmpty()) {
+            return TaskQuizContext(gradeLabel, "$subjectName: ${taskChapterNames.joinToString(", ")}", questionCount, taskChapterNames)
+        }
+
         val chapterNames = mutableListOf<String>()
         val studyScope = planSubjects.filter { it.textbook.subject.id.value == subjectId }.joinToString("\n") { subject ->
             val textbookChapters = orderedChaptersInRange(subject.textbook, subject.startChapter, subject.endChapter).map { it.chapterName }
@@ -440,6 +450,15 @@ class TaskQuizService(
 
         return TaskQuizContext(gradeLabel, studyScope, questionCount, chapterNames)
     }
+
+    /** 할일에 저장된 단원 이름 (plan_task_chapters). 단원 id 순 — 마스터 데이터가 교과서 순서로 들어가 있고, chapter_order 는 소단원에서 다시 1부터라 쓸 수 없다. 없으면 빈 목록 */
+    private fun taskChapterNamesOf(planTaskId: Int): List<String> =
+        (PlanTaskChapterTable innerJoin ChapterTable)
+            .select(ChapterTable.chapterName)
+            .where { PlanTaskChapterTable.planTaskId eq planTaskId }
+            .orderBy(ChapterTable.id to SortOrder.ASC)
+            .map { it[ChapterTable.chapterName] }
+            .distinct()
 
     /**
      * 할일 과목 (id, 이름). 순서대로 본다.
