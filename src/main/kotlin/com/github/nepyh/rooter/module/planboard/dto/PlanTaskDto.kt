@@ -44,7 +44,9 @@ data class PlanTaskCreateRequest(
     val endTime: String,
     val estimatedMinutes: Int,
     // 수동 일정 생성에서 프론트가 고른 교과서. 오면 서버가 교과서로부터 과목을 유도해 할일에 붙인다
-    val textbookId: Int? = null
+    val textbookId: Int? = null,
+    // 할일이 다루는 단원(목차) id 들. textbookId 교과서의 단원이어야 한다. 없거나 빈 배열이면 단원 미지정 (#387)
+    val chapterIds: List<Int>? = null
 )
 
 @Serializable
