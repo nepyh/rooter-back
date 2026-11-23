@@ -1,6 +1,5 @@
 package com.github.nepyh.rooter.module.taskquiz.api
 
-import com.github.nepyh.rooter.common.QUIZ_LATEX_DOC
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.taskquiz.TaskQuizService
@@ -34,7 +33,7 @@ fun TaskQuizApi(taskQuizService: TaskQuizService) = ApiRoute("plan-tasks") {
         }.describe {
             tag("TaskQuiz")
             summary = "태스크 완료 확인 퀴즈 조회"
-            description = QUIZ_LATEX_DOC + "퀴즈 열기 (앱의 완료 버튼). 풀 퀴즈를 돌려줌 — 퀴즈를 통과해야 태스크가 완료됨. 문항 수는 할일 길이(estimatedMinutes)에 따라 30분 이하 4문항, 1시간 이하 5문항, 1시간 초과 7문항이고, 통과에 필요한 정답 수는 passCount (70점 이상: 4문항 3개, 5문항 4개, 7문항 5개). " +
+            description = "퀴즈 열기 (앱의 완료 버튼). 풀 퀴즈를 돌려줌 — 퀴즈를 통과해야 태스크가 완료됨. 문항 수는 할일 길이(estimatedMinutes)에 따라 30분 이하 4문항, 1시간 이하 5문항, 1시간 초과 7문항이고, 통과에 필요한 정답 수는 passCount (70점 이상: 4문항 3개, 5문항 4개, 7문항 5개). " +
                 "아직 퀴즈가 없으면 종료 시각을 기다리지 않고 지금 만들고(AI 생성이라 몇 초 걸림), " +
                 "직전 차수 불합격 후 10분이 지났으면 다음 차수를 바로 만듦. 그 외에는 가장 최근 차수(최초 또는 재시도)를 그대로 반환. " +
                 "종료 시각이 지나면 열지 않아도 기존처럼 자동 생성됨. 이미 답한 문제는 selectedChoiceId 가 채워져 있어 앱을 다시 켜도 이어서 풀 수 있음"

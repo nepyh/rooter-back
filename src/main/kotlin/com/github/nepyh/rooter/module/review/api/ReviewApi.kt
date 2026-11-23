@@ -1,6 +1,5 @@
 package com.github.nepyh.rooter.module.review.api
 
-import com.github.nepyh.rooter.common.QUIZ_LATEX_DOC
 import com.github.nepyh.rooter.common.ApiRoute
 import com.github.nepyh.rooter.common.ErrorResponse
 import com.github.nepyh.rooter.module.review.REVIEW_PAGE_SIZE
@@ -38,7 +37,7 @@ fun ReviewApi(reviewService: ReviewService) = ApiRoute("review-questions") {
         }.describe {
             tag("Review")
             summary = "복습 문제 목록"
-            description = QUIZ_LATEX_DOC + "일일·태스크 퀴즈에서 틀린 문제(틀리는 즉시 들어옴)와 약점 맞춤 문제 중 아직 맞히지 않은 것을 최근 것부터 반환. " +
+            description = "일일·태스크 퀴즈에서 틀린 문제(틀리는 즉시 들어옴)와 약점 맞춤 문제 중 아직 맞히지 않은 것을 최근 것부터 반환. " +
                 "보기 순서는 원래 퀴즈와 다르게 섞여 있고 정답 여부는 노출하지 않음. " +
                 "다음 페이지는 응답의 nextCursor 를 cursor 로 넘겨 받음 (nextCursor=null 이면 마지막). totalCount 는 남은 복습 문제 전체 수"
             parameters {
