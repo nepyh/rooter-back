@@ -4,7 +4,7 @@ import com.github.nepyh.rooter.common.LLM_REQUEST_TIMEOUT_MILLIS
 import com.github.nepyh.rooter.common.LlmThinking
 import com.github.nepyh.rooter.common.LLM_RESPONSE_JSON
 import com.github.nepyh.rooter.common.PromptLoader
-import com.github.nepyh.rooter.common.stripCodeFence
+import com.github.nepyh.rooter.common.cleanQuizLlmJson
 import com.github.nepyh.rooter.common.config.AppConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -75,8 +75,8 @@ open class TaskQuizLlmClient(private val appConfig: AppConfig) {
         )
 
         val content = requestChatCompletion(prompt) ?: return emptyList()
-        // AI 가 가끔 ```json 코드블록으로 감싸 보내 0문항이 되던 것 — 감싼 표시를 벗기고 읽는다 (#388 확인 중 발견)
-        return runCatching { json.decodeFromString<GeneratedTaskQuiz>(stripCodeFence(content)).questions }
+        // 코드블록을 벗기고, 수식($...$ LaTeX)의 역슬래시를 한 번만 쓴 응답이 깨지지 않게 바로잡는다 (#388)
+        return runCatching { json.decodeFromString<GeneratedTaskQuiz>(cleanQuizLlmJson(content)).questions }
             .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
             .getOrElse { emptyList() }
     }
