@@ -231,13 +231,75 @@ class TaskQuizServiceTest : StringSpec({
         llm.lastStudyScope shouldBe "과학: 지구계"
     }
 
-    "할일 과목을 정할 수 없으면 보드 범위 전체를 넘긴다" {
+    "할일 과목을 정할 수 없으면 보드의 다른 과목을 섞지 않고 '지정 안 됨' 으로 넘긴다 (#387)" {
         val taskId = seedTwoSubjectTask("문제집 30쪽 풀기")
         val llm = FakeTaskQuizLlmClient()
 
         TaskQuizService(llm).generateAttempt(taskId, 1, "문제집 30쪽 풀기")
 
-        llm.lastStudyScope shouldBe "수학: 이차방정식\n과학: 지구계"
+        llm.lastStudyScope shouldBe "지정 안 됨"
+    }
+
+    /** 과목 [boardSubjects] 범위만 있는 보드(빈 목록 = 직접 만든 일정 보드)에 할일을 만든다. [extraSubjects] 는 보드에 없는 과목 행 */
+    fun seedTaskOnBoard(
+        taskName: String,
+        boardSubjects: List<String>,
+        extraSubjects: List<String> = emptyList(),
+        taskSubject: String? = null
+    ): Int = transaction(db) {
+        val user = UserRow.new { email = "tqb${UserRow.count()}@test.com"; username = "t"; password = "x"; createdAt = OffsetDateTime.now() }
+        val board = PlanBoardRow.new {
+            this.user = user; title = "보드"; startDate = day; endDate = day; createdAt = OffsetDateTime.now()
+        }
+        val subjects = (boardSubjects + extraSubjects).associateWith { SubjectRow.new { name = it } }
+        boardSubjects.forEach { subjectName ->
+            val textbook = TextbookRow.new { this.subject = subjects.getValue(subjectName); title = "$subjectName 3" }
+            val chapter = ChapterRow.new { this.textbook = textbook; chapterName = "$subjectName 1단원"; chapterOrder = 1 }
+            PlanSubjectRow.new { planBoard = board; this.textbook = textbook; startChapter = chapter; endChapter = chapter }
+        }
+        val dailyPlan = DailyPlanRow.new { planBoard = board; planDate = day }
+        PlanTaskRow.new {
+            this.dailyPlan = dailyPlan; this.taskName = taskName
+            startTime = LocalTime.of(16, 0); endTime = LocalTime.of(17, 0); estimatedMinutes = 60
+            subjectId = taskSubject?.let { subjects.getValue(it).id }
+        }.id.value
+    }
+
+    suspend fun scopeOf(taskId: Int, taskName: String): String? {
+        val llm = FakeTaskQuizLlmClient()
+        TaskQuizService(llm).generateAttempt(taskId, 1, taskName)
+        return llm.lastStudyScope
+    }
+
+    "할일 과목(subject_id)이 보드 범위에 없으면 보드 전체가 아니라 그 과목 이름만 넘긴다 (#387)" {
+        val taskId = seedTaskOnBoard("문제집 30쪽 풀기", boardSubjects = listOf("국어", "수학"), extraSubjects = listOf("과학"), taskSubject = "과학")
+
+        scopeOf(taskId, "문제집 30쪽 풀기") shouldBe "과학: 단원 지정 안 됨"
+    }
+
+    "직접 만든 일정 보드(범위 없음)여도 할일 과목(subject_id)은 넘긴다 (#387)" {
+        val taskId = seedTaskOnBoard("문제집 30쪽 풀기", boardSubjects = emptyList(), extraSubjects = listOf("과학"), taskSubject = "과학")
+
+        scopeOf(taskId, "문제집 30쪽 풀기") shouldBe "과학: 단원 지정 안 됨"
+    }
+
+    "과목이 저장 안 된 할일은 이름에 든 과목명으로 보드 밖 과목까지 찾는다 (#387)" {
+        val onManualBoard = seedTaskOnBoard("과학 문제집 풀기", boardSubjects = emptyList(), extraSubjects = listOf("과학"))
+        scopeOf(onManualBoard, "과학 문제집 풀기") shouldBe "과학: 단원 지정 안 됨"
+    }
+
+    "보드에 없는 과목명이 이름에 있으면 그 과목만 넘기고, 과목명이 둘이면 정하지 않는다 (#387)" {
+        val outside = seedTaskOnBoard("국어 문법 정리", boardSubjects = listOf("수학", "과학"), extraSubjects = listOf("국어", "영어"))
+        scopeOf(outside, "국어 문법 정리") shouldBe "국어: 단원 지정 안 됨"
+
+        val ambiguous = transaction(db) {
+            val dailyPlan = PlanTaskRow[outside].dailyPlan
+            PlanTaskRow.new {
+                this.dailyPlan = dailyPlan; taskName = "국어 영어 단어 비교"
+                startTime = LocalTime.of(18, 0); endTime = LocalTime.of(19, 0); estimatedMinutes = 60
+            }.id.value
+        }
+        scopeOf(ambiguous, "국어 영어 단어 비교") shouldBe "지정 안 됨"
     }
 
     "getCurrentQuiz: 플랜보드 학습 범위 과목(subjects)과 태스크 이름으로 추정한 과목(subject)을 함께 준다" {

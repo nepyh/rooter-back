@@ -18,6 +18,7 @@ import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.guessTaskSubject
 import com.github.nepyh.rooter.module.planboard.orderedChaptersInRange
 import com.github.nepyh.rooter.module.planboard.planBoardSubjects
@@ -408,12 +409,16 @@ class TaskQuizService(
     /**
      * 퀴즈 출제에 쓸 학년 표시와 학습 범위(과목·단원), 할일 길이에 맞춘 문항 수. 사용자가 직접 추가한 태스크는 이름만 있어서
      * ("영어 단어 30개 외우기" 등) 학년·범위가 없으면 AI 가 "학생이 완료한 활동은?" 같은 문제를 냈다.
-     * 학습 범위는 그 할일의 과목만 넘긴다. 보드의 모든 과목을 넘기면 문항 수가 5개 이상일 때 AI 가 할일 개념으로
-     * 다 채우지 못하고 다른 과목(수학 할일에 과학) 문제로 넘어갔다.
+     *
+     * 학습 범위에는 **그 할일의 과목 하나만** 넣는다 (#387 — 국어 할일에 수학 문제).
+     * - 과목을 알고 보드 범위에 그 과목이 있으면: "수학: 이차방정식, …" (보드 범위의 단원)
+     * - 과목은 아는데 보드 범위에 없으면(직접 만든 일정 보드, 보드에 없는 교과서를 고른 할일): "과학: 단원 지정 안 됨"
+     *   — 예전엔 여기서 보드의 모든 과목을 넘겨 다른 과목 문제가 나왔고, 범위가 비면 과목 이름조차 AI 에 가지 않았다
+     * - 과목을 모르면: "지정 안 됨" — 보드의 다른 과목을 섞지 않고 AI 가 할일 이름으로만 낸다
      */
     private fun quizContextOf(planTaskId: Int): TaskQuizContext {
         val task = PlanTaskRow.findById(planTaskId)
-            ?: return TaskQuizContext("중학생(학년 정보 없음)", "지정 안 됨", quizQuestionCount(0), emptyList())
+            ?: return TaskQuizContext("중학생(학년 정보 없음)", NO_SCOPE, quizQuestionCount(0), emptyList())
         val questionCount = quizQuestionCount(task.estimatedMinutes)
         val board = task.dailyPlan.planBoard
 
@@ -421,21 +426,42 @@ class TaskQuizService(
         val gradeLabel = grade?.let { "중학교 ${it}학년" } ?: "중학생(학년 정보 없음)"
 
         val planSubjects = PlanSubjectRow.find { PlanSubjectTable.planBoardId eq board.id }.toList()
-        // 할일 과목: 저장된 subject_id, 없으면(복습·재조정·챗봇으로 파생된 할일) 이름으로 추정.
-        // 과목을 못 정했거나 그 과목이 보드 범위에 없으면 보드 범위 전체를 넘긴다
-        val taskSubjectId = task.subjectId?.value
-            ?: guessTaskSubject(task.taskName, planSubjects.map { it.textbook.subject.id.value to it.textbook.subject.name }.distinctBy { it.first })?.first
-        val scopedSubjects = planSubjects.filter { it.textbook.subject.id.value == taskSubjectId }.ifEmpty { planSubjects }
+        val boardSubjects = planSubjects.map { it.textbook.subject.id.value to it.textbook.subject.name }.distinctBy { it.first }
+        val (subjectId, subjectName) = resolveTaskSubject(task, boardSubjects)
+            ?: return TaskQuizContext(gradeLabel, NO_SCOPE, questionCount, emptyList())
 
         val chapterNames = mutableListOf<String>()
-        val studyScope = scopedSubjects.joinToString("\n") { subject ->
+        val studyScope = planSubjects.filter { it.textbook.subject.id.value == subjectId }.joinToString("\n") { subject ->
             val textbookChapters = orderedChaptersInRange(subject.textbook, subject.startChapter, subject.endChapter).map { it.chapterName }
             chapterNames += textbookChapters // 직접 적은 범위(customRangeText)는 단원이 아니라 리포트 기준에서 뺀다
             val chapters = textbookChapters + listOfNotNull(subject.customRangeText?.takeIf { it.isNotBlank() })
-            "${subject.textbook.subject.name}: ${chapters.joinToString(", ")}"
-        }.ifBlank { "지정 안 됨" }
+            "${subject.textbook.subject.name}: ${chapters.joinToString(", ").ifBlank { NO_CHAPTERS }}"
+        }.ifBlank { "$subjectName: $NO_CHAPTERS" }
 
         return TaskQuizContext(gradeLabel, studyScope, questionCount, chapterNames)
+    }
+
+    /**
+     * 할일 과목 (id, 이름). 순서대로 본다.
+     * 1. 저장된 subject_id (AI 계획·교과서를 고른 직접 추가·챗봇 수정·복습 할일)
+     * 2. 할일 이름으로 보드 과목 중에서 추정 ([guessTaskSubject] — 이름에 과목명이 하나, 또는 보드 과목이 하나)
+     * 3. 할일 이름에 든 과목명으로 전체 과목 중에서 추정 — 직접 만든 일정 보드처럼 보드 범위가 없거나, 보드에 없는 과목의 할일
+     * 그래도 모르면 null.
+     */
+    private fun resolveTaskSubject(task: PlanTaskRow, boardSubjects: List<Pair<Int, String>>): Pair<Int, String>? {
+        task.subjectId?.let { id -> SubjectRow.findById(id)?.let { return id.value to it.name } }
+        guessTaskSubject(task.taskName, boardSubjects)?.let { return it }
+        return SubjectRow.all().map { it.id.value to it.name }
+            .filter { (_, name) -> task.taskName.contains(name) }
+            .singleOrNull()
+    }
+
+    private companion object {
+        /** 과목을 모를 때의 학습 범위 */
+        const val NO_SCOPE = "지정 안 됨"
+
+        /** 과목은 알지만 단원 범위가 없을 때 과목 이름 뒤에 붙인다 (프롬프트 task-quiz-generation.md 와 같은 문구) */
+        const val NO_CHAPTERS = "단원 지정 안 됨"
     }
 
 }

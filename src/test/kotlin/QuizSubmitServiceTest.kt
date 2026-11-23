@@ -1,15 +1,19 @@
 import com.github.nepyh.rooter.common.config.AppConfig
 import com.github.nepyh.rooter.common.config.EnvironmentMode
+import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.ChapterTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
+import com.github.nepyh.rooter.module.planboard.model.SubjectRow
 import com.github.nepyh.rooter.module.planboard.model.SubjectTable
+import com.github.nepyh.rooter.module.planboard.model.TextbookRow
 import com.github.nepyh.rooter.module.planboard.model.TextbookTable
 import com.github.nepyh.rooter.module.quiz.CustomReviewQuestion
 import com.github.nepyh.rooter.module.quiz.QuizLlmClient
@@ -183,6 +187,33 @@ class QuizSubmitServiceTest : StringSpec({
         result.insertedReviewTasks.map { Triple(it.planDate, it.startTime, it.endTime) } shouldBe listOf(
             Triple("2026-10-03", "22:00", "22:20"),
             Triple("2026-10-03", "22:30", "22:50")
+        )
+    }
+
+    "복습 할일에는 약점 단원이 속한 과목을 붙이고, 같은 단원 이름이 여러 과목에 있으면 비워 둔다 (#387)" {
+        val quiz = seedQuiz(friday, friday.plusDays(7))
+        // 보드 범위: 수학(1단원·공통 단원), 과학(2단원·공통 단원)
+        val subjectIds = transaction(db) {
+            listOf("수학" to "1단원", "과학" to "2단원").associate { (subjectName, unitName) ->
+                val subject = SubjectRow.new { name = "복습$subjectName" }
+                val textbook = TextbookRow.new { this.subject = subject; title = "$subjectName 1" }
+                val unit = ChapterRow.new { this.textbook = textbook; chapterName = unitName; chapterOrder = 1 }
+                val shared = ChapterRow.new { this.textbook = textbook; chapterName = "공통 단원"; chapterOrder = 2 }
+                PlanSubjectRow.new { planBoard = PlanBoardRow[quiz.boardId]; this.textbook = textbook; startChapter = unit; endChapter = shared }
+                subjectName to subject.id.value
+            }
+        }
+        val suggestions = twoSuggestions + WeakAreaSuggestion("공통 단원", "공통 개념 정리")
+        val service = QuizService(FakeWeakAreaLlmClient(suggestions), schoolDataFetcher)
+
+        service.submitQuiz(quiz.userId, quiz.dailyPlanId, wrongAnswers(quiz))
+
+        transaction(db) {
+            PlanTaskRow.all().filter { it.taskName.startsWith("복습:") }.associate { it.taskName to it.subjectId?.value }
+        } shouldBe mapOf(
+            "복습: 소인수분해 다시 풀기" to subjectIds.getValue("수학"),
+            "복습: 정수 계산 연습" to subjectIds.getValue("과학"),
+            "복습: 공통 개념 정리" to null
         )
     }
 
