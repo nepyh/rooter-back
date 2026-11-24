@@ -55,7 +55,7 @@ fun ChatSessionApi(chatSessionService: ChatSessionService, chatService: ChatServ
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "메시지가 비어있음 (code=CHAT_001), 요청 형식이 틀림 (code=INVALID_REQUEST_BODY)"
+                    description = "메시지가 비어있음 (code=CHAT_001), 메시지가 500자(앞뒤 공백 제외)를 넘음 (code=CHAT_MESSAGE_TOO_LONG), 요청 형식이 틀림 (code=INVALID_REQUEST_BODY)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
