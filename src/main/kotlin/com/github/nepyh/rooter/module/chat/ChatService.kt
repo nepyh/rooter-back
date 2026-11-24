@@ -11,6 +11,7 @@ import com.github.nepyh.rooter.module.chat.dto.ChatMessageResponse
 import com.github.nepyh.rooter.module.chat.dto.ChatTurnResponse
 import com.github.nepyh.rooter.module.chat.dto.ChatUpdatedDay
 import com.github.nepyh.rooter.module.chat.exception.ChatValidationException
+import com.github.nepyh.rooter.module.chat.exception.CHAT_MESSAGE_MAX_LENGTH
 import com.github.nepyh.rooter.module.chat.exception.DailyPlanNotFoundException
 import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
@@ -100,13 +101,20 @@ class ChatService(
             ?.let { DailyPlanRow.wrapRow(it) }
             ?: throw DailyPlanNotFoundException()
 
+    /** 앞뒤 공백을 뺀 메시지. 비었거나 [CHAT_MESSAGE_MAX_LENGTH] 자를 넘으면 저장·AI 호출 전에 거절한다 (#396) */
+    private fun validatedMessage(message: String): String {
+        val trimmed = message.trim()
+        if (trimmed.isBlank()) throw ChatValidationException.MessageRequiredException()
+        if (trimmed.length > CHAT_MESSAGE_MAX_LENGTH) throw ChatValidationException.MessageTooLongException()
+        return trimmed
+    }
+
     /**
      * 챗봇에게 메시지를 보낸다. [sessionId] 세션에 이어 붙이고 AI 에는 그 세션 대화만 히스토리로 넣는다 (#342).
      * [sessionId] 가 없으면 이 날 계획으로 마지막에 대화한 세션, 그것도 없으면 새 세션에 저장한다.
      */
     suspend fun sendMessage(userId: Int, dailyPlanId: Int, message: String, sessionId: Int? = null): ChatMessageResponse {
-        val trimmed = message.trim()
-        if (trimmed.isBlank()) throw ChatValidationException.MessageRequiredException()
+        val trimmed = validatedMessage(message)
 
         val context = loadContext(userId, dailyPlanId, sessionId)
 
@@ -690,8 +698,7 @@ class ChatService(
      * 저장되는 대화의 dailyPlanId 는 null 이다.
      */
     suspend fun sendMessageWithoutPlan(userId: Int, message: String, sessionId: Int? = null): ChatMessageResponse {
-        val trimmed = message.trim()
-        if (trimmed.isBlank()) throw ChatValidationException.MessageRequiredException()
+        val trimmed = validatedMessage(message)
 
         val context = newSuspendedTransaction {
             val session = sessionId?.let { requireOwnedSession(userId, it) }

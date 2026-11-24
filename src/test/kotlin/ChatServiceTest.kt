@@ -1242,6 +1242,29 @@ class ChatServiceTest : StringSpec({
         shouldThrow<ChatSessionNotFoundException> { service.sendMessageWithoutPlan(userId, "안녕", othersSession.id) }
     }
 
+    "메시지는 앞뒤 공백을 빼고 500자까지 받고, 넘으면 저장·AI 호출 없이 CHAT_MESSAGE_TOO_LONG (#396)" {
+        val (userId, dailyPlanId) = seedDailyPlan()
+        val llm = FakeChatLlmClient(plainReply("네"))
+        llm.noPlanResult = plainReply("네")
+        val service = ChatService(llm, schoolDataFetcher, otherDayClock)
+
+        val tooLong = "가".repeat(501)
+        shouldThrow<ChatValidationException.MessageTooLongException> { service.sendMessage(userId, dailyPlanId, tooLong) }
+            .code shouldBe "CHAT_MESSAGE_TOO_LONG"
+        shouldThrow<ChatValidationException.MessageTooLongException> { service.sendMessageWithoutPlan(userId, tooLong) }
+        llm.lastChatHistoryJson shouldBe null
+        llm.lastNoPlanUserMessage shouldBe null
+        transaction(db) { ChatTurnTable.selectAll().count() shouldBe 0L }
+
+        // 500자 + 앞뒤 공백은 통과하고, 공백을 뺀 채로 저장된다
+        val exact = "가".repeat(500)
+        service.sendMessage(userId, dailyPlanId, "  $exact\n")
+        service.sendMessageWithoutPlan(userId, "\t$exact  ")
+        transaction(db) {
+            ChatTurnTable.selectAll().where { ChatTurnTable.role eq "user" }.map { it[ChatTurnTable.content] } shouldBe listOf(exact, exact)
+        }
+    }
+
     "세션을 지우면 그 대화도 지워지고 계획은 그대로다" {
         val (userId, dailyPlanId) = seedDailyPlan()
         val taskId = seedTask(dailyPlanId, "수학", LocalTime.of(20, 0), LocalTime.of(21, 0), completed = false)
