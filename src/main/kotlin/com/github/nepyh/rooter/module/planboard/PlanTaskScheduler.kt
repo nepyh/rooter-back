@@ -49,7 +49,7 @@ data class PlacementOptions(
  */
 object PlanTaskScheduler {
     /** 한 번에 NICE 로 조회하는 최대 일수 — 계획 최대 기간([MAX_PLAN_DAYS])보다 조금 넉넉하게 (#401) */
-    const val NICE_MAX_RANGE_DAYS = 62
+    const val NICE_MAX_RANGE_DAYS = 82
 
 
     /**

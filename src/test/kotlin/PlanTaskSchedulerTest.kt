@@ -31,7 +31,7 @@ import java.time.LocalTime
 
 class PlanTaskSchedulerTest : StringSpec({
 
-    "NICE 는 앞쪽 NICE_MAX_RANGE_DAYS(62)일만 조회한다 — 2100년까지 늘린 보드도 몇 번만 부른다 (#401)" {
+    "NICE 는 앞쪽 NICE_MAX_RANGE_DAYS(82)일만 조회한다 — 2100년까지 늘린 보드도 몇 번만 부른다 (#401)" {
         val requested = mutableListOf<String>()
         val fetcher = SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { request ->
             val params = request.url.parameters
@@ -48,7 +48,7 @@ class PlanTaskSchedulerTest : StringSpec({
         val ranges = PlanTaskScheduler.buildTypedUnavailableRanges(fetcher, start, end, "C107181084", 1, 2)
 
         ranges.size shouldBe java.time.temporal.ChronoUnit.DAYS.between(start, end).toInt() + 1 // 결과는 기간 전체
-        // 앞 62일(06-01~07-31)만 — 1학기 안이라 시간표 1번 + 학사일정 1번 (캐시가 범위를 조금 넓혀 묻는 것은 괜찮다).
+        // 앞 82일(06-01~08-21)만 — 1학기 안이라 시간표 1번 + 학사일정 1번 (캐시가 범위를 조금 넓혀 묻는 것은 괜찮다).
         // 상한이 없으면 2100년까지 학기마다 불렀다
         requested.size shouldBe 2
         requested.all { it < "20260901" } shouldBe true

@@ -277,7 +277,7 @@ class PlanBoardServiceTest : StringSpec({
 
     "createBoard: 정상 요청이면 보드가 저장되고 id 를 반환한다" {
         val userId = seedUser("board-ok@test.com")
-        val boardId = planBoardService.createBoard(userId, PlanBoardCreateRequest("여름방학", "2026-07-01", "2026-08-29"))
+        val boardId = planBoardService.createBoard(userId, PlanBoardCreateRequest("여름방학", "2026-07-01", "2026-08-31"))
 
         val (title, ownerId) = transaction(db) {
             val saved = PlanBoardRow.findById(boardId) ?: error("보드가 저장되지 않음")
@@ -298,13 +298,13 @@ class PlanBoardServiceTest : StringSpec({
         } shouldBe "시작일은 오늘 이후여야 합니다."
     }
 
-    "createBoard: 계획 기간은 60일까지, 61일이면 INVALID_DATE_RANGE (#401)" {
+    "createBoard: 계획 기간은 80일까지, 81일이면 INVALID_DATE_RANGE (#401)" {
         val userId = seedUser("board-60@test.com")
-        planBoardService.createBoard(userId, PlanBoardCreateRequest("60일", "2026-06-01", "2026-07-30"))
+        planBoardService.createBoard(userId, PlanBoardCreateRequest("80일", "2026-06-01", "2026-08-19"))
 
         dateRangeMessage {
-            planBoardService.createBoard(userId, PlanBoardCreateRequest("61일", "2026-06-01", "2026-07-31"))
-        } shouldBe "계획 기간은 최대 60일입니다."
+            planBoardService.createBoard(userId, PlanBoardCreateRequest("81일", "2026-06-01", "2026-08-20"))
+        } shouldBe "계획 기간은 최대 80일입니다."
     }
 
     "createBoard: 종료일·시험일이 오늘부터 1년을 넘으면 INVALID_DATE_RANGE (#401)" {
@@ -323,20 +323,20 @@ class PlanBoardServiceTest : StringSpec({
         val later = PlanBoardService(Clock.fixed(java.time.Instant.parse("2026-06-22T00:00:00Z"), java.time.ZoneOffset.UTC))
 
         later.updateBoard(userId, boardId, PlanBoardUpdateRequest(title = "수정")).title shouldBe "수정"
-        later.updateBoard(userId, boardId, PlanBoardUpdateRequest(endDate = "2026-07-30")).endDate shouldBe "2026-07-30"
+        later.updateBoard(userId, boardId, PlanBoardUpdateRequest(endDate = "2026-08-19")).endDate shouldBe "2026-08-19"
 
         dateRangeMessage {
             later.updateBoard(userId, boardId, PlanBoardUpdateRequest(startDate = "2026-06-21"))
         } shouldBe "시작일은 오늘 이후여야 합니다."
         dateRangeMessage {
-            later.updateBoard(userId, boardId, PlanBoardUpdateRequest(endDate = "2026-07-31"))
-        } shouldBe "계획 기간은 최대 60일입니다."
+            later.updateBoard(userId, boardId, PlanBoardUpdateRequest(endDate = "2026-08-20"))
+        } shouldBe "계획 기간은 최대 80일입니다."
         dateRangeMessage {
             later.updateBoard(userId, boardId, PlanBoardUpdateRequest(examDate = "2027-06-23"))
         } shouldBe "시험일은 오늘부터 1년 안이어야 합니다."
     }
 
-    "plan-generation: 지난 시작일·61일 넘는 기간·1년 넘은 시험일은 AI 호출 전에 INVALID_DATE_RANGE (#401)" {
+    "plan-generation: 지난 시작일·80일 넘는 기간·1년 넘은 시험일은 AI 호출 전에 INVALID_DATE_RANGE (#401)" {
         val userId = seedUser("gen-range@test.com")
         val textbook = seedTextbook(seedSubject("수학"), title = "수학")
         val chapter = seedChapter(textbook, 1)
@@ -355,8 +355,8 @@ class PlanBoardServiceTest : StringSpec({
 
         dateRangeMessage { service.generate(userId, request("2026-05-31", daysRemaining = 7)) } shouldBe
             "시작일은 오늘 이후여야 합니다."
-        dateRangeMessage { service.generate(userId, request(null, daysRemaining = 61)) } shouldBe
-            "계획 기간은 최대 60일입니다."
+        dateRangeMessage { service.generate(userId, request(null, daysRemaining = 81)) } shouldBe
+            "계획 기간은 최대 80일입니다."
         dateRangeMessage { service.generate(userId, request(null, examDate = "2027-06-02")) } shouldBe
             "시험일은 오늘부터 1년 안이어야 합니다."
     }
