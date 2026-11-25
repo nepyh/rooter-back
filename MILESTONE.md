@@ -49,7 +49,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 | M6 | 파일 저장·S3 | 4/5 | doing |
 | M7 | 이슈 기반 기능 (#57~#59, 캘린더) | 7/9 | doing |
 | M8 | AI 계획 생성·스케줄링 | 17/21 | doing |
-| M9 | 퀴즈 고도화 | 18/24 | doing |
+| M9 | 퀴즈 고도화 | 18/25 | doing |
 | M10 | 챗봇 재조정 | 11/12 | doing |
 | M11 | 교과서 카탈로그 | 4/5 | doing |
 | M12 | API 응답·계약 정리 | 5/7 | doing |
@@ -243,6 +243,7 @@ DDL·데이터 SQL 은 로컬 Postgres(rooter-ddl `schema.sql` + 운영과 같�
 - [ ] doing RB-189 퀴즈 문항 명확화 + 퀴즈 0문항 실패 2건 (#388 중 수식 외 부분) — 테스터 피드백: 문항이 모호함. 할일 퀴즈·일일 퀴즈·맞춤 복습 프롬프트에 [문항 작성 규칙](한 문제 한 가지, 조건·단위, 묻는 형식을 문장 끝에, 교과서 용어, 그림·지문 필요한 문제 금지, 보기 형식). 실제 LLM 확인 중 찾은 기존 실패: 퀴즈 클라이언트가 ```json 코드블록을 안 벗겨 0문항(→ `stripCodeFence`), 배열 끝 쉼표로 0문항(→ `LLM_RESPONSE_JSON` allowTrailingComma). 수식 LaTeX 는 앱 업데이트가 필요해 RB-191 로 분리(11-23 결정 — 업데이트 안 한 앱에 `$\frac{3}{4}$` 가 글자로 보이므로) · 새 code 없음 · DB 변경 없음 · `./gradlew test` 542건 0 실패(#393 병합 후) · 실제 LLM 할일 퀴즈 3회·일일 1회 파싱 실패 0 · PR #392
 - [ ] doing RB-190 할일 퀴즈 범위를 할일 단원으로 좁히기 (#387 마지막 백엔드 부분) — RB-188 로 저장한 `plan_task_chapters` 가 있으면 `TaskQuizService.quizContextOf` 가 보드 범위 대신 `"수학: 소인수분해, 정수와 유리수"` 처럼 그 단원만 넘기고, 문항 단원(오답 리포트 기준)도 그 안에서만 받음. 단원이 없으면 RB-187 그대로(과목의 보드 범위). 직접 만든 일정 보드도 단원이 있으면 과목·단원을 넘김. 단원은 id 순(소단원 `chapter_order` 가 다시 1부터라). 퀴즈 생성 테스트 3종 스키마에 `PlanTaskChapterTable` 추가 · 새 code 없음 · DB 변경 없음(테이블은 RB-188 때 운영 적용) · `./gradlew test` 541건 0 실패(3 skipped, 신규 2), 퀴즈 테스트 3종은 빈 DB 에서 따로도 통과 · PR #393 머지 (11-23)
 - [ ] doing RB-191 퀴즈 수식 LaTeX(`$...$`) 출력 (#388 의 수식 부분) — 테스터 피드백: 분수·지수가 `3/4`·`x^2` 같은 글자로 나와 읽기 어려움. 할일 퀴즈·일일 퀴즈·맞춤 복습 프롬프트에 [수식 표기](인라인 `$...$` LaTeX, JSON 안 역슬래시 두 번) 추가. 서버 보정 `common/LatexJson.kt`: `repairLatexJsonEscapes`(수식 안 역슬래시 한 개 → 두 개, 수식 밖은 잘못된 escape 만 — `\frac` 이 폼피드로 깨지거나 `\sqrt` 로 파싱 실패하던 것), `cleanQuizLlmJson`(`stripCodeFence` + 보정)을 퀴즈 클라이언트 4곳에서 사용. Swagger 퀴즈 API 3곳·복습 목록에 수식 표기 안내(`QUIZ_LATEX_DOC`). #392 머지 후 보관 브랜치 `feature/quiz-latex-output` 에서 main 위로 다시 옮김 · 새 code 없음 · DB 변경 없음 · `./gradlew test` 549건 0 실패(3 skipped, 신규 7) · 실제 DeepSeek 로 수학 할일 퀴즈 7회·일일 2회·맞춤 복습 1회 — 수식 문항 전부 `$...$`, 파싱 실패 0 · 앱 KaTeX 표시 rooter-front #372 머지(11-23), WebView 네이티브 모듈이라 **새 EAS 빌드 앱 배포 후 머지** (먼저 나가면 옛 앱에 `$\frac{3}{4}$` 가 글자로 보임) · PR #394 (draft)
+- [ ] doing RB-195 수학 퀴즈가 비던 것 — 수식 값에 따옴표 누락 (#402) — 11-24 운영 로그: AI 가 `"question_text": $(x+3)(x+4)$를…` 처럼 수식으로 시작하는 값을 따옴표 없이 보내 응답 전체가 파싱 실패 → 0문항(RB-191 수식 출력 뒤 생긴 실패 유형, `repairLatexJsonEscapes` 는 역슬래시만 고침). `common/LlmParseRetry.kt` `requestParsedWithRetry`: 파싱이 실패하면 같은 요청을 바로 한 번 더(`LLM_PARSE_ATTEMPTS` = 2, 호출 자체 실패는 다시 부르지 않음) — 할일 퀴즈(`TaskQuizLlmClient`)·일일 퀴즈·약점 분석·맞춤 복습(`QuizLlmClient`) 4곳. 할일·일일·맞춤 복습 프롬프트 [수식 표기]에 "수식이 든 값도 큰따옴표" 규칙과 맞음/틀림 예시 추가 · 새 code 없음 · DB 변경 없음 · 신규 `LlmParseRetryTest` 4건(운영 실패 응답 그대로 → 두 번째 응답 사용) · 퀴즈를 못 만들면 서버는 빈 퀴즈가 아니라 502 `TASK_QUIZ_GENERATION_FAILED` 를 주므로 "비어 있음" 표시는 프론트 확인 필요 · DeepSeek JSON 모드(`response_format`)는 일일·맞춤 복습이 최상위 배열이라 바로 못 써서 보류(#404 Bedrock 전환 때 함께 검토)
 
 ## M10. 챗봇 재조정
 
