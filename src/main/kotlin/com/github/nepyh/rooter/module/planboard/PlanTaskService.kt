@@ -211,6 +211,8 @@ class PlanTaskService(private val clock: Clock = Clock.systemUTC()) {
         if (date.isBefore(board.startDate) || date.isAfter(board.endDate)) {
             throw PlanTaskValidationException.PlanDateOutOfRangeException()
         }
+        // 남은 기간을 아직 만들고 있는 AI 계획이면 만든 날까지만 추가할 수 있다 (#405)
+        requireGeneratedDate(board, date)
 
         // 프론트가 고른 교과서가 오면 그 교과서의 과목을 할일에 붙인다 (안 보내면 과목 미지정)
         val textbook = request.textbookId?.let { textbookId ->

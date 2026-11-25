@@ -52,6 +52,17 @@ data class PlanGenerationResponse(
     val examDate: String?,
     val examEndDate: String?,
     val isCramMode: Boolean,
-    val dailyPlans: List<PlanGenerationDailyResponse>,
-    val tips: List<String>
+    val dailyPlans: List<PlanGenerationDailyResponse>, // 지금까지 만든 날만 (앞 구간). 나머지는 만들어지는 대로 일일 계획 조회로
+    val tips: List<String>,
+    // AI 계획 생성 상태 (#405): COMPLETED = 기간 전체를 만듦, GENERATING = 뒷부분을 서버가 이어서 만드는 중
+    val generationStatus: String = "COMPLETED",
+    val generatedUntil: String? = null // 지금까지 만든 마지막 날짜 "yyyy-MM-dd". COMPLETED 면 endDate 와 같다
+)
+
+/** POST /plan-generation/{planBoardId}/retry 응답 (#405) */
+@Serializable
+data class PlanGenerationRetryResponse(
+    val planBoardId: Int,
+    val generationStatus: String, // GENERATING
+    val generatedUntil: String // 이미 만든 마지막 날짜. 그 다음 날부터 다시 만든다
 )

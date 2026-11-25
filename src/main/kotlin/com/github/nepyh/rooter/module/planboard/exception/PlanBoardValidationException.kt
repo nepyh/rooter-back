@@ -47,4 +47,14 @@ sealed class PlanBoardValidationException(
         "GENERATION_FAILED",
         "AI 계획 생성에 실패했습니다. 잠시 후 다시 시도해주세요."
     )
+    class GenerationInProgressException : PlanBoardValidationException(
+        HttpStatusCode.Conflict,
+        "PLAN_GENERATION_IN_PROGRESS",
+        "아직 계획을 만드는 중이에요. 다 만들어진 뒤에 다시 해주세요."
+    )
+    class GenerationNotFailedException : PlanBoardValidationException(
+        HttpStatusCode.Conflict,
+        "PLAN_GENERATION_NOT_FAILED",
+        "다시 만들 계획이 없어요. 실패한 계획만 다시 만들 수 있어요."
+    )
 }

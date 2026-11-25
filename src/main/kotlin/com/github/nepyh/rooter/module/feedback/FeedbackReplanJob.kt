@@ -4,12 +4,15 @@ import com.github.nepyh.rooter.module.feedback.model.DailyFeedbackTable
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanTable
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
+import com.github.nepyh.rooter.module.planboard.model.PlanGenerationStatus
 import com.github.nepyh.rooter.module.scheduler.DEFAULT_RETRY_DELAYS
 import com.github.nepyh.rooter.module.scheduler.DueJob
 import com.github.nepyh.rooter.module.scheduler.SchedulerJob
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.Duration
@@ -51,7 +54,8 @@ class FeedbackReplanJob(
         // daily_feedback 이 1건 이상 달린 (plan_board_id, plan_date) 조합만 후보가 된다.
         val submittedDays = (DailyFeedbackTable innerJoin DailyPlanTable innerJoin PlanBoardTable)
             .selectAll()
-            .where { DailyPlanTable.planDate eq target }
+            // 남은 기간을 아직 만들고 있는 AI 계획은 건너뛴다 — 이어 만들기와 같은 날을 함께 고치지 않게 (#405)
+            .where { (DailyPlanTable.planDate eq target) and (PlanBoardTable.generationStatus neq PlanGenerationStatus.GENERATING.value) }
             .map { it[PlanBoardTable.id].value to it[DailyPlanTable.planDate] }
             .distinct()
 
