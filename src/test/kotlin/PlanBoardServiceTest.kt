@@ -44,6 +44,8 @@ import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskChapterTable
+import com.github.nepyh.rooter.module.planboard.model.PlanGenerationRequestTable
+import com.github.nepyh.rooter.module.scheduler.model.JobRunTable
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskRow
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskOrigin
 import com.github.nepyh.rooter.module.planboard.model.PlanTaskTable
@@ -70,6 +72,13 @@ import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.insert
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import com.github.nepyh.rooter.module.scheduler.JobRunRepo
+import com.github.nepyh.rooter.module.planboard.PlanGenerationContinueJob
+import com.github.nepyh.rooter.module.planboard.PlanGenerationContinuer
+import com.github.nepyh.rooter.module.planboard.PLAN_GENERATION_JOB_TYPE
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -114,6 +123,8 @@ class PlanBoardServiceTest : StringSpec({
             exec("DROP TABLE IF EXISTS user_unavailable_times CASCADE")
             exec("DROP TABLE IF EXISTS task_quiz_attempts CASCADE")
             exec("DROP TABLE IF EXISTS plan_task_chapters CASCADE")
+            exec("DROP TABLE IF EXISTS plan_generation_requests CASCADE")
+            exec("DROP TABLE IF EXISTS job_runs CASCADE")
             exec("DROP TABLE IF EXISTS plan_subjects CASCADE")
             exec("DROP TABLE IF EXISTS plan_tasks CASCADE")
             exec("DROP TABLE IF EXISTS daily_plans CASCADE")
@@ -132,7 +143,9 @@ class PlanBoardServiceTest : StringSpec({
                 // plan-generation 이 등급·프로필·불가 시간을 조회한다
                 LevelTestResultTable, StudentProfileTable, UnavailableTimeTable, StudyStyleAnswerTable,
                 // 태스크 완료 처리가 퀴즈로 확정된 태스크인지 조회한다
-                TaskQuizAttemptTable
+                TaskQuizAttemptTable,
+                // AI 계획 이어 만들기 (#405)
+                PlanGenerationRequestTable, JobRunTable
             )
             // DDL(rooter-ddl) 의 uq_daily_plans_board_date 와 동일한 제약 — insertIgnore 레이스 방지 검증용
             exec("ALTER TABLE daily_plans ADD CONSTRAINT uq_daily_plans_board_date UNIQUE (plan_board_id, plan_date)")
@@ -148,6 +161,8 @@ class PlanBoardServiceTest : StringSpec({
             UnavailableTimeTable.deleteAll()
             TaskQuizAttemptTable.deleteAll()
             PlanTaskChapterTable.deleteAll()
+            PlanGenerationRequestTable.deleteAll()
+            JobRunTable.deleteAll()
             PlanTaskTable.deleteAll()
             PlanSubjectTable.deleteAll()
             DailyPlanTable.deleteAll()
@@ -610,11 +625,12 @@ class PlanBoardServiceTest : StringSpec({
         }
     }
 
-    "plan-generation: 14일을 넘으면 비슷한 길이의 구간으로 나눈다" {
-        splitIntoChunks(14) shouldBe listOf(1..14)
-        splitIntoChunks(15) shouldBe listOf(1..8, 9..15)
-        splitIntoChunks(30) shouldBe listOf(1..10, 11..20, 21..30)
-        splitIntoChunks(60).map { it.count() } shouldBe listOf(12, 12, 12, 12, 12)
+    "plan-generation: 7일을 넘으면 비슷한 길이의 구간으로 나눈다 (#405)" {
+        splitIntoChunks(7) shouldBe listOf(1..7)
+        splitIntoChunks(8) shouldBe listOf(1..4, 5..8)
+        splitIntoChunks(14) shouldBe listOf(1..7, 8..14)
+        splitIntoChunks(30) shouldBe listOf(1..6, 7..12, 13..18, 19..24, 25..30)
+        splitIntoChunks(60).map { it.count() } shouldBe listOf(7, 7, 7, 7, 7, 7, 6, 6, 6)
     }
 
     "plan-generation: 단원은 구간 비율만큼 나눠 주고, 단원이 적으면 구간끼리 겹쳐 쓴다" {
@@ -625,28 +641,148 @@ class PlanBoardServiceTest : StringSpec({
         topicsForChunk(listOf("1"), 11..20, 30) shouldBe listOf("1")
     }
 
-    "plan-generation: 30일 계획은 3구간으로 나눠 생성하고 30일치를 모두 저장한다" {
+    "plan-generation: 30일 계획은 앞 구간(6일)만 만들어 GENERATING 으로 응답하고, 이어 만들기로 나머지를 채운 뒤 COMPLETED (#405)" {
         val userId = seedUser("gen-chunk@test.com")
         val math = seedTextbook(seedSubject("수학"), title = "수학")
         val math1 = seedChapter(math, 1)
         val math2 = seedChapter(math, 2)
         val llm = FakePlanGenerationLlmClient()
-        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+        val started = mutableListOf<Int>()
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher(), onGenerating = { started += it })
 
         val response = service.generate(
             userId,
-            PlanGenerationRequest(
-                title = "긴 계획",
-                subjects = listOf(PlanGenerationSubjectInput(math, math1, math2)),
-                startDate = "2026-07-01",
-                daysRemaining = 30
-            )
+            PlanGenerationRequest(title = "긴 계획", subjects = listOf(PlanGenerationSubjectInput(math, math1, math2)), startDate = "2026-07-01", daysRemaining = 30)
         )
 
-        llm.contexts.size shouldBe 3
-        llm.contexts.all { it.contains("총 학습 기간: 10일") } shouldBe true
-        response.dailyPlans.map { it.date } shouldBe (0L until 30L).map { LocalDate.of(2026, 7, 1).plusDays(it).toString() }
-        transaction(db) { DailyPlanRow.find { DailyPlanTable.planBoardId eq response.planBoardId }.count() } shouldBe 30L
+        llm.contexts.size shouldBe 1
+        llm.contexts[0] shouldContain "총 학습 기간: 6일"
+        llm.contexts[0] shouldContain "전체 계획 30일 (2026-07-01 ~ 2026-07-30) 중 1~6일차 구간이다"
+        response.generationStatus shouldBe "GENERATING"
+        response.generatedUntil shouldBe "2026-07-06"
+        response.endDate shouldBe "2026-07-30"
+        response.dailyPlans.map { it.date } shouldBe (0L until 6L).map { LocalDate.of(2026, 7, 1).plusDays(it).toString() }
+        started shouldBe listOf(response.planBoardId)
+        planBoardService.getAllBoards(userId).single().let {
+            it.generationStatus shouldBe "GENERATING"
+            it.generatedUntil shouldBe "2026-07-06"
+        }
+
+        // 다른 시작일을 기대한 호출(이미 다른 곳이 만든 구간)은 아무것도 하지 않는다
+        service.continueGeneration(response.planBoardId, LocalDate.of(2026, 7, 13)) shouldBe false
+        llm.contexts.size shouldBe 1
+
+        while (service.continueGeneration(response.planBoardId)) { /* 남은 구간 */ }
+
+        llm.contexts.size shouldBe 5
+        llm.contexts[1] shouldContain "7~12일차 구간이다"
+        llm.contexts.last() shouldContain "마지막 구간이므로 끝부분에 전체 범위 총복습을 넣어라."
+        transaction(db) {
+            DailyPlanRow.find { DailyPlanTable.planBoardId eq response.planBoardId }.map { it.planDate }.sorted() shouldBe
+                (0L until 30L).map { LocalDate.of(2026, 7, 1).plusDays(it) }
+            PlanGenerationRequestTable.selectAll().count() shouldBe 0L
+        }
+        planBoardService.getAllBoards(userId).single().let {
+            it.generationStatus shouldBe "COMPLETED"
+            it.generatedUntil shouldBe null
+        }
+        service.continueGeneration(response.planBoardId) shouldBe false
+    }
+
+    "plan-generation: 7일 이하면 한 번에 다 만들고 바로 COMPLETED (#405)" {
+        val userId = seedUser("gen-week@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val started = mutableListOf<Int>()
+        val service = PlanGenerationService(FakePlanGenerationLlmClient(), noNiceSchoolDataFetcher(), onGenerating = { started += it })
+
+        val response = service.generate(
+            userId,
+            PlanGenerationRequest(title = "일주일", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 7)
+        )
+
+        response.generationStatus shouldBe "COMPLETED"
+        response.generatedUntil shouldBe "2026-07-07"
+        response.dailyPlans.size shouldBe 7
+        started shouldBe emptyList()
+        transaction(db) { PlanGenerationRequestTable.selectAll().count() } shouldBe 0L
+    }
+
+    "plan-generation: 생성 중인 보드는 기간·과목 수정, 아직 안 만든 날 할일 추가가 409 PLAN_GENERATION_IN_PROGRESS (#405)" {
+        val userId = seedUser("gen-lock@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val service = PlanGenerationService(FakePlanGenerationLlmClient(), noNiceSchoolDataFetcher())
+        val boardId = service.generate(
+            userId,
+            PlanGenerationRequest(title = "잠금", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 14)
+        ).planBoardId
+
+        shouldThrow<PlanBoardValidationException.GenerationInProgressException> {
+            planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(endDate = "2026-07-20"))
+        }.code shouldBe "PLAN_GENERATION_IN_PROGRESS"
+        shouldThrow<PlanBoardValidationException.GenerationInProgressException> {
+            planBoardService.addSubject(userId, boardId, PlanSubjectCreateRequest(math, math1, math1))
+        }
+        shouldThrow<PlanBoardValidationException.GenerationInProgressException> {
+            planTaskService.createTask(userId, taskRequest(boardId, planDate = "2026-07-10", startTime = "05:00", endTime = "05:30", estimatedMinutes = 30))
+        }
+        // 제목 수정·이미 만든 날 할일 추가는 된다
+        planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(title = "새 제목")).title shouldBe "새 제목"
+        planTaskService.createTask(userId, taskRequest(boardId, planDate = "2026-07-03", startTime = "05:00", endTime = "05:30", estimatedMinutes = 30))
+
+        while (service.continueGeneration(boardId)) { /* 남은 구간 */ }
+        planBoardService.updateBoard(userId, boardId, PlanBoardUpdateRequest(endDate = "2026-07-20")).endDate shouldBe "2026-07-20"
+    }
+
+    "plan-generation: 이어 만들기가 재시도까지 실패하면 FAILED, 다시 만들기로 만든 날 다음부터 이어서 완성한다 (#405)" {
+        val userId = seedUser("gen-fail@test.com")
+        val otherUserId = seedUser("gen-fail-other@test.com")
+        val math = seedTextbook(seedSubject("수학"), title = "수학")
+        val math1 = seedChapter(math, 1)
+        val llm = FakePlanGenerationLlmClient()
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+        val job = PlanGenerationContinueJob(service)
+        val boardId = service.generate(
+            userId,
+            PlanGenerationRequest(title = "실패", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 14)
+        ).planBoardId
+
+        val due = job.findDue(OffsetDateTime.now()).single()
+        due.runKey shouldBe "plan_generation_${boardId}_2026-07-08"
+        shouldThrow<PlanBoardValidationException.GenerationNotFailedException> { service.retry(userId, boardId) } // 생성 중에는 다시 만들기 불가
+        llm.failing = true
+        // 마지막 재시도(retry_count = 재시도 횟수)에서 실패하면 잡이 보드를 실패로 확정한다
+        transaction(db) {
+            JobRunTable.insert {
+                it[jobType] = PLAN_GENERATION_JOB_TYPE; it[runKey] = due.runKey; it[status] = "pending"
+                it[retryCount] = job.retryDelays.size; it[scheduledAt] = OffsetDateTime.now(); it[createdAt] = OffsetDateTime.now()
+            }
+        }
+        shouldThrow<PlanBoardValidationException.GenerationFailedException> { job.execute(due) }
+        planBoardService.getAllBoards(userId).single().let {
+            it.generationStatus shouldBe "FAILED"
+            it.generatedUntil shouldBe "2026-07-07"
+        }
+        job.findDue(OffsetDateTime.now()) shouldBe emptyList()
+
+        shouldThrow<PlanBoardForbiddenException> { service.retry(otherUserId, boardId) }
+        llm.failing = false
+        service.retry(userId, boardId).let {
+            it.generationStatus shouldBe "GENERATING"
+            it.generatedUntil shouldBe "2026-07-07"
+        }
+        transaction(db) { JobRunTable.selectAll().count() } shouldBe 0L // 다 쓴 실행 기록을 지워 다시 잡을 수 있게
+
+        // 응답 직후 바로 이어 만드는 경로: job_runs 에 claim 하고 끝까지 만든다
+        PlanGenerationContinuer(job, JobRunRepo(), CoroutineScope(Dispatchers.IO)).runFor(boardId)
+        planBoardService.getAllBoards(userId).single().generationStatus shouldBe "COMPLETED"
+        transaction(db) {
+            DailyPlanRow.find { DailyPlanTable.planBoardId eq boardId }.count() shouldBe 14L
+            JobRunTable.selectAll().single()[JobRunTable.status] shouldBe "done"
+        }
+        shouldThrow<PlanBoardValidationException.GenerationNotFailedException> { service.retry(userId, boardId) }
+            .code shouldBe "PLAN_GENERATION_NOT_FAILED"
     }
 
     "plan-generation: 일수가 모자라게 오면 한 번 더 요청해서 채운다" {
@@ -864,16 +1000,18 @@ class PlanBoardServiceTest : StringSpec({
         }
         val llm = FakePlanGenerationLlmClient()
 
-        // 2026-07-01(수) 부터 30일 → 10일씩 3구간. 1구간 주말 = 07-04·05 (day 4, 5)
-        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        // 2026-07-01(수) 부터 30일 → 6일씩 5구간 (#405). 1구간 주말 = 07-04·05 (day 4, 5)
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+        val boardId = service.generate(
             userId,
             PlanGenerationRequest(title = "주말", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 30)
-        )
+        ).planBoardId
+        while (service.continueGeneration(boardId)) { /* 남은 구간 */ }
 
-        llm.studyStyleRules.size shouldBe 3
-        llm.studyStyleRules.any { it.contains("주말(day 4, 5)") } shouldBe true
-        // 2구간(07-11~07-20) 주말 = 07-11·12·18·19 → day 1, 2, 8, 9
-        llm.studyStyleRules.any { it.contains("주말(day 1, 2, 8, 9)") } shouldBe true
+        llm.studyStyleRules.size shouldBe 5
+        llm.studyStyleRules[0] shouldContain "주말(day 4, 5)"
+        // 2구간(07-07~07-12) 주말 = 07-11·12 → day 5, 6 — 이어 만든 구간도 그 구간 기준으로 센다
+        llm.studyStyleRules[1] shouldContain "주말(day 5, 6)"
     }
 
     // 2026-10-05 은 월요일(등교일, 학교 정보 없음 → 하교 16:30), 2026-10-03 은 토요일
@@ -965,17 +1103,19 @@ class PlanBoardServiceTest : StringSpec({
         }
         val llm = FakePlanGenerationLlmClient()
 
-        // 2026-07-01(수) 부터 30일 → 10일씩 3구간. 2구간 첫날은 07-11(토)
-        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        // 2026-07-01(수) 부터 30일 → 6일씩 5구간 (#405). 2구간 첫날은 07-07(화) — 계획 7일째라 낮추지 않는다
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+        val boardId = service.generate(
             userId,
             PlanGenerationRequest(title = "적게", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 30)
-        )
+        ).planBoardId
+        service.continueGeneration(boardId)
 
-        val first = llm.contexts.single { it.contains("총 학습 기간: 10일 (2026-07-01") }
+        val first = llm.contexts.single { it.contains("총 학습 기간: 6일 (2026-07-01") }
         first.contains("- day 1 (2026-07-01 수): 공부 가능 290분, 가장 긴 연속 240분, 권장 45~60분") shouldBe true
         first.contains("- day 3 (2026-07-03 금): 공부 가능 290분, 가장 긴 연속 240분, 권장 75~90분") shouldBe true
         first.contains("- day 4 (2026-07-04 토): 공부 가능 840분, 가장 긴 연속 300분, 권장 150~240분") shouldBe true
-        llm.contexts.single { it.contains("총 학습 기간: 10일 (2026-07-11") }.contains("- day 1 (2026-07-11 토): 공부 가능 840분, 가장 긴 연속 300분, 권장 150~240분") shouldBe true
+        llm.contexts.single { it.contains("총 학습 기간: 6일 (2026-07-07") } shouldContain "- day 1 (2026-07-07 화): 공부 가능 290분, 가장 긴 연속 240분, 권장 90~150분"
     }
 
     "plan-generation: 주말이 변수면 토·일요일 권장을 평일보다 낮게 알려준다" {
@@ -1940,7 +2080,10 @@ private class FakePlanGenerationLlmClient(
     val contexts = java.util.Collections.synchronizedList(mutableListOf<String>())
     val studyStyleRules = java.util.Collections.synchronizedList(mutableListOf<String>())
 
+    @Volatile var failing = false
+
     override suspend fun generatePlan(context: String, studyStyleRules: String): GeneratedPlan {
+        if (failing) throw PlanBoardValidationException.GenerationFailedException()
         contexts += context
         this.studyStyleRules += studyStyleRules
         val days = Regex("총 학습 기간: (\\d+)일").find(context)!!.groupValues[1].toInt()

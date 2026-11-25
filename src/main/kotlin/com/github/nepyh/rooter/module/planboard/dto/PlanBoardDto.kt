@@ -24,7 +24,10 @@ data class PlanBoardResponse(
     val isArchived: Boolean, // 보관한 보드인지. 목록 조회는 기본으로 보관된 보드를 뺀다
     val isRepresentative: Boolean, // 대표 플랜인지 (유저당 1개). 홈 화면이 이 보드의 디데이를 보여준다
     val createdAt: String,
-    val updatedAt: String // 마지막 수정 시각 (제목·설명·기간·보관 변경 시 갱신)
+    val updatedAt: String, // 마지막 수정 시각 (제목·설명·기간·보관 변경 시 갱신)
+    // AI 계획 생성 상태 (#405): COMPLETED / GENERATING(뒷부분을 만드는 중) / FAILED(재시도까지 실패 — 다시 만들기 필요)
+    val generationStatus: String = "COMPLETED",
+    val generatedUntil: String? = null // 만들어진 마지막 날짜. GENERATING·FAILED 일 때만, 그 뒤 날짜는 아직 계획이 없다
 )
 
 @Serializable

@@ -16,6 +16,7 @@ import com.github.nepyh.rooter.module.chat.exception.DailyPlanNotFoundException
 import com.github.nepyh.rooter.module.chat.model.ChatTurnRow
 import com.github.nepyh.rooter.module.chat.model.ChatTurnTable
 import com.github.nepyh.rooter.module.planboard.PlanTaskScheduler
+import com.github.nepyh.rooter.module.planboard.generatedEndDateOf
 import com.github.nepyh.rooter.module.planboard.UserRoutine
 import com.github.nepyh.rooter.module.planboard.dto.PlanTaskResponse
 import com.github.nepyh.rooter.module.planboard.model.DailyPlanRow
@@ -319,11 +320,13 @@ class ChatService(
             .where { (PlanBoardTable.userId eq userId) and (DailyPlanTable.planDate eq planDate) and (DailyPlanTable.id neq dailyPlanId) }
             .map { PlanTaskScheduler.toMinutes(it[PlanTaskTable.startTime]) to PlanTaskScheduler.toMinutes(it[PlanTaskTable.endTime]) }
 
-        // 플랜보드 기간 전체 (#337) — AI 가 다른 날 할일도 보고 고칠 수 있게
-        val days = loadPlanDays(userId, board.id.value, board.startDate, board.endDate)
+        // 플랜보드 기간 전체 (#337) — AI 가 다른 날 할일도 보고 고칠 수 있게.
+        // 남은 기간을 아직 만들고 있는 AI 계획이면 만든 날까지만 보여주고 고치게 한다 (#405)
+        val editableEndDate = generatedEndDateOf(board)
+        val days = loadPlanDays(userId, board.id.value, board.startDate, editableEndDate)
         val today = todayInAppZone(clock)
         val editablePendingIds = days.values
-            .filter { it.date == planDate || isEditableDay(it.date, today, board.endDate) }
+            .filter { it.date == planDate || isEditableDay(it.date, today, editableEndDate) }
             .flatMap { day -> day.pendingTasks.map { it.id } }
 
         // 새 세션은 빈 대화로 시작한다 — 다른 세션 대화는 AI 에 넣지 않는다 (#342)
@@ -379,11 +382,11 @@ class ChatService(
             planBoardId = board.id.value,
             planBoardIsManual = isManualPlanBoard(board.examDate),
             planBoardStartDate = board.startDate,
-            planBoardEndDate = board.endDate,
+            planBoardEndDate = editableEndDate,
             pendingPostponedFrom = pendingTasks.associate { it.id.value to it.postponedFromDate },
             days = days,
             quizState = quizStateOf(editablePendingIds),
-            planDaysText = planDaysText(days.values.sortedBy { it.date }, planDate, today, board.endDate)
+            planDaysText = planDaysText(days.values.sortedBy { it.date }, planDate, today, editableEndDate)
         )
     }
 

@@ -12,6 +12,8 @@ import com.github.nepyh.rooter.module.planboard.exception.PlanBoardValidationExc
 import com.github.nepyh.rooter.module.planboard.exception.PlanSubjectNotFoundException
 import com.github.nepyh.rooter.module.planboard.model.ChapterRow
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardRow
+import com.github.nepyh.rooter.module.planboard.model.PlanGenerationRequestTable
+import com.github.nepyh.rooter.module.planboard.model.PlanGenerationStatus
 import com.github.nepyh.rooter.module.planboard.model.PlanBoardTable
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectRow
 import com.github.nepyh.rooter.module.planboard.model.PlanSubjectTable
@@ -23,7 +25,9 @@ import com.github.nepyh.rooter.module.user.model.UserRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -53,10 +57,22 @@ class PlanBoardService {
             else (PlanBoardTable.userId eq user.id) and (PlanBoardTable.isArchived eq false)
         }
             .orderBy(PlanBoardTable.createdAt to SortOrder.DESC)
-            .map { it.toResponse() }
+            .toList()
+            .let { boards ->
+                // 생성 중·실패한 보드의 만든 마지막 날짜를 한 번에 읽는다 (#405)
+                val unfinished = boards.filter { it.generationStatus != PlanGenerationStatus.COMPLETED.value }.map { it.id }
+                val untilByBoard = if (unfinished.isEmpty()) emptyMap() else {
+                    PlanGenerationRequestTable.select(PlanGenerationRequestTable.planBoardId, PlanGenerationRequestTable.generatedUntil)
+                        .where { PlanGenerationRequestTable.planBoardId inList unfinished }
+                        .associate { it[PlanGenerationRequestTable.planBoardId].value to it[PlanGenerationRequestTable.generatedUntil] }
+                }
+                boards.map { it.toResponse(untilByBoard[it.id.value]) }
+            }
     }
 
-    private fun PlanBoardRow.toResponse() = PlanBoardResponse(
+    private fun PlanBoardRow.toResponse(
+        generatedUntil: LocalDate? = if (generationStatus == PlanGenerationStatus.COMPLETED.value) null else currentGeneratedUntil(id.value)
+    ) = PlanBoardResponse(
         id = id.value,
         title = title,
         description = description,
@@ -67,7 +83,9 @@ class PlanBoardService {
         isArchived = isArchived,
         isRepresentative = isRepresentative,
         createdAt = createdAt.toString(),
-        updatedAt = updatedAt.toString()
+        updatedAt = updatedAt.toString(),
+        generationStatus = PlanGenerationStatus.of(generationStatus).name,
+        generatedUntil = generatedUntil?.takeIf { generationStatus != PlanGenerationStatus.COMPLETED.value }?.toString()
     )
 
     /** PATCH 에서 null 은 "변경 없음"이라 설명을 지우는 표현이 따로 필요하다 — 빈 문자열/공백만 있는 문자열을 지우기로 본다. */
@@ -158,6 +176,8 @@ class PlanBoardService {
             runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
         } ?: board.endDate
         if (newEndDate.isBefore(newStartDate)) throw PlanBoardValidationException.InvalidDateRangeException()
+        // 남은 구간을 이어서 만드는 중에는 기간을 바꾸지 못한다 — 구간 위치가 어긋난다 (#405)
+        if (newStartDate != board.startDate || newEndDate != board.endDate) requireNotGenerating(board)
         board.startDate = newStartDate
         board.endDate = newEndDate
 
@@ -206,6 +226,7 @@ class PlanBoardService {
      */
     fun addSubject(userId: Int, boardId: Int, request: PlanSubjectCreateRequest): PlanSubjectResponse = transaction {
         val board = requireOwnedBoard(userId, boardId)
+        requireNotGenerating(board)
         val resolved = resolveTextbookSubject(request)
 
         val planSubject = PlanSubjectRow.new {
@@ -253,7 +274,7 @@ class PlanBoardService {
 
     /** textbookId/startChapterId/endChapterId/customRangeText 전체를 다시 받아 통째로 교체 (부분 업데이트 아님 — 서로 연결된 값들이라 일부만 바꾸면 불일치 위험) */
     fun updateSubject(userId: Int, boardId: Int, subjectId: Int, request: PlanSubjectCreateRequest): PlanSubjectResponse = transaction {
-        requireOwnedBoard(userId, boardId)
+        requireNotGenerating(requireOwnedBoard(userId, boardId))
         val planSubject = PlanSubjectRow.find {
             (PlanSubjectTable.id eq subjectId) and (PlanSubjectTable.planBoardId eq boardId)
         }.firstOrNull() ?: throw PlanSubjectNotFoundException()
@@ -278,7 +299,7 @@ class PlanBoardService {
     }
 
     fun deleteSubject(userId: Int, boardId: Int, subjectId: Int) = transaction {
-        requireOwnedBoard(userId, boardId)
+        requireNotGenerating(requireOwnedBoard(userId, boardId))
         val planSubject = PlanSubjectRow.find {
             (PlanSubjectTable.id eq subjectId) and (PlanSubjectTable.planBoardId eq boardId)
         }.firstOrNull() ?: throw PlanSubjectNotFoundException()
@@ -291,6 +312,7 @@ class PlanBoardService {
      */
     fun replaceSubjects(userId: Int, boardId: Int, request: PlanSubjectReplaceRequest): List<PlanSubjectResponse> = transaction {
         val board = requireOwnedBoard(userId, boardId)
+        requireNotGenerating(board)
         val resolved = request.subjects.map { resolveTextbookSubject(it) }
 
         PlanSubjectRow.find { PlanSubjectTable.planBoardId eq board.id }.forEach { it.delete() }
