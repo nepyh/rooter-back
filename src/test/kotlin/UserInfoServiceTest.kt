@@ -3,6 +3,9 @@ import com.github.nepyh.rooter.module.storage.UploadableFile
 import com.github.nepyh.rooter.module.user.ExposedUserRepo
 import com.github.nepyh.rooter.module.user.UserService
 import com.github.nepyh.rooter.module.user.dto.StudentProfileRequest
+import com.github.nepyh.rooter.module.user.dto.UpdateProfileRequest
+import com.github.nepyh.rooter.module.user.dto.UserRegisterRequest
+import com.github.nepyh.rooter.module.user.exception.UserValidationException
 import com.github.nepyh.rooter.module.user.exception.UserNotFoundException
 import com.github.nepyh.rooter.module.user.model.StudentProfileRow
 import com.github.nepyh.rooter.module.user.model.StudentProfileTable
@@ -65,10 +68,10 @@ class UserInfoServiceTest : StringSpec({
     }
     val userService = UserService(ExposedUserRepo(), noopFileStorage, testAgreementCatalog)
 
-    fun seedUser(email: String): Int = transaction(db) {
+    fun seedUser(email: String, username: String = "tester"): Int = transaction(db) {
         UserRow.new {
             this.email = email
-            username = "tester"
+            this.username = username
             password = "x"
             createdAt = OffsetDateTime.now()
         }.id.value
@@ -122,6 +125,35 @@ class UserInfoServiceTest : StringSpec({
         shouldThrow<UserNotFoundException> {
             userService.getUserInfo(999999)
         }
+    }
+
+    "updateProfile: 공백이 든 새 이름은 INVALID_USERNAME (#407)" {
+        val userId = seedUser("rename@test.com")
+
+        val exception = shouldThrow<UserValidationException.WrongUsernameException> {
+            userService.updateProfile(userId, UpdateProfileRequest(username = "김 철수"))
+        }
+
+        exception.message shouldBe "이름에 띄어쓰기를 넣을 수 없습니다."
+        transaction(db) { UserRow[userId].username } shouldBe "tester"
+    }
+
+    "updateProfile: 규칙 전에 공백 이름으로 가입한 사용자도 이름을 그대로 보내며 소개만 고칠 수 있다 (#407)" {
+        val userId = seedUser("legacy-name@test.com", username = "김 철수")
+
+        val updated = userService.updateProfile(userId, UpdateProfileRequest(username = "김 철수", bio = "안녕"))
+
+        updated.username shouldBe "김 철수"
+        updated.bio shouldBe "안녕"
+    }
+
+    "registerUser: 공백이 든 이름은 가입 전에 INVALID_USERNAME (#407)" {
+        val exception = shouldThrow<UserValidationException.WrongUsernameException> {
+            userService.registerUser(UserRegisterRequest(email = "space@test.com", username = "김 철수", password = "abcd1234"))
+        }
+
+        exception.code shouldBe "INVALID_USERNAME"
+        transaction(db) { UserRow.count() } shouldBe 0L
     }
 })
 

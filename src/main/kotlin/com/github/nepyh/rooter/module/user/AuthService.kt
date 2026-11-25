@@ -134,7 +134,7 @@ class AuthService(
     private fun findOrCreateSocialUser(email: String): UserRow {
         userRepo.findUserByEmail(email)?.let { return it }
 
-        val username = email.substringBefore("@").take(12).ifBlank { "user" }
+        val username = usernameFromEmail(email)
         // 소셜 로그인 계정은 비밀번호로 로그인하지 않으므로, 절대 알아낼 수 없는 임의의 해시를 채워 넣는다
         // (users.password 가 NOT NULL 이라 비워둘 수 없음)
         val unusablePassword = BCrypt.hashpw(UUID.randomUUID().toString(), BCrypt.gensalt())

@@ -66,7 +66,7 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
                 }
             }
             HttpStatusCode.BadRequest {
-                description = "사용할 수 없는 사용자 이름 (12자 초과, code=INVALID_USERNAME), 비밀번호 형식 오류 — 영문·숫자 포함 8~20자, 공백·이모지·보이지 않는 문자 불가 (code=INVALID_PASSWORD_FORMAT), 또는 이메일 320자 초과 (code=EMAIL_TOO_LONG), 또는 agreements 검증 실패 " +
+                description = "사용할 수 없는 사용자 이름 — 1~12자, 띄어쓰기·이모지·보이지 않는 문자 불가, 사유는 message (code=INVALID_USERNAME), 비밀번호 형식 오류 — 영문·숫자 포함 8~20자, 공백·이모지·보이지 않는 문자 불가 (code=INVALID_PASSWORD_FORMAT), 또는 이메일 320자 초과 (code=EMAIL_TOO_LONG), 또는 agreements 검증 실패 " +
                         "(code=UNKNOWN_AGREEMENT_CODE / DUPLICATED_AGREEMENT_CODE / AGREEMENT_VERSION_MISMATCH / REQUIRED_AGREEMENT_MISSING / EMPTY_AGREEMENTS)"
             }
             HttpStatusCode.Conflict {
@@ -323,7 +323,7 @@ fun UserApi(userService: UserService, authService: AuthService) = ApiRoute("user
                     }
                 }
                 HttpStatusCode.BadRequest {
-                    description = "유효하지 않은 ID, username 12자 초과 (code=INVALID_USERNAME), 또는 bio 500자 초과 (code=BIO_TOO_LONG)"
+                    description = "유효하지 않은 ID, username 형식 오류 — 1~12자, 띄어쓰기·이모지·보이지 않는 문자 불가, 사유는 message. 이름을 바꾸지 않고 그대로 보내면 검사하지 않음 (code=INVALID_USERNAME), 또는 bio 500자 초과 (code=BIO_TOO_LONG)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

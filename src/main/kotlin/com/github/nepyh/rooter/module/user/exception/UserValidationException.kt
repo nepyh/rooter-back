@@ -22,10 +22,11 @@ sealed class UserValidationException(
         "BAD_CREDENTIALS",
         "이메일 또는 비밀번호가 일치하지 않습니다."
     )
-    class WrongUsernameException : UserValidationException(
+    /** 사유는 message 로만 나눈다 — code 는 그대로 (#407) */
+    class WrongUsernameException(message: String = "사용할 수 없는 사용자 이름입니다.") : UserValidationException(
         HttpStatusCode.BadRequest,
         "INVALID_USERNAME",
-        "사용할 수 없는 사용자 이름입니다."
+        message
     )
     class WrongEmailLengthException : UserValidationException(
         HttpStatusCode.BadRequest,

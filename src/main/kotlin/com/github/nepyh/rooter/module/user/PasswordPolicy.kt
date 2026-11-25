@@ -34,8 +34,10 @@ internal fun requireValidPasswordFormat(password: String) {
     }
 }
 
-private fun Char.isForbiddenInPassword(): Boolean {
-    if (isWhitespace()) return true
+private fun Char.isForbiddenInPassword(): Boolean = isWhitespace() || isInvisibleOrEmoji()
+
+/** 제어·서식(폭 없는 공백 등)·이모지·사용자 정의·미할당 문자. 비밀번호와 사용자 이름(#407)이 함께 쓴다 */
+internal fun Char.isInvisibleOrEmoji(): Boolean {
     if (this in '︀'..'️') return true // 이모지 변형 선택자
     return when (Character.getType(this).toByte()) {
         Character.CONTROL,
