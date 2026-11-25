@@ -6,6 +6,7 @@ import com.github.nepyh.rooter.common.LLM_RESPONSE_JSON
 import com.github.nepyh.rooter.common.PromptLoader
 import com.github.nepyh.rooter.common.cleanQuizLlmJson
 import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.requestParsedWithRetry
 import com.github.nepyh.rooter.module.quiz.exception.QuizValidationException
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -86,11 +87,11 @@ open class QuizLlmClient(private val appConfig: AppConfig) {
             "COUNT" to count.toString()
         )
 
-        val content = requestChatCompletion(prompt)
-        // 코드블록을 벗기고, 수식($...$ LaTeX)의 역슬래시를 한 번만 쓴 응답이 깨지지 않게 바로잡는다 (#388)
-        return runCatching { json.decodeFromString<List<GeneratedQuestion>>(cleanQuizLlmJson(content)) }
-            .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
-            .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
+        // 코드블록을 벗기고, 수식($...$ LaTeX)의 역슬래시를 한 번만 쓴 응답이 깨지지 않게 바로잡는다 (#388).
+        // 그래도 형식이 틀리면 같은 요청을 한 번 더 보낸다 (#402)
+        return requestParsedWithRetry(logger, { requestChatCompletion(prompt) }) {
+            json.decodeFromString<List<GeneratedQuestion>>(cleanQuizLlmJson(it))
+        } ?: throw QuizValidationException.QuizGenerationFailedException()
     }
 
     open suspend fun analyzeWeakAreas(wrongQuestionTexts: List<String>, chapterNames: List<String>): List<WeakAreaSuggestion> {
@@ -100,10 +101,11 @@ open class QuizLlmClient(private val appConfig: AppConfig) {
             "WRONG_QUESTIONS" to wrongQuestionTexts.joinToString("\n") { "- $it" }
         )
 
-        val content = requestChatCompletion(prompt)
-        return runCatching { json.decodeFromString<List<WeakAreaSuggestion>>(cleanQuizLlmJson(content)) }
-            .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
-            .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
+        // 코드블록을 벗기고, 수식($...$ LaTeX)의 역슬래시를 한 번만 쓴 응답이 깨지지 않게 바로잡는다 (#388).
+        // 그래도 형식이 틀리면 같은 요청을 한 번 더 보낸다 (#402)
+        return requestParsedWithRetry(logger, { requestChatCompletion(prompt) }) {
+            json.decodeFromString<List<WeakAreaSuggestion>>(cleanQuizLlmJson(it))
+        } ?: throw QuizValidationException.QuizGenerationFailedException()
     }
 
     open suspend fun generateCustomReviewQuestions(
@@ -120,11 +122,11 @@ open class QuizLlmClient(private val appConfig: AppConfig) {
             "COUNT_PER_CHAPTER" to countPerChapter.toString()
         )
 
-        val content = requestChatCompletion(prompt)
-        // 코드블록을 벗기고, 수식($...$ LaTeX)의 역슬래시를 한 번만 쓴 응답이 깨지지 않게 바로잡는다 (#388)
-        return runCatching { json.decodeFromString<List<CustomReviewQuestion>>(cleanQuizLlmJson(content)) }
-            .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
-            .getOrElse { throw QuizValidationException.QuizGenerationFailedException() }
+        // 코드블록을 벗기고, 수식($...$ LaTeX)의 역슬래시를 한 번만 쓴 응답이 깨지지 않게 바로잡는다 (#388).
+        // 그래도 형식이 틀리면 같은 요청을 한 번 더 보낸다 (#402)
+        return requestParsedWithRetry(logger, { requestChatCompletion(prompt) }) {
+            json.decodeFromString<List<CustomReviewQuestion>>(cleanQuizLlmJson(it))
+        } ?: throw QuizValidationException.QuizGenerationFailedException()
     }
 
     private suspend fun requestChatCompletion(prompt: String): String {

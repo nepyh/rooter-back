@@ -50,6 +50,9 @@
 - `$` 는 수식을 감쌀 때만 써라 (돈은 "5달러"처럼 글로 써라).
 - question_text, choices, explanation, choice_reasons 모두 같은 규칙을 따른다.
 - 응답은 JSON 이므로 문자열 안의 LaTeX 역슬래시는 두 번 써라. 예: `"$\\frac{3}{4}$"`
+- 수식이 들어간 값도 JSON 문자열이므로 반드시 큰따옴표로 감싸라. 값이 수식(`$`)으로 시작하거나 끝나도 마찬가지다.
+  - 맞음: `"question_text": "$(x+3)(x+4)$를 전개한 결과는?"`, `"choices": ["$x^2+7x+12$", "$x^2+12$", "$x^2+7x$", "$2x+7$"]`
+  - 틀림: `"question_text": $(x+3)(x+4)$를 전개한 결과는?` (따옴표가 없으면 응답 전체를 읽지 못한다)
 
 반드시 아래 JSON 형식으로만 응답하고, 다른 설명은 절대 붙이지 마라.
 {"questions": [{"question_text": "...", "choices": ["...", "...", "...", "..."], "correct_index": 0, "explanation": "...", "choice_reasons": ["...", "", "...", "..."], "chapter_name": "..."}]}

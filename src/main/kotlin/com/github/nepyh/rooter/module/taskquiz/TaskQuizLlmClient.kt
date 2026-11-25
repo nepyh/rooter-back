@@ -6,6 +6,7 @@ import com.github.nepyh.rooter.common.LLM_RESPONSE_JSON
 import com.github.nepyh.rooter.common.PromptLoader
 import com.github.nepyh.rooter.common.cleanQuizLlmJson
 import com.github.nepyh.rooter.common.config.AppConfig
+import com.github.nepyh.rooter.common.requestParsedWithRetry
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
@@ -74,11 +75,11 @@ open class TaskQuizLlmClient(private val appConfig: AppConfig) {
             "COUNT" to count.toString()
         )
 
-        val content = requestChatCompletion(prompt) ?: return emptyList()
-        // 코드블록을 벗기고, 수식($...$ LaTeX)의 역슬래시를 한 번만 쓴 응답이 깨지지 않게 바로잡는다 (#388)
-        return runCatching { json.decodeFromString<GeneratedTaskQuiz>(cleanQuizLlmJson(content)).questions }
-            .onFailure { logger.warn("LLM 응답 JSON 파싱 실패: content={}", content.take(500), it) }
-            .getOrElse { emptyList() }
+        // 코드블록을 벗기고, 수식($...$ LaTeX)의 역슬래시를 한 번만 쓴 응답이 깨지지 않게 바로잡는다 (#388).
+        // 그래도 형식이 틀리면 같은 요청을 한 번 더 보낸다 (#402)
+        return requestParsedWithRetry(logger, { requestChatCompletion(prompt) }) {
+            json.decodeFromString<GeneratedTaskQuiz>(cleanQuizLlmJson(it)).questions
+        } ?: emptyList()
     }
 
     private suspend fun requestChatCompletion(prompt: String): String? {
