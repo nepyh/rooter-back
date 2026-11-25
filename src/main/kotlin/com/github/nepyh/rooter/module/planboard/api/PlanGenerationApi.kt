@@ -55,7 +55,7 @@ fun PlanGenerationApi(planGenerationService: PlanGenerationService) = ApiRoute("
                 }
                 HttpStatusCode.BadRequest {
                     description = "제목/날짜/과목 범위 오류 (code: INVALID_TITLE, INVALID_DATE_FORMAT, " +
-                        "INVALID_DATE_RANGE — 시험 첫날이 시작일 이전이거나, examEndDate 가 있는데 examDate 가 없거나 examDate 보다 빠름, " +
+                        "INVALID_DATE_RANGE — 시작일이 오늘보다 앞이거나, 계획 기간이 80일을 넘거나, 시험일·종료일이 오늘부터 1년을 넘거나 (#401, 사유는 message), 시험 첫날이 시작일 이전이거나, examEndDate 가 있는데 examDate 가 없거나 examDate 보다 빠름, " +
                         "SUBJECTS_REQUIRED, INVALID_SUBJECT_RANGE, MISSING_DATE_INFO)"
                 }
                 HttpStatusCode.Unauthorized {

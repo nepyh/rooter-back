@@ -145,6 +145,10 @@ class PlanGenerationService(
             }
             else -> throw PlanBoardValidationException.MissingDateInfoException()
         }
+        val today = todayInAppZone(clock)
+        requireStartNotPast(startDate, today)
+        requireExamWithinLimit(examDate, today)
+        requirePlanLengthWithinLimit(startDate, endDate, today)
 
         val chunks = splitIntoChunks(totalDays)
         val startedAt = System.nanoTime()

@@ -48,6 +48,9 @@ data class PlacementOptions(
  * (plan-generation, chat 기반 계획 재조정 둘 다 이 로직을 공유).
  */
 object PlanTaskScheduler {
+    /** 한 번에 NICE 로 조회하는 최대 일수 — 계획 최대 기간([MAX_PLAN_DAYS])보다 조금 넉넉하게 (#401) */
+    const val NICE_MAX_RANGE_DAYS = 82
+
 
     /**
      * 날짜별 학습 불가 시간대를 만든다 (plan-generation 의 여러 날짜 생성, chat 재조정의
@@ -86,16 +89,19 @@ object PlanTaskScheduler {
         routine: UserRoutine = UserRoutine.DEFAULT
     ): Map<LocalDate, List<TypedRange>> {
         val dates = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
+        // NICE 는 앞쪽 [NICE_MAX_RANGE_DAYS]일만 조회하고 그 뒤 날은 기본값(하교 16:30, 평일 등교)으로 둔다 —
+        // 범위를 그대로 조회하면 2100년까지 늘린 보드 하나가 NICE 를 학기마다 약 150번 불렀다 (#401)
+        val niceEndDate = minOf(endDate, startDate.plusDays(NICE_MAX_RANGE_DAYS - 1L))
 
         // 시간표(하교 시각)와 학사일정(쉬는 날)은 서로 상관없는 NICE 조회라 동시에 부른다 (순서대로 부르면 캐시가 빈 첫 요청이 둘을 합친 만큼 걸림)
         val (dismissalMinutesByDate, noSchoolDays) = if (schoolId != null) {
             coroutineScope {
                 val dismissal = async {
-                    runCatching { fetchDismissalMinutesByDate(schoolDataFetcher, schoolId, classNumber, grade, startDate, endDate) }.getOrElse { emptyMap() }
+                    runCatching { fetchDismissalMinutesByDate(schoolDataFetcher, schoolId, classNumber, grade, startDate, niceEndDate) }.getOrElse { emptyMap() }
                 }
                 // 공휴일·방학·재량휴업일 등 학교 안 가는 날 (NICE 학사일정). 조회 실패면 평일은 전부 등교일로 본다
                 val noSchool = async {
-                    runCatching { schoolDataFetcher.getNoSchoolDays(schoolId, startDate, endDate) }.getOrElse { emptySet() }
+                    runCatching { schoolDataFetcher.getNoSchoolDays(schoolId, startDate, niceEndDate) }.getOrElse { emptySet() }
                 }
                 dismissal.await() to noSchool.await()
             }
