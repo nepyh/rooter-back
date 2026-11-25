@@ -29,6 +29,8 @@ object PlanBoardTable : IntIdTable("plan_boards") {
     val createdAt = timestampWithTimeZone("created_at")
     // 제목·설명·기간·보관을 PATCH 하면 갱신한다 (DDL: timestamptz not null default current_timestamp)
     val updatedAt = timestampWithTimeZone("updated_at").defaultExpression(CurrentTimestampWithTimeZone)
+    // AI 계획 생성 상태 (#405) — PlanGenerationStatus.value. DDL chk_plan_boards_generation_status
+    val generationStatus = varchar("generation_status", 20).default(PlanGenerationStatus.COMPLETED.value)
 }
 
 class PlanBoardRow(id: EntityID<Int>) : IntEntity(id) {
@@ -46,4 +48,5 @@ class PlanBoardRow(id: EntityID<Int>) : IntEntity(id) {
     var isRepresentative by PlanBoardTable.isRepresentative
     var createdAt by PlanBoardTable.createdAt
     var updatedAt by PlanBoardTable.updatedAt
+    var generationStatus by PlanBoardTable.generationStatus
 }

@@ -131,6 +131,9 @@ fun PlanTaskApi(planTaskService: PlanTaskService) = ApiRoute("plan-tasks") {
                 HttpStatusCode.Created {
                     description = "생성 성공"
                 }
+                HttpStatusCode.Conflict {
+                    description = "AI 계획의 남은 기간을 만드는 중이고 planDate 가 아직 만들지 않은 날 — 플랜보드 generatedUntil 이후 (code=PLAN_GENERATION_IN_PROGRESS) (#405)"
+                }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }

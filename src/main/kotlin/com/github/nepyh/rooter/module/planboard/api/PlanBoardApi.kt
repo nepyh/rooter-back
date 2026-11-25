@@ -38,7 +38,9 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
             tag("PlanBoard")
             summary = "플랜보드 목록 조회"
             description = "본인 플랜보드 목록만 조회 가능. 최근에 만든 보드가 앞에 온다 (클라이언트는 목록의 첫 항목을 현재 보드로 쓴다). " +
-                "기본으로 보관(isArchived=true)된 보드는 빠지고, includeArchived=true 면 함께 온다"
+                "기본으로 보관(isArchived=true)된 보드는 빠지고, includeArchived=true 면 함께 온다. " +
+                "generationStatus (#405): COMPLETED / GENERATING(AI 계획의 남은 기간을 서버가 만드는 중 — generatedUntil 까지만 일일 계획이 있다) / " +
+                "FAILED(재시도까지 실패 — POST /plan-generation/{planBoardId}/retry). 생성 중인 보드가 있으면 이 목록을 다시 불러 진행 상황을 확인한다"
             parameters {
                 query("includeArchived") {
                     description = "보관한 보드도 포함할지 (기본 false)"
@@ -120,6 +122,9 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 제목이 1~100자를 벗어남 (code=INVALID_TITLE), 설명이 500자를 넘음 (code=INVALID_DESCRIPTION), " +
                         "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠르거나 시험 마지막 날(examEndDate)이 시험 첫날(examDate) 없이 오거나 첫날보다 빠름 (code=INVALID_DATE_RANGE)"
+                }
+                HttpStatusCode.Conflict {
+                    description = "AI 계획의 남은 기간을 만드는 중이라 기간(startDate·endDate)을 바꿀 수 없음 (code=PLAN_GENERATION_IN_PROGRESS) — 제목·설명·보관은 바꿀 수 있다 (#405)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -259,6 +264,9 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 또는 존재하지 않는 교과서/단원이거나 요청한 교과서의 단원이 아니거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
                 }
+                HttpStatusCode.Conflict {
+                    description = "AI 계획의 남은 기간을 만드는 중이라 과목을 바꿀 수 없음 (code=PLAN_GENERATION_IN_PROGRESS) (#405)"
+                }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
@@ -300,6 +308,9 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 또는 존재하지 않는 교과서/단원이거나 요청한 교과서의 단원이 아니거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
+                }
+                HttpStatusCode.Conflict {
+                    description = "AI 계획의 남은 기간을 만드는 중이라 과목을 바꿀 수 없음 (code=PLAN_GENERATION_IN_PROGRESS) (#405)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
@@ -377,6 +388,9 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 또는 존재하지 않는 교과서/단원이거나 요청한 교과서의 단원이 아니거나 시작 단원이 끝 단원보다 뒤에 있음 (code=INVALID_SUBJECT_RANGE)"
                 }
+                HttpStatusCode.Conflict {
+                    description = "AI 계획의 남은 기간을 만드는 중이라 과목을 바꿀 수 없음 (code=PLAN_GENERATION_IN_PROGRESS) (#405)"
+                }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"
                 }
@@ -409,6 +423,9 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID)"
+                }
+                HttpStatusCode.Conflict {
+                    description = "AI 계획의 남은 기간을 만드는 중이라 과목을 바꿀 수 없음 (code=PLAN_GENERATION_IN_PROGRESS) (#405)"
                 }
                 HttpStatusCode.Unauthorized {
                     description = "인증되지 않음"

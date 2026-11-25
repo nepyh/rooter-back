@@ -144,7 +144,8 @@ class NotificationService(
         val settings = notificationSettingService.get(userId)
         return when (type) {
             // 오늘 공부 설문 알림은 별도 토글이 생기기 전까지 할일 알림 설정을 따른다 (#374)
-            NotificationType.TASK_REMINDER, NotificationType.DAILY_FEEDBACK_REMINDER -> settings.taskReminderEnabled
+            NotificationType.TASK_REMINDER, NotificationType.DAILY_FEEDBACK_REMINDER,
+            NotificationType.PLAN_GENERATION_COMPLETED, NotificationType.PLAN_GENERATION_FAILED -> settings.taskReminderEnabled
             NotificationType.TEST -> true // 푸시 연동 확인용이라 설정과 상관없이 보낸다
         }
     }
