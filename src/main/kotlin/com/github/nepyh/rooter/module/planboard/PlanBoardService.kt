@@ -1,5 +1,6 @@
 package com.github.nepyh.rooter.module.planboard
 
+import com.github.nepyh.rooter.common.todayInAppZone
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardCreateRequest
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardResponse
 import com.github.nepyh.rooter.module.planboard.dto.PlanBoardUpdateRequest
@@ -29,6 +30,7 @@ import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
 
@@ -43,7 +45,8 @@ private data class ResolvedTextbookSubject(
     val endChapter: ChapterRow
 )
 
-class PlanBoardService {
+/** @param clock 날짜 범위 규칙(#401)의 "오늘" 기준 */
+class PlanBoardService(private val clock: Clock = Clock.systemUTC()) {
     /**
      * 본인 보드 목록. 최근에 만든 보드가 앞에 온다 — 클라이언트가 목록의 첫 항목을 현재 보드 컨텍스트로 쓴다.
      * [includeArchived] 가 false(기본)면 보관한 보드는 빠진다.
@@ -113,6 +116,10 @@ class PlanBoardService {
         if (endDate.isBefore(startDate)) {
             throw PlanBoardValidationException.InvalidDateRangeException()
         }
+        val today = todayInAppZone(clock)
+        requireStartNotPast(startDate, today)
+        requireExamWithinLimit(examDate, today)
+        requirePlanLengthWithinLimit(startDate, endDate, today)
 
         return transaction {
             val board = PlanBoardRow.new {
@@ -176,6 +183,10 @@ class PlanBoardService {
             runCatching { LocalDate.parse(it) }.getOrElse { throw PlanBoardValidationException.InvalidDateFormatException() }
         } ?: board.endDate
         if (newEndDate.isBefore(newStartDate)) throw PlanBoardValidationException.InvalidDateRangeException()
+        // 바뀐 값만 검사한다 — 이미 시작한 보드는 지난 시작일을 그대로 둔 채 제목·종료일 등을 고칠 수 있게 (#401)
+        val today = todayInAppZone(clock)
+        if (newStartDate != board.startDate) requireStartNotPast(newStartDate, today)
+        if (newStartDate != board.startDate || newEndDate != board.endDate) requirePlanLengthWithinLimit(newStartDate, newEndDate, today)
         // 남은 구간을 이어서 만드는 중에는 기간을 바꾸지 못한다 — 구간 위치가 어긋난다 (#405)
         if (newStartDate != board.startDate || newEndDate != board.endDate) requireNotGenerating(board)
         board.startDate = newStartDate
@@ -185,6 +196,7 @@ class PlanBoardService {
         val newExamDate = request.examDate?.let { parseBoardDate(it) } ?: board.examDate
         val newExamEndDate = request.examEndDate?.let { parseBoardDate(it) } ?: board.examEndDate
         requireValidExamPeriod(newExamDate, newExamEndDate)
+        if (newExamDate != board.examDate) requireExamWithinLimit(newExamDate, today)
         board.examDate = newExamDate
         board.examEndDate = newExamEndDate
 

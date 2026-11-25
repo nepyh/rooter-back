@@ -175,7 +175,9 @@ class PlanBoardServiceTest : StringSpec({
         }
     }
 
-    val planBoardService = PlanBoardService()
+    // 이 테스트는 2026-07 날짜로 보드·계획을 만든다. 시작일 ≥ 오늘 규칙(#401)에 걸리지 않게 "오늘"을 그 전으로 고정한다
+    val beforeTestDates: Clock = Clock.fixed(java.time.Instant.parse("2026-06-01T00:00:00Z"), java.time.ZoneOffset.UTC)
+    val planBoardService = PlanBoardService(beforeTestDates)
     val planTaskService = PlanTaskService()
     val calendarService = CalendarService()
 
@@ -275,7 +277,7 @@ class PlanBoardServiceTest : StringSpec({
 
     "createBoard: 정상 요청이면 보드가 저장되고 id 를 반환한다" {
         val userId = seedUser("board-ok@test.com")
-        val boardId = planBoardService.createBoard(userId, PlanBoardCreateRequest("여름방학", "2026-07-01", "2026-08-31"))
+        val boardId = planBoardService.createBoard(userId, PlanBoardCreateRequest("여름방학", "2026-07-01", "2026-08-29"))
 
         val (title, ownerId) = transaction(db) {
             val saved = PlanBoardRow.findById(boardId) ?: error("보드가 저장되지 않음")
@@ -283,6 +285,80 @@ class PlanBoardServiceTest : StringSpec({
         }
         title shouldBe "여름방학"
         ownerId shouldBe userId
+    }
+
+    // ---- 날짜 범위 규칙 (#401) — 테스트의 오늘은 2026-06-01 ----
+
+    suspend fun dateRangeMessage(block: suspend () -> Unit): String? =
+        shouldThrow<PlanBoardValidationException.InvalidDateRangeException> { block() }.message
+
+    "createBoard: 시작일이 오늘보다 앞이면 INVALID_DATE_RANGE (#401)" {
+        dateRangeMessage {
+            planBoardService.createBoard(1, PlanBoardCreateRequest("제목", "2026-05-31", "2026-06-10"))
+        } shouldBe "시작일은 오늘 이후여야 합니다."
+    }
+
+    "createBoard: 계획 기간은 60일까지, 61일이면 INVALID_DATE_RANGE (#401)" {
+        val userId = seedUser("board-60@test.com")
+        planBoardService.createBoard(userId, PlanBoardCreateRequest("60일", "2026-06-01", "2026-07-30"))
+
+        dateRangeMessage {
+            planBoardService.createBoard(userId, PlanBoardCreateRequest("61일", "2026-06-01", "2026-07-31"))
+        } shouldBe "계획 기간은 최대 60일입니다."
+    }
+
+    "createBoard: 종료일·시험일이 오늘부터 1년을 넘으면 INVALID_DATE_RANGE (#401)" {
+        dateRangeMessage {
+            planBoardService.createBoard(1, PlanBoardCreateRequest("제목", "2027-05-20", "2027-06-02"))
+        } shouldBe "계획은 오늘부터 1년 안의 날짜로만 만들 수 있습니다."
+        dateRangeMessage {
+            planBoardService.createBoard(1, PlanBoardCreateRequest("제목", "2026-06-01", "2026-06-10", examDate = "2027-06-02"))
+        } shouldBe "시험일은 오늘부터 1년 안이어야 합니다."
+    }
+
+    "updateBoard: 이미 시작한 보드는 지난 시작일을 그대로 두고 제목·종료일을 고칠 수 있고, 바꾼 값만 규칙을 본다 (#401)" {
+        val userId = seedUser("board-started@test.com")
+        val boardId = planBoardService.createBoard(userId, PlanBoardCreateRequest("보드", "2026-06-01", "2026-06-20"))
+        // 3주 뒤 — 시작일(06-01)은 이제 지난 날이다
+        val later = PlanBoardService(Clock.fixed(java.time.Instant.parse("2026-06-22T00:00:00Z"), java.time.ZoneOffset.UTC))
+
+        later.updateBoard(userId, boardId, PlanBoardUpdateRequest(title = "수정")).title shouldBe "수정"
+        later.updateBoard(userId, boardId, PlanBoardUpdateRequest(endDate = "2026-07-30")).endDate shouldBe "2026-07-30"
+
+        dateRangeMessage {
+            later.updateBoard(userId, boardId, PlanBoardUpdateRequest(startDate = "2026-06-21"))
+        } shouldBe "시작일은 오늘 이후여야 합니다."
+        dateRangeMessage {
+            later.updateBoard(userId, boardId, PlanBoardUpdateRequest(endDate = "2026-07-31"))
+        } shouldBe "계획 기간은 최대 60일입니다."
+        dateRangeMessage {
+            later.updateBoard(userId, boardId, PlanBoardUpdateRequest(examDate = "2027-06-23"))
+        } shouldBe "시험일은 오늘부터 1년 안이어야 합니다."
+    }
+
+    "plan-generation: 지난 시작일·61일 넘는 기간·1년 넘은 시험일은 AI 호출 전에 INVALID_DATE_RANGE (#401)" {
+        val userId = seedUser("gen-range@test.com")
+        val textbook = seedTextbook(seedSubject("수학"), title = "수학")
+        val chapter = seedChapter(textbook, 1)
+        val service = PlanGenerationService(
+            PlanGenerationLlmClient(dummyAppConfig()),
+            noNiceSchoolDataFetcher(),
+            beforeTestDates
+        )
+        fun request(startDate: String?, examDate: String? = null, daysRemaining: Int? = null) = PlanGenerationRequest(
+            title = "계획",
+            startDate = startDate,
+            examDate = examDate,
+            daysRemaining = daysRemaining,
+            subjects = listOf(PlanGenerationSubjectInput(textbook, chapter, chapter))
+        )
+
+        dateRangeMessage { service.generate(userId, request("2026-05-31", daysRemaining = 7)) } shouldBe
+            "시작일은 오늘 이후여야 합니다."
+        dateRangeMessage { service.generate(userId, request(null, daysRemaining = 61)) } shouldBe
+            "계획 기간은 최대 60일입니다."
+        dateRangeMessage { service.generate(userId, request(null, examDate = "2027-06-02")) } shouldBe
+            "시험일은 오늘부터 1년 안이어야 합니다."
     }
 
     // ---- updateBoard / deleteBoard ----
@@ -415,7 +491,8 @@ class PlanBoardServiceTest : StringSpec({
         val math1 = seedChapter(math, 1)
         val service = PlanGenerationService(
             PlanGenerationLlmClient(dummyAppConfig()),
-            SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") })))
+            SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") }))),
+            beforeTestDates
         )
 
         shouldThrow<PlanBoardValidationException.InvalidDateRangeException> {
@@ -609,7 +686,8 @@ class PlanBoardServiceTest : StringSpec({
         // 범위 검증에서 먼저 실패하므로 LLM·NICE 는 호출되지 않는다
         val service = PlanGenerationService(
             PlanGenerationLlmClient(dummyAppConfig()),
-            SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") })))
+            SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") }))),
+            beforeTestDates
         )
 
         shouldThrow<PlanBoardValidationException.InvalidSubjectRangeException> {
@@ -648,7 +726,7 @@ class PlanBoardServiceTest : StringSpec({
         val math2 = seedChapter(math, 2)
         val llm = FakePlanGenerationLlmClient()
         val started = mutableListOf<Int>()
-        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher(), onGenerating = { started += it })
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates, onGenerating = { started += it })
 
         val response = service.generate(
             userId,
@@ -694,7 +772,7 @@ class PlanBoardServiceTest : StringSpec({
         val math = seedTextbook(seedSubject("수학"), title = "수학")
         val math1 = seedChapter(math, 1)
         val started = mutableListOf<Int>()
-        val service = PlanGenerationService(FakePlanGenerationLlmClient(), noNiceSchoolDataFetcher(), onGenerating = { started += it })
+        val service = PlanGenerationService(FakePlanGenerationLlmClient(), noNiceSchoolDataFetcher(), beforeTestDates, onGenerating = { started += it })
 
         val response = service.generate(
             userId,
@@ -712,7 +790,7 @@ class PlanBoardServiceTest : StringSpec({
         val userId = seedUser("gen-lock@test.com")
         val math = seedTextbook(seedSubject("수학"), title = "수학")
         val math1 = seedChapter(math, 1)
-        val service = PlanGenerationService(FakePlanGenerationLlmClient(), noNiceSchoolDataFetcher())
+        val service = PlanGenerationService(FakePlanGenerationLlmClient(), noNiceSchoolDataFetcher(), beforeTestDates)
         val boardId = service.generate(
             userId,
             PlanGenerationRequest(title = "잠금", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 14)
@@ -741,7 +819,7 @@ class PlanBoardServiceTest : StringSpec({
         val math = seedTextbook(seedSubject("수학"), title = "수학")
         val math1 = seedChapter(math, 1)
         val llm = FakePlanGenerationLlmClient()
-        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates)
         val job = PlanGenerationContinueJob(service)
         val boardId = service.generate(
             userId,
@@ -790,7 +868,7 @@ class PlanBoardServiceTest : StringSpec({
         val math = seedTextbook(seedSubject("수학"), title = "수학")
         val math1 = seedChapter(math, 1)
         val llm = FakePlanGenerationLlmClient(shortResponses = 1)
-        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates)
 
         val response = service.generate(
             userId,
@@ -811,7 +889,7 @@ class PlanBoardServiceTest : StringSpec({
         val math = seedTextbook(seedSubject("수학"), title = "수학")
         val math1 = seedChapter(math, 1)
         val llm = FakePlanGenerationLlmClient(shortResponses = Int.MAX_VALUE)
-        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates)
 
         shouldThrow<PlanBoardValidationException.GenerationFailedException> {
             service.generate(
@@ -929,7 +1007,7 @@ class PlanBoardServiceTest : StringSpec({
         planTaskService.createTask(otherUserId, taskRequest(seedBoard(otherUserId), planDate = "2026-07-04", startTime = "07:40", endTime = "09:00", estimatedMinutes = 80))
         val llm = FakePlanGenerationLlmClient(tasks = listOf(GeneratedPlanTask("수학 개념", 60), GeneratedPlanTask("수학 문제", 30)))
 
-        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates).generate(
             userId,
             PlanGenerationRequest(
                 title = "새 보드",
@@ -958,7 +1036,7 @@ class PlanBoardServiceTest : StringSpec({
         }
         val llm = FakePlanGenerationLlmClient(tasks = listOf(GeneratedPlanTask("수학 개념", 60), GeneratedPlanTask("수학 문제", 30)))
 
-        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates).generate(
             userId,
             PlanGenerationRequest(
                 title = "밤 공부",
@@ -979,7 +1057,7 @@ class PlanBoardServiceTest : StringSpec({
         val math1 = seedChapter(math, 1)
         val llm = FakePlanGenerationLlmClient()
 
-        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates).generate(
             userId,
             PlanGenerationRequest(title = "설문 없음", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 1)
         )
@@ -1001,7 +1079,7 @@ class PlanBoardServiceTest : StringSpec({
         val llm = FakePlanGenerationLlmClient()
 
         // 2026-07-01(수) 부터 30일 → 6일씩 5구간 (#405). 1구간 주말 = 07-04·05 (day 4, 5)
-        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates)
         val boardId = service.generate(
             userId,
             PlanGenerationRequest(title = "주말", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 30)
@@ -1077,7 +1155,7 @@ class PlanBoardServiceTest : StringSpec({
         val llm = FakePlanGenerationLlmClient()
 
         // 2026-07-01 수 ~ 07-04 토 (학교 정보 없음 → 평일 하교 16:30, 주말은 06:30 부터)
-        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates).generate(
             userId,
             PlanGenerationRequest(title = "분량", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 4)
         )
@@ -1104,7 +1182,7 @@ class PlanBoardServiceTest : StringSpec({
         val llm = FakePlanGenerationLlmClient()
 
         // 2026-07-01(수) 부터 30일 → 6일씩 5구간 (#405). 2구간 첫날은 07-07(화) — 계획 7일째라 낮추지 않는다
-        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher())
+        val service = PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates)
         val boardId = service.generate(
             userId,
             PlanGenerationRequest(title = "적게", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-01", daysRemaining = 30)
@@ -1131,7 +1209,7 @@ class PlanBoardServiceTest : StringSpec({
         }
         val llm = FakePlanGenerationLlmClient()
 
-        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates).generate(
             userId,
             PlanGenerationRequest(title = "주말", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-03", daysRemaining = 3)
         )
@@ -1148,7 +1226,7 @@ class PlanBoardServiceTest : StringSpec({
         val math1 = seedChapter(math, 1)
         val llm = FakePlanGenerationLlmClient()
 
-        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates).generate(
             userId,
             PlanGenerationRequest(title = "벼락치기", subjects = listOf(PlanGenerationSubjectInput(math, math1, math1)), startDate = "2026-07-03", daysRemaining = 2, isCramMode = true)
         )
@@ -1330,7 +1408,7 @@ class PlanBoardServiceTest : StringSpec({
         val math1 = seedChapter(math, 1)
         val llm = FakePlanGenerationLlmClient(tasks = listOf(GeneratedPlanTask("수학 개념", 60)))
 
-        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates).generate(
             userId,
             PlanGenerationRequest(
                 title = "출처 확인",
@@ -2017,7 +2095,7 @@ class PlanBoardServiceTest : StringSpec({
             )
         )
 
-        PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates).generate(
             userId,
             PlanGenerationRequest(
                 title = "단원 귀속",
@@ -2047,7 +2125,7 @@ class PlanBoardServiceTest : StringSpec({
             )
         )
 
-        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher()).generate(
+        val response = PlanGenerationService(llm, noNiceSchoolDataFetcher(), beforeTestDates).generate(
             userId,
             PlanGenerationRequest(
                 title = "과목 귀속",

@@ -22,10 +22,13 @@ sealed class PlanBoardValidationException(
         "INVALID_DATE_FORMAT",
         "날짜 형식이 올바르지 않습니다. (yyyy-MM-dd)"
     )
-    class InvalidDateRangeException : PlanBoardValidationException(
+    /** 사유는 message 로만 나눈다 — code 는 그대로 (#401) */
+    class InvalidDateRangeException(
+        message: String = "종료일은 시작일보다 빠를 수 없습니다. (시험 마지막 날은 시험 첫날이 있어야 하고 첫날보다 빠를 수 없습니다.)"
+    ) : PlanBoardValidationException(
         HttpStatusCode.BadRequest,
         "INVALID_DATE_RANGE",
-        "종료일은 시작일보다 빠를 수 없습니다. (시험 마지막 날은 시험 첫날이 있어야 하고 첫날보다 빠를 수 없습니다.)"
+        message
     )
     class SubjectsRequiredException : PlanBoardValidationException(
         HttpStatusCode.BadRequest,

@@ -88,7 +88,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "제목이 1~100자를 벗어남 (code=INVALID_TITLE), 설명이 500자를 넘음 (code=INVALID_DESCRIPTION), " +
-                        "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠르거나 시험 마지막 날(examEndDate)이 시험 첫날(examDate) 없이 오거나 첫날보다 빠름 (code=INVALID_DATE_RANGE)"
+                        "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠르거나 시험 마지막 날(examEndDate)이 시험 첫날(examDate) 없이 오거나 첫날보다 빠름, 또는 시작일이 오늘보다 앞이거나 계획 기간이 60일을 넘거나 종료일·시험일이 오늘부터 1년을 넘음 (#401, 사유는 message) (code=INVALID_DATE_RANGE)"
                 }
                 HttpStatusCode.InternalServerError {
                     description = "서버 오류"
@@ -121,7 +121,7 @@ fun PlanBoardApi(planBoardService: PlanBoardService) = ApiRoute("plan-boards") {
                 }
                 HttpStatusCode.BadRequest {
                     description = "유효하지 않은 ID (code=INVALID_ID), 제목이 1~100자를 벗어남 (code=INVALID_TITLE), 설명이 500자를 넘음 (code=INVALID_DESCRIPTION), " +
-                        "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠르거나 시험 마지막 날(examEndDate)이 시험 첫날(examDate) 없이 오거나 첫날보다 빠름 (code=INVALID_DATE_RANGE)"
+                        "날짜 형식이 잘못됨 (code=INVALID_DATE_FORMAT), 또는 종료일이 시작일보다 빠르거나 시험 마지막 날(examEndDate)이 시험 첫날(examDate) 없이 오거나 첫날보다 빠름, 또는 바꾼 시작일이 오늘보다 앞이거나 바꾼 기간이 60일을 넘거나 종료일·시험일이 오늘부터 1년을 넘음 — 바꾼 값만 검사해 이미 시작한 보드는 지난 시작일을 그대로 둘 수 있다 (#401, 사유는 message) (code=INVALID_DATE_RANGE)"
                 }
                 HttpStatusCode.Conflict {
                     description = "AI 계획의 남은 기간을 만드는 중이라 기간(startDate·endDate)을 바꿀 수 없음 (code=PLAN_GENERATION_IN_PROGRESS) — 제목·설명·보관은 바꿀 수 있다 (#405)"

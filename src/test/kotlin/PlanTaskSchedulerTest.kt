@@ -31,6 +31,29 @@ import java.time.LocalTime
 
 class PlanTaskSchedulerTest : StringSpec({
 
+    "NICE 는 앞쪽 NICE_MAX_RANGE_DAYS(62)일만 조회한다 — 2100년까지 늘린 보드도 몇 번만 부른다 (#401)" {
+        val requested = mutableListOf<String>()
+        val fetcher = SchoolDataFetcher(NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { request ->
+            val params = request.url.parameters
+            synchronized(requested) { requested += (params["TI_TO_YMD"] ?: params["AA_TO_YMD"] ?: "?") }
+            respond(
+                content = """{"RESULT":{"CODE":"INFO-200","MESSAGE":"해당하는 데이터가 없습니다."}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
+            )
+        })))
+        val start = LocalDate.of(2026, 6, 1)
+        val end = LocalDate.of(2100, 12, 31)
+
+        val ranges = PlanTaskScheduler.buildTypedUnavailableRanges(fetcher, start, end, "C107181084", 1, 2)
+
+        ranges.size shouldBe java.time.temporal.ChronoUnit.DAYS.between(start, end).toInt() + 1 // 결과는 기간 전체
+        // 앞 62일(06-01~07-31)만 — 1학기 안이라 시간표 1번 + 학사일정 1번 (캐시가 범위를 조금 넓혀 묻는 것은 괜찮다).
+        // 상한이 없으면 2100년까지 학기마다 불렀다
+        requested.size shouldBe 2
+        requested.all { it < "20260901" } shouldBe true
+    }
+
     // schoolId = null 이면 NICE 를 호출하지 않으므로, 호출되면 바로 실패하게 둔다
     val schoolDataFetcher = SchoolDataFetcher(
         NiceApiClient(apiKey = "test-key", httpClient = HttpClient(MockEngine { error("NICE 가 호출되면 안 됨") }))
