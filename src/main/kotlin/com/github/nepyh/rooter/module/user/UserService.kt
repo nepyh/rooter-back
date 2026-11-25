@@ -71,11 +71,8 @@ class UserService(
 
     fun registerUser(request: UserRegisterRequest): UserRegisterResponse {
 
-        // 사용자 이름 (12자 이하)
-        val lengthUsername = request.username
-        if (lengthUsername.length > 12) {
-            throw UserValidationException.WrongUsernameException()
-        }
+        // 사용자 이름 (1~12자, 공백·이모지·보이지 않는 문자 불가)
+        requireValidUsername(request.username)
 
         // 이메일 길이 체크 (users.email varchar(320))
         if (request.email.length > 320) {
@@ -135,10 +132,11 @@ class UserService(
     }
 
     fun updateProfile(userId: Int, request: UpdateProfileRequest): UserProfileUpdateResponse {
-        request.username?.let {
-            if (it.isBlank() || it.length > 12) {
-                throw UserValidationException.WrongUsernameException()
-            }
+        // 이름이 바뀔 때만 검사한다 — 규칙(#407) 전에 공백이 든 이름으로 가입한 사용자가, 앱이 이름을 그대로 다시 보내도
+        // 소개만 고치는 건 막히지 않게
+        request.username?.let { username ->
+            val current = userRepo.findUserById(userId)?.username
+            if (username != current) requireValidUsername(username)
         }
         request.bio?.let {
             if (it.length > 500) {
